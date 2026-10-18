@@ -27,7 +27,7 @@ use axum::{
     body::{to_bytes, Body},
     http::{Request, StatusCode},
 };
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 use octravpn_mesh::{
     admin_surface::build_admin_router,
     headscale_api::admin::{AdminState, InMemoryPreauthAdmin, UserRegistry, WireMachineAdmin},
@@ -60,7 +60,7 @@ fn upsert_peer(machines: &MachineRegistry, hostname: &str, ipv4: [u8; 4], user: 
     machines.upsert(
         key_hex.clone(),
         MachineRecord::new_at(
-            Utc::now(),
+            Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
             key_hex,
             String::new(),
             user.into(),
@@ -256,11 +256,8 @@ async fn admin_router_byte_identical_under_hub_and_serve() {
     upsert_peer(&serve_machines, "peer-1", [100, 64, 0, 10], "alice");
     let serve_router = build_admin_router(serve_state, Some(Arc::from(TOK)));
 
-    // Drive the same GET against both and compare status + body
-    // verbatim. `WireMachineAdmin::render` stamps `last_seen` from
-    // the upsert wall-clock so the two responses can drift on the
-    // seconds digit; we sanity-check JSON structural equality
-    // (ignoring `last_seen`) which is the user-visible contract.
+    // Both records use the same fixed lifecycle timestamp. Compare every
+    // response field, including created_at and last_seen, across both routers.
     async fn fetch(r: axum::Router) -> (StatusCode, serde_json::Value) {
         let resp = r
             .oneshot(
@@ -274,23 +271,13 @@ async fn admin_router_byte_identical_under_hub_and_serve() {
             .unwrap();
         let status = resp.status();
         let body = to_bytes(resp.into_body(), 64 * 1024).await.unwrap();
-        let v: serde_json::Value = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
         (status, v)
     }
 
-    let (s1, mut v1) = fetch(hub_router).await;
-    let (s2, mut v2) = fetch(serve_router).await;
+    let (s1, v1) = fetch(hub_router).await;
+    let (s2, v2) = fetch(serve_router).await;
+    assert_eq!(s1, StatusCode::OK);
     assert_eq!(s1, s2);
-    // Strip the wall-clock-stamped fields before comparing.
-    for arr in [&mut v1, &mut v2]
-        .into_iter()
-        .filter_map(|v| v.as_array_mut())
-    {
-        for m in arr.iter_mut() {
-            if let Some(obj) = m.as_object_mut() {
-                obj.remove("last_seen");
-            }
-        }
-    }
     assert_eq!(v1, v2);
 }

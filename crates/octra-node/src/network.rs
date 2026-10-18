@@ -46,6 +46,10 @@ pub struct Config {
     #[serde(default)]
     pub gateway: Option<crate::gateway::Config>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stock_portal: Option<crate::gateway::StockPortalConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stock_circle_gateway: Option<crate::gateway::StockCircleConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh: Option<octravpn_node::mesh_control::Config>,
     #[serde(default)]
     pub compute_provider: bool,
@@ -112,6 +116,12 @@ pub fn read(path: &Path) -> Result<Config> {
         if path.is_relative() {
             *path = parent.join(&*path);
         }
+    }
+    if let Some(circle) = &mut config.stock_circle_gateway {
+        circle.resolve_paths(&parent);
+    }
+    if let Some(portal) = &mut config.stock_portal {
+        portal.resolve_paths(&parent);
     }
     if let Some(mesh) = &mut config.mesh {
         mesh.resolve_paths(&parent);
@@ -355,6 +365,8 @@ pub async fn run(
                 control: config.control,
                 tunnel: config.tunnel,
                 gateway: config.gateway,
+                stock_portal: config.stock_portal,
+                stock_circle_gateway: config.stock_circle_gateway,
                 mesh: config.mesh,
             },
             transport: launch::Transport {

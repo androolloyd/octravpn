@@ -11,10 +11,13 @@ use octravpn_core::{
     ip_tunnel,
     payments::{Direction, PlanBinding, SignedConnect, SignedStatus, Tariff},
 };
-use octravpn_tun::{amnezia::WireTransport, Tun, TunAddress, TunConfig};
+use octravpn_tun::Tun;
 use serde::Deserialize;
 
 mod accounting;
+mod prepare;
+pub(crate) use prepare::{Pins, Prepared};
+mod stock;
 use accounting::Accounting;
 use std::{
     io::Read as _,
@@ -22,6 +25,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+pub use stock::{StockClient, StockOptions};
 
 const STATUS_MAX_AGE: Duration = Duration::from_secs(120);
 
@@ -99,7 +103,7 @@ impl Plan {
         Ok(plan)
     }
 
-    fn origin(&self) -> Result<reqwest::Url> {
+    pub(crate) fn origin(&self) -> Result<reqwest::Url> {
         self.binding.validate()?;
         ensure!(self.original_budget_ou > 0, "zero original plan budget");
         validate_purchase(&self.tariff, self.original_budget_ou, &self.prepaid_bytes)?;
@@ -175,85 +179,8 @@ pub struct Client {
 }
 impl Client {
     pub async fn open(options: Options) -> Result<Self> {
-        let Options {
-            plan,
-            journal: path,
-            receipt_key: key,
-            interface_name: name,
-            mode,
-        } = options;
-        let origin = plan.origin()?;
-        ensure!(
-            !name.is_empty()
-                && name.len() <= 15
-                && name
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b)),
-            "invalid TUN name"
-        );
-        let wg = wireguard::public_key(&key);
-        let session = plan.binding.session_id()?;
-        let binding = plan.binding.clone();
-        let tariff = plan.tariff.clone();
-        let journal_key = key.clone();
-        let budget = plan.original_budget_ou;
-        let prepaid = plan.prepaid_bytes.clone();
-        let journal = Accounting::new(
-            tokio::task::spawn_blocking(move || {
-                Journal::open(&path, binding, tariff, budget, prepaid, journal_key, mode)
-            })
-            .await??,
-        );
-        let connect = journal.with(move |journal| {
-            tracing::info!(plan = journal.binding().plan, local_bytes = ?journal.totals(),
-                uncertain_bytes = ?journal.uncertain_totals(), authorized_bytes = ?journal.authorized_totals(),
-                remaining_ou = journal.remaining_ou()?, "restored accepted payment plan");
-            journal.connect(wg)
-        }).await?;
-        let http = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(60))
-            .no_proxy()
-            .build()?;
-        let initial = Observation::new(status(&http, &origin, &connect, &plan).await?);
-        // A control connection is allowed before payment. No WireGuard/TUN
-        // payload path is opened until the exact purchases are canonical.
-        let initial = prepay(&http, &origin, &connect, &plan, &journal, initial).await?;
-        let tunnel = wireguard::Tunnel::connect(
-            session.clone(),
-            &key,
-            &plan.wireguard_endpoint,
-            initial.signed.status.server_wireguard_key,
-            None,
-            WireTransport::default(),
-        )
-        .await?;
-        let assigned = ip_tunnel::address(&session, &wg);
-        let device = tokio::task::spawn_blocking(move || {
-            Tun::open(&TunConfig {
-                name,
-                address: TunAddress::new(assigned, 32),
-                mtu: ip_tunnel::MTU as u16,
-                up_at_open: true,
-            })
-        })
-        .await??;
-        let interface = Interface {
-            name: device.name().to_owned(),
-            address: assigned,
-            mtu: ip_tunnel::MTU as u16,
-        };
-        Ok(Self {
-            plan,
-            journal,
-            origin,
-            connect,
-            http,
-            initial,
-            tunnel,
-            device,
-            interface,
-        })
+        let prepared = Box::pin(Prepared::new(options, None, ip_tunnel::MTU as u16)).await?;
+        Box::pin(prepared.open()).await
     }
 
     pub const fn interface(&self) -> &Interface {
@@ -290,7 +217,7 @@ impl Client {
                     length = device.recv(&mut packet) => {
                         let length = length?;
                         let raw = packet[..length].to_vec();
-                        if ip_tunnel::validate_outbound(&raw, assigned).is_err() { continue; }
+                        if raw.len() > usize::from(interface.mtu) || ip_tunnel::validate_outbound(&raw, assigned).is_err() { continue; }
                         let Some(reservation) = reserve(&accounting, raw.clone(), Direction::Outbound).await? else {continue;};
                         if tunnel.send_confirmed(&ip_tunnel::encode(&raw)?).await? {
                             finish(&accounting, reservation, true).await?;
@@ -302,6 +229,7 @@ impl Client {
                     body = tunnel.recv() => {
                         let body = body?;
                         let raw = ip_tunnel::decode(&body)?.to_vec();
+                        if raw.len() > usize::from(interface.mtu) { continue; }
                         ip_tunnel::validate_inbound(&raw, assigned)?;
                         let Some(reservation) = reserve(&accounting, raw.clone(), Direction::Inbound).await? else {continue;};
                         let length = device.send(&raw).await?;
@@ -373,7 +301,18 @@ async fn control_loop(
     connect: SignedConnect,
     plan: Plan,
     initial: Observation,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) -> Result<()> {
+    control_mode(client, origin, connect, plan, initial, shutdown, false).await
+}
+async fn control_mode(
+    client: reqwest::Client,
+    origin: reqwest::Url,
+    connect: SignedConnect,
+    plan: Plan,
+    initial: Observation,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
+    stock: bool,
 ) -> Result<()> {
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -393,7 +332,7 @@ async fn control_loop(
             () = tokio::time::sleep_until(freshness.deadline) => anyhow::bail!("operator canonical clock stopped advancing"),
             _ = interval.tick() => (),
         }
-        let poll = status(&client, &origin, &connect, &plan);
+        let poll = status_mode(&client, &origin, &connect, &plan, stock);
         tokio::pin!(poll);
         let view = tokio::select! {
             biased;
@@ -434,6 +373,17 @@ async fn prepay(
     journal: &Accounting,
     initial: Observation,
 ) -> Result<Observation> {
+    prepay_mode(client, origin, connect, plan, journal, initial, false).await
+}
+async fn prepay_mode(
+    client: &reqwest::Client,
+    origin: &reqwest::Url,
+    connect: &SignedConnect,
+    plan: &Plan,
+    journal: &Accounting,
+    initial: Observation,
+    stock: bool,
+) -> Result<Observation> {
     let receipts = journal.with(Journal::purchases).await?;
     initial.freshness.ensure_live()?;
     if purchased(&initial.signed, plan) {
@@ -458,7 +408,7 @@ async fn prepay(
                 result.context("purchase batch missing")?.context("purchase batch failed")??;
             },
             _ = interval.tick() => {
-                let view = tokio::time::timeout_at(freshness.deadline.min(deadline), status(client, origin, connect, plan)).await??;
+                let view = tokio::time::timeout_at(freshness.deadline.min(deadline), status_mode(client, origin, connect, plan,stock)).await??;
                 ensure!(view.status.server_wireguard_key == signed.status.server_wireguard_key,
                     "operator WireGuard identity changed during purchase");
                 freshness.observe(view.status.canonical_ms)?;
@@ -477,26 +427,38 @@ async fn settle_batch(
     receipts: Vec<octravpn_core::payments::SignedUsage>,
 ) -> Result<()> {
     for receipt in receipts {
-        let result = client
-            .post(origin.join("payments/usage")?)
-            .json(&receipt)
-            .send()
-            .await?;
-        ensure!(
-            result.status().is_success(),
-            "canonical payment unavailable; reconnect with --resume"
-        );
-        ensure!(
-            result.content_length().is_none_or(|n| n <= 1024),
-            "settlement response exceeds bound"
-        );
-        let mut result = result;
-        let mut bytes = 0_usize;
-        while let Some(chunk) = result.chunk().await? {
-            bytes = bytes
-                .checked_add(chunk.len())
-                .context("purchase response size overflow")?;
-            ensure!(bytes <= 1024, "settlement response exceeds bound");
+        // Reuse the exact durable purchase authorization. Retrying a temporary
+        // control failure cannot sign another sequence or increase its target.
+        let body = serde_json::to_vec(&receipt)?;
+        for attempt in 0..3 {
+            let result = client
+                .post(origin.join("payments/usage")?)
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(body.clone())
+                .send()
+                .await?;
+            let success = result.status().is_success();
+            let temporary = result.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE;
+            ensure!(
+                success || (temporary && attempt < 2),
+                "canonical payment unavailable; reconnect with --resume"
+            );
+            ensure!(
+                result.content_length().is_none_or(|n| n <= 1024),
+                "settlement response exceeds bound"
+            );
+            let mut result = result;
+            let mut bytes = 0_usize;
+            while let Some(chunk) = result.chunk().await? {
+                bytes = bytes
+                    .checked_add(chunk.len())
+                    .context("purchase response size overflow")?;
+                ensure!(bytes <= 1024, "settlement response exceeds bound");
+            }
+            if success {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
         }
     }
     Ok(())
@@ -533,8 +495,21 @@ async fn status(
     connect: &SignedConnect,
     plan: &Plan,
 ) -> Result<SignedStatus> {
+    status_mode(client, origin, connect, plan, false).await
+}
+async fn status_mode(
+    client: &reqwest::Client,
+    origin: &reqwest::Url,
+    connect: &SignedConnect,
+    plan: &Plan,
+    stock: bool,
+) -> Result<SignedStatus> {
     let mut response = client
-        .post(origin.join("payments/connect")?)
+        .post(origin.join(if stock {
+            "payments/stock/connect"
+        } else {
+            "payments/connect"
+        })?)
         .json(connect)
         .send()
         .await?

@@ -34,7 +34,7 @@ def main():
         for source, target in helpers.items():
             shutil.copyfile(ROOT / "scripts/node-port" / source, fixture / target)
         (fixture / "dune").write_text(
-            "(executables (names main fixtures) (libraries octra_core octra_recovery_case lwt.unix unix yojson digestif))\n")
+            "(executables (names main fixtures) (libraries octra_node_runtime octra_consensus octra_net octra_core octra_recovery_case lwt.unix unix yojson digestif))\n")
         (fixture / "runtime.sha256").write_text("".join(
             f"{digest}  {name}\n" for name, digest in inventory["files"].items()))
         (fixture / "restore.py").write_text(
@@ -54,7 +54,7 @@ def main():
             "opam exec -- dune exec ./vpn_native_history_oracle/fixtures.exe -- /tmp/native-history-data"], text=True)
     report = {
         "upstream_commit": pin,
-        "scope": "real native storage/recovery boundary; synthetic transactions, no consensus or peer finality qualification",
+        "scope": "real native storage/recovery boundary and unchanged epoch_source on exact exported native header bytes under independent fixture keys; synthetic transactions, no consensus or peer finality qualification",
         "source_sha256": inventory["files"],
         "adapter_sha256": {name: hashlib.sha256((ROOT / "scripts/node-port" / name).read_bytes()).hexdigest() for name in helpers},
         "cases": json.loads(output.splitlines()[-1]),

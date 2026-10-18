@@ -1,0 +1,301 @@
+{
+  "schema": "octra_mixed_validator_checkpoint_v1",
+  "status": "PASS",
+  "qualified_scope": "Isolated two-Rust/two-unchanged-native-library-host private devnet fixture: empty epochs, Standard transfers, clean retained-store restart",
+  "published": true,
+  "public_deployment_qualified": false,
+  "stock_native_launcher_qualified": false,
+  "activated_applications_or_private_proofs_qualified": false,
+  "universal_equivalence_proven": false,
+  "captured_implementation_source_sha256": "7ef76d9b4d0e3823a7d84216b2966c9c732719ec440b929f5e65cc02c6fd4b8f",
+  "native_upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "genesis_profile": {
+    "generator": "Unchanged production Rust init-devnet",
+    "activated_applications": false,
+    "application_profile": "Prior",
+    "validator_count": 4,
+    "rust_processes": 2,
+    "native_fixture_processes": 2,
+    "quorum": 3,
+    "genesis_leaf_count": 9,
+    "four_way_pre_vote_state_root": "d19e235c72e706844a8ea1eb28d267281c9befa1c63050d950f8611be35ebc12",
+    "genesis_independently_reconstructed": true
+  },
+  "observed": {
+    "finalized_epochs": 16,
+    "before_restart": {
+      "epochs": 8,
+      "txid_hi": 0,
+      "transfer_hashes": [
+        "6947ab7c16b1d69d5e9bc259124ac8b675a47ac6f3a6bfe1ad5c5c1d68f62ac6"
+      ],
+      "second_transfer_absent": true,
+      "native_and_rust_cold_history_agree": true
+    },
+    "final": {
+      "epochs": 16,
+      "txid_hi": 1,
+      "transfer_hashes": [
+        "6947ab7c16b1d69d5e9bc259124ac8b675a47ac6f3a6bfe1ad5c5c1d68f62ac6",
+        "6df9e8449b64ccb08af58a341479b65f0bf42a586c2ada0d99f580d08277a9c3"
+      ],
+      "after_restart_transfer_hashes": [
+        "6df9e8449b64ccb08af58a341479b65f0bf42a586c2ada0d99f580d08277a9c3"
+      ],
+      "both_transfers_exactly_once": true,
+      "native_and_rust_cold_history_agree": true
+    },
+    "all_four_agree_on": [
+      "epoch",
+      "commit_round",
+      "protocol",
+      "creator",
+      "previous_state_root",
+      "state_root",
+      "transaction_list_hash",
+      "receipt_root",
+      "global_txid",
+      "timestamp",
+      "proposal_id",
+      "parent_proposal_id"
+    ],
+    "different_valid_qc_signer_subsets_and_wire_orders_allowed": true,
+    "both_families_created_finalized_proposals": true,
+    "all_four_validators_observed_in_finalized_quorums": true,
+    "every_finalized_qc_independently_ed25519_verified": true,
+    "three_of_four_quorum_necessarily_includes_both_families": true,
+    "standard_receipts_observed_empty_in_both_stores": true,
+    "native_execution_transactions_match_rust_immutable_exex": true,
+    "retained_prefix_unchanged_after_clean_restart": true,
+    "clean_process_exits": 8,
+    "processes_reaped": true,
+    "forced_stops": 0
+  },
+  "negative_controls": {
+    "count": 6,
+    "kind": "Independent Python certificate-verifier mutations derived from an actually finalized v4 certificate",
+    "controls": [
+      "tampered signature",
+      "tampered chain",
+      "tampered header",
+      "tampered parent",
+      "duplicate signer",
+      "nonmember signer"
+    ],
+    "all_refused": true,
+    "injected_runtime_rejection_claim": false,
+    "additional_rust_test_cases": 0
+  },
+  "production_artifacts": {
+    "native_builder_image": "sha256:e61194220c65f9f0b8034a4816fb15d47dfe7dda8ece1087d9850b6d838bae95",
+    "rust_image": "sha256:734339b6f1d5dee009794fa15527e80199eab8bbb15507edca09f58033d499d4",
+    "rust_binaries": {
+      "octra": "d288bb757081db85c1be8221f1dfebe6bf877ec58efaa6d690eb3efeab138264",
+      "octra-node": "4af1d9ad6d586e0ff258d0a4a4b2e65dbe4748820d683ed101eb86d0ad10d3d1",
+      "octra-single-fixture": "a4c7cd708cd27fa1ccea21740dcc6be93a0a0bca0f6c8ea14463826f96a83096",
+      "octravpn": "a8529bbdc02635e2cb36df646f80e07d93b32cf78b7075af04d91f0e10ef9da7",
+      "octravpn-node": "cf4a90bb0fe87f0c169062f587b6b6ae4a6d05785b9a4fb93fa88bae1a11b344",
+      "octravpn-private-admin": "6653268682d451039f7274ace72e6ae26b106e6ce377d79d7cf6d69361fd5185"
+    },
+    "rust_raw_manifest_sha256": "280c1157d712ca797bc93af706e933cb7da0de4259c5aea7b4bc4bc9e9500345",
+    "native_fixture_binary_sha256": "1d52bfcd3ea078d74c9713b52d24bf22a39a2e659c339b1932497640caef8cf5",
+    "native_census_files_verified_before_and_after_build": 1158,
+    "all_original_regular_native_archive_inputs_verified_before_and_after_build": 1566,
+    "generated_mcl_archive_sha256": "57c5ad4244d10bbb4e310bd162035d31f88385266a8e570c5488235bf096f21e",
+    "unchanged_native_or_rust_production_source": true
+  },
+  "isolation": {
+    "network": "none; loopback only inside one owned container",
+    "host_ports_published": false,
+    "public_evidence_bind_only": true,
+    "private_keys_exported": false,
+    "owned_container_known_absent": true,
+    "global_added_remaining": 0,
+    "global_removed_preexisting": 0,
+    "build_image_retained_as_evidence": true
+  },
+  "evidence": {
+    "runtime_result": {
+      "path": "out/mixed-validator-20261017/runtime-v7/report.json",
+      "sha256": "ea0f714336cbfb4333c4a20611ebdda48b22f07c3624c7bc8278a710d8df153b"
+    },
+    "runtime_child": {
+      "path": "out/mixed-validator-20261017/runtime-v7/evidence/report.json",
+      "sha256": "7a02c53845256b723ce21c2af47143969b620e8fea1c8f9cd5f9e26d272c09bd"
+    },
+    "raw_evidence_manifest": {
+      "path": "out/mixed-validator-20261017/checkpoint-v1/raw-evidence-manifest.json",
+      "sha256": "bb5be330af6ac3ccb0ce0cd0b960d6aa2596a6cef2922d705fe9d53ca55fd46d"
+    },
+    "supporting_proofs": {
+      "prepared-v1/preparation.json": {
+        "path": "out/mixed-validator-20261017/prepared-v1/preparation.json",
+        "sha256": "b1017d403d1b03431c499648f1109663919c107109b150f1602ad540120b9650"
+      },
+      "prepared-v9/preparation.json": {
+        "path": "out/mixed-validator-20261017/prepared-v9/preparation.json",
+        "sha256": "ff4a658345b18e2f5fafc389be93afcae1c53af98ffcd1fb7882ad8bf19a8d0f"
+      },
+      "interval-complete-v1.json": {
+        "path": "out/mixed-validator-20261017/interval-complete-v1.json",
+        "sha256": "21d8a12831f760b2819980d8e3a9942a29123f947f3674f015469f140808e4d9"
+      },
+      "phase-reporting-supplement-v1.json": {
+        "path": "out/mixed-validator-20261017/phase-reporting-supplement-v1.json",
+        "sha256": "be6c15da1a2d02e49343a2b6ae1179835ad30054a9a8e26738672df82bb47648"
+      },
+      "host-v1/driver-static-source-v1.json": {
+        "path": "out/mixed-validator-20261017/host-v1/driver-static-source-v1.json",
+        "sha256": "b5d6e17c1d67e4b8a0651a1e555357c8f60465d9b1347a7e05f292c3475d07b1"
+      },
+      "host-v1/native-static-source-v2.json": {
+        "path": "out/mixed-validator-20261017/host-v1/native-static-source-v2.json",
+        "sha256": "356d794981d5b6778e7733f85d2d39f98650ccd98677302a8356efc0f79a55eb"
+      },
+      "host-v2/type-annotation-correction-v1.json": {
+        "path": "out/mixed-validator-20261017/host-v2/type-annotation-correction-v1.json",
+        "sha256": "b0809e2a662e5e2623628b351bd2bba424fd30b9f3c84b4cdc87d47824101f73"
+      },
+      "host-v3/verified-bundle-annotation-v1.json": {
+        "path": "out/mixed-validator-20261017/host-v3/verified-bundle-annotation-v1.json",
+        "sha256": "6d1fb2563250bd4e3231efc38e86dc8dab4908edfd0c360b5a813fcb1b3ab133"
+      },
+      "driver-v2/exex-reader-correction-v1.json": {
+        "path": "out/mixed-validator-20261017/driver-v2/exex-reader-correction-v1.json",
+        "sha256": "dd03fd4213f0ab6a2816d897bd34177483b90fb1d722a6971d084df01711a696"
+      },
+      "driver-v3/certified-exex-hash-list-guard-v1.json": {
+        "path": "out/mixed-validator-20261017/driver-v3/certified-exex-hash-list-guard-v1.json",
+        "sha256": "5a6d25f3f3659aafa2ddd555779b1900804cc0d688416522414d0f11a4c8ac7a"
+      },
+      "driver-v4/active-header-domain-correction-v1.json": {
+        "path": "out/mixed-validator-20261017/driver-v4/active-header-domain-correction-v1.json",
+        "sha256": "a94a6a9316e64e084fe1ea6e845fef23bcd3edbc5f032e040c9e059906132b6f"
+      },
+      "builder-artifact-probe-v1.json": {
+        "path": "out/mixed-validator-20261017/builder-artifact-probe-v1.json",
+        "sha256": "ca940a2ecaa480fb7fe212493a247fc719d082b569fd5498d960e8091ff0d5a1"
+      }
+    },
+    "preserved_failed_attempts": {
+      "runtime-v1": {
+        "path": "out/mixed-validator-20261017/runtime-v1/report.json",
+        "sha256": "93949c53b26a89999da084a23afff950236b97e548b01a45c8d5210a9f75ade7",
+        "qualified": false
+      },
+      "runtime-v2": {
+        "path": "out/mixed-validator-20261017/runtime-v2/report.json",
+        "sha256": "702d6abea7b140096c064560ae25866c02da3a1ed5824e46b5acb22ba40a25f4",
+        "qualified": false
+      },
+      "runtime-v3": {
+        "path": "out/mixed-validator-20261017/runtime-v3/report.json",
+        "sha256": "3a8c004c2b7477b3022a864f4dbc5cbbd63a5396ca84f9e6c7436524be253d77",
+        "qualified": false
+      },
+      "runtime-v4": {
+        "path": "out/mixed-validator-20261017/runtime-v4/report.json",
+        "sha256": "3a753d79bba957cfcd1e40c185b12345c5506c68b045161d549f362b31fd9ca7",
+        "qualified": false
+      },
+      "runtime-v5": {
+        "path": "out/mixed-validator-20261017/runtime-v5/report.json",
+        "sha256": "291857c212d158247c06c98b8bc960614340790ed7bcc43f8407f9babe89d130",
+        "qualified": false
+      },
+      "runtime-v6": {
+        "path": "out/mixed-validator-20261017/runtime-v6/report.json",
+        "sha256": "14397fe076b17a2de56e0f8c96e7bdbe7108d149857ffbd7ff93395324c3495f",
+        "qualified": false
+      }
+    }
+  },
+  "reporting_limitation": {
+    "field": "child.before_restart.submitted_transfers",
+    "actual_preserved_value": [
+      "6947ab7c16b1d69d5e9bc259124ac8b675a47ac6f3a6bfe1ad5c5c1d68f62ac6",
+      "6df9e8449b64ccb08af58a341479b65f0bf42a586c2ada0d99f580d08277a9c3"
+    ],
+    "cause": "verify_history returned the same mutable tx_hashes list; the later second transfer append changed this presentation field before final JSON serialization",
+    "acceptance_assertions": "The epoch8 verification ran before the second append with only the first hash. The epoch16 verification checked both. This supplement independently checks the raw captured phase histories; it does not rewrite the original report."
+  },
+  "tested_source_attachments": {
+    "run.py": {
+      "published_path": "docs/rust-node/checkpoints/2026-10-17/mixed-validator-fixture/run.py",
+      "sha256": "eb0b42eaff2c97e01ff00858e4238e5e560df50b2c315d0009c5ffc7a23a4174",
+      "executed_source": {
+        "path": "out/mixed-validator-20261017/driver-v4/run.py",
+        "sha256": "eb0b42eaff2c97e01ff00858e4238e5e560df50b2c315d0009c5ffc7a23a4174"
+      },
+      "method": "identity"
+    },
+    "genesis_verify.py": {
+      "published_path": "docs/rust-node/checkpoints/2026-10-17/mixed-validator-fixture/genesis_verify.py",
+      "sha256": "a91ea5bdf3c80f7629a7812145f5598b4daf355dea115eeed35c31fb59cd170b",
+      "executed_source": {
+        "path": "out/mixed-validator-20261017/driver-v4/genesis_verify.py",
+        "sha256": "a91ea5bdf3c80f7629a7812145f5598b4daf355dea115eeed35c31fb59cd170b"
+      },
+      "method": "identity"
+    },
+    "Dockerfile": {
+      "published_path": "docs/rust-node/checkpoints/2026-10-17/mixed-validator-fixture/Dockerfile",
+      "sha256": "15a2163b95f8299f93e047b4997c58d1b23987c9441a12419d4bf85df6d4fa66",
+      "executed_source": {
+        "path": "out/mixed-validator-20261017/prepared-v9/context/Dockerfile",
+        "sha256": "15a2163b95f8299f93e047b4997c58d1b23987c9441a12419d4bf85df6d4fa66"
+      },
+      "method": "identity"
+    },
+    "native/fixture.ml": {
+      "published_path": "docs/rust-node/checkpoints/2026-10-17/mixed-validator-fixture/native/fixture.ml",
+      "sha256": "722ad3eb0e3fd3e094e5f6ced6eca28e3cde8eb0d2b0e7fe5ceac6d3150dab35",
+      "executed_source": {
+        "path": "out/mixed-validator-20261017/host-v3/native/fixture.ml",
+        "sha256": "722ad3eb0e3fd3e094e5f6ced6eca28e3cde8eb0d2b0e7fe5ceac6d3150dab35"
+      },
+      "method": "identity"
+    },
+    "native/execution.ml": {
+      "published_path": "docs/rust-node/checkpoints/2026-10-17/mixed-validator-fixture/native/execution.ml",
+      "sha256": "301da4ac83771577f043699dcf8914df2787a398a98579a757c7ec568efd54b1",
+      "executed_source": {
+        "path": "out/mixed-validator-20261017/host-v3/native/execution.ml",
+        "sha256": "301da4ac83771577f043699dcf8914df2787a398a98579a757c7ec568efd54b1"
+      },
+      "method": "identity"
+    },
+    "native/main.ml": {
+      "published_path": "docs/rust-node/checkpoints/2026-10-17/mixed-validator-fixture/native/main.ml",
+      "sha256": "7aafe03a3326a3b5efff7f226fa21fc53de93fa68f958b0930591c0c01656819",
+      "executed_source": {
+        "path": "out/mixed-validator-20261017/host-v3/native/main.ml",
+        "sha256": "7aafe03a3326a3b5efff7f226fa21fc53de93fa68f958b0930591c0c01656819"
+      },
+      "method": "identity"
+    },
+    "native/dune": {
+      "published_path": "docs/rust-node/checkpoints/2026-10-17/mixed-validator-fixture/native/dune",
+      "sha256": "82f62ffc675263b5e2a66b1cdc7bac750160bd69a66fe67c1f2f5af94466a67c",
+      "executed_source": {
+        "path": "out/mixed-validator-20261017/host-v3/native/dune",
+        "sha256": "82f62ffc675263b5e2a66b1cdc7bac750160bd69a66fe67c1f2f5af94466a67c"
+      },
+      "method": "identity"
+    }
+  },
+  "reproduction_scope": "Requires the retained captured7ef preparation/archive, pinned builder/MCL artifact, six exact image executables (including the debug Single test harness) and their raw manifest. Source attachments preserve tested bytes; they are not a generic cold-checkout reproducer. No shared source scope is enlarged.",
+  "rust_test_or_gate_counts_added_by_this_presentation": 0,
+  "producer": {
+    "path": "out/mixed-validator-20261017/make-checkpoint-v1.py",
+    "sha256": "a56b7956f66ca0df794e202d14a313cb3bd81e7e8293a436afd090f81275ca68"
+  },
+  "image_executable_build_profiles": {
+    "octra-node": "default-feature release binary used by both actual mixed Rust validators",
+    "octravpn-private-admin": "default-feature release binary",
+    "octra": "default-feature debug CLI binary",
+    "octravpn": "default-feature debug client binary",
+    "octravpn-node": "default-feature debug standalone operator binary",
+    "octra-single-fixture": "debug single_native test executable; fixture initializer, not the production CLI"
+  }
+}

@@ -11,6 +11,20 @@ pub(crate) fn admission(shared: Arc<Shared>) -> Arc<dyn Fn() -> bool + Send + Sy
     })
 }
 
+pub(crate) fn stock_guard(shared: Arc<Shared>) -> Arc<dyn octravpn_node::payments::Guard> {
+    struct Guard(Arc<Shared>);
+    impl octravpn_node::payments::Guard for Guard {
+        fn live(&self) -> bool {
+            self.0.current().is_ok_and(|s| !s.revocation.is_revoked())
+        }
+        fn current(&self, action: &mut dyn FnMut() -> anyhow::Result<()>) -> anyhow::Result<()> {
+            let serving = self.0.current()?;
+            self.0
+                .with_current(serving.committed.head(), &serving.revocation, action)
+        }
+    }
+    Arc::new(Guard(shared))
+}
 #[cfg(test)]
 mod tests {
     use super::*;

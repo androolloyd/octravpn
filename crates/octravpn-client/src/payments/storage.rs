@@ -90,7 +90,7 @@ fn options(write: bool, create: bool, directory: bool) -> OpenOptions {
     options
 }
 
-pub(super) struct Store {
+pub(crate) struct Store {
     path: PathBuf,
     directory: File,
     directory_identity: Stamp,
@@ -103,7 +103,7 @@ pub(super) struct Store {
     fail_after_install: bool,
 }
 impl Store {
-    pub(super) fn open(path: &Path, mode: OpenMode) -> Result<Self> {
+    pub(crate) fn open(path: &Path, mode: OpenMode) -> Result<Self> {
         if mode == OpenMode::Create {
             let mut builder = fs::DirBuilder::new();
             #[cfg(unix)]
@@ -181,7 +181,7 @@ impl Store {
         Ok(directory)
     }
 
-    pub(super) fn check(&self) -> Result<()> {
+    pub(crate) fn check(&self) -> Result<()> {
         let directory = self.paths()?;
         let expected = self
             .state_identity
@@ -196,7 +196,7 @@ impl Store {
         Ok(())
     }
 
-    pub(super) fn read(&mut self) -> Result<Vec<u8>> {
+    pub(crate) fn read(&mut self) -> Result<Vec<u8>> {
         let directory = self.paths()?;
         let mut file = options(false, false, false)
             .open(self.path.join(STATE))
@@ -223,7 +223,7 @@ impl Store {
         Ok(bytes)
     }
 
-    pub(super) fn commit(&mut self, bytes: &[u8]) -> Result<()> {
+    pub(crate) fn commit(&mut self, bytes: &[u8]) -> Result<()> {
         #[cfg(test)]
         ensure!(
             !std::mem::take(&mut self.fail_next),

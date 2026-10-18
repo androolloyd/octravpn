@@ -1,4 +1,4 @@
-//! Durable prepaid byte authorizations become ordinary signed Program claims.
+//! Durable prepaid byte authorizations become signed application claims.
 //! Intake acknowledgement never completes a purchase: only authenticated
 //! canonical byte floors do, including zero-rate and rounded-price classes.
 //! One pending slot per plan/class coalesces smaller vouchers. An immutable
@@ -10,7 +10,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use ed25519_dalek::{Signer, SigningKey};
 use octra_node_protocol::{
     native_json::Document,
-    transaction::{self, OpType, Transaction},
+    transaction::{self, Transaction},
 };
 use octra_node_runtime::{account_store, state_batch::StateBatch};
 use octravpn_core::payments::{SignedUsage, Tariff, MAX_TARIFF_BYTES};
@@ -822,6 +822,7 @@ impl octravpn_node::payments::Settlement for Publisher {
 mod tests {
     use super::*;
     use octra_node_protocol::transaction::Nonce;
+    use octra_node_protocol::transaction::OpType;
     use octravpn_core::{
         payments::{Deployment, Usage},
         Address, KeyPair,

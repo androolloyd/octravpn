@@ -3,6 +3,8 @@
 //! Payment clients accept an externally confirmed plan, retain their original
 //! journal, and take caller-owned shutdown futures. They install no global
 //! signal handler, route, tracing subscriber or browser integration.
+//! The opt-in MultiPaymentClient separately owns a Linux composite route lease;
+//! its documented management exceptions and crash recovery apply to that API.
 //!
 //! ```no_run
 //! use octravpn_client::{PaymentClient, PaymentOptions, PaymentSummary};
@@ -20,6 +22,7 @@ mod config;
 mod discover;
 mod discover_v2;
 mod migration;
+mod multihop;
 mod onboarding;
 mod paid_routes;
 mod payment_runner;
@@ -37,6 +40,11 @@ mod wireguard;
 
 pub use payment_runner::{
     Client as PaymentClient, Interface, Options as PaymentOptions, Plan as AcceptedPlan,
-    Summary as PaymentSummary,
+    StockClient, StockOptions, Summary as PaymentSummary,
 };
 pub use payments::OpenMode as JournalMode;
+
+pub use multihop::{
+    Client as MultiPaymentClient, HopPlan as MultiHopPlan, Options as MultiPaymentOptions,
+    RoutePlan as MultiRoutePlan,
+};

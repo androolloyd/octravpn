@@ -188,7 +188,7 @@ fn genesis(tariff: &Tariff, expires: Option<i64>) -> StateBatch {
 }
 
 struct Fixture {
-    node: Node<Authority>,
+    node: Arc<Node<Authority>>,
     native: executor::Native,
     graph: Graph,
     protocol: Protocol,
@@ -200,11 +200,11 @@ struct Fixture {
     application: Application,
     payment_code: Vec<u8>,
     factory_code: Vec<u8>,
-    _directory: tempfile::TempDir,
+    directory: tempfile::TempDir,
 }
 impl Fixture {
     async fn new(expires: Option<i64>) -> Self {
-        Self::with_application(expires, Application::Program).await
+        Box::pin(Self::with_application(expires, Application::Program)).await
     }
     async fn with_application(expires: Option<i64>, application: Application) -> Self {
         let directory = tempfile::tempdir().unwrap();
@@ -316,7 +316,7 @@ impl Fixture {
         .unwrap();
         assert!(node.resume().await.unwrap());
         let mut fixture = Self {
-            node,
+            node: Arc::new(node),
             native,
             graph,
             protocol,
@@ -328,7 +328,7 @@ impl Fixture {
             application,
             payment_code,
             factory_code,
-            _directory: directory,
+            directory,
         };
         fixture.deploy_and_fund().await;
         fixture
@@ -386,6 +386,9 @@ impl Fixture {
     }
     async fn publish_at(&mut self, inputs: Vec<Transaction>, seconds: f64) -> Value {
         let parent = self.node.snapshot().unwrap().head().clone();
+        let circle_deploy = inputs
+            .first()
+            .is_some_and(|tx| tx.op_type == OpType::CircleDeploy);
         let hashes = inputs
             .iter()
             .map(|tx| hex::encode(tx.hash().unwrap()))
@@ -415,10 +418,16 @@ impl Fixture {
         );
         assert_eq!(built.execution().transactions.len(), hashes.len());
         let receipt = hashes.first().map_or(Value::Null, |hash| {
-            serde_json::from_slice(&built.execution().vm_receipts[hash]).unwrap()
+            if circle_deploy {
+                // Native CircleDeploy installs code without invoking the VM.
+                assert!(!built.execution().vm_receipts.contains_key(hash));
+                Value::Null
+            } else {
+                serde_json::from_slice(&built.execution().vm_receipts[hash]).unwrap()
+            }
         });
-        if !hashes.is_empty() {
-            assert_eq!(receipt["success"], true, "native Program failed: {receipt}");
+        if !hashes.is_empty() && !circle_deploy {
+            assert_eq!(receipt["success"], true, "native call failed: {receipt}");
         }
         assert!(built.execution().epoch_observation.is_some());
         let mut finalized = Finalize {
@@ -621,6 +630,11 @@ impl Fixture {
             .unwrap()
     }
 }
+
+// Share the actual deployment/QC fixture with the HTTP intake boundary tests;
+// those tests do not replace intake with the fixture's direct publish helper.
+#[path = "../../rpc/circle_admission_tests.rs"]
+mod rpc_admission;
 
 fn receipt(plan: &Plan, bytes: u64) -> SignedUsage {
     SignedUsage::sign(

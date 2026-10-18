@@ -1000,13 +1000,17 @@ fn assert_bft_epochs_with_oracle(fixture: &Value, oracle: &[u8]) {
     }
 }
 
-/// Run explicitly after generating the source-bound unchanged-native artifact.
-/// This gate refuses absence rather than substituting a Rust-made expectation.
+/// Replay the checked-in unchanged-native artifact in ordinary CI. Explicit
+/// overrides also refuse absence rather than substituting a Rust expectation.
 #[test]
-#[ignore = "requires OCTRA_CIRCLE_PREPAID_ORACLE from the unchanged-native generator"]
 fn native_prepaid_circle_custody_epochs_match() {
-    let path =
-        std::env::var("OCTRA_CIRCLE_PREPAID_ORACLE").expect("native Circle artifact required");
+    let path = std::env::var_os("OCTRA_CIRCLE_PREPAID_ORACLE").map_or_else(
+        || {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/circle-prepaid.json")
+        },
+        std::path::PathBuf::from,
+    );
     let fixture: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     let base = include_str!("../../../scripts/node-port/circle-code-oracle.ml");
     let prefix = base

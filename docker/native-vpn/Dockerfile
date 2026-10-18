@@ -98,6 +98,7 @@ COPY octra/program/main-v5.aml octra/program/private-admin-factory.aml /usr/loca
 COPY octra/program/octranet-payments.aml octra/program/octranet-payments-factory.aml /usr/local/share/aml/
 COPY octra/docker/native-vpn/qualify.py /usr/local/bin/qualify.py
 COPY octra/docker/native-vpn/payments_qualify.py /usr/local/bin/payments_qualify.py
+COPY octra/docker/native-vpn/json_snapshot.py /usr/local/bin/json_snapshot.py
 COPY octra/docker/native-vpn/payment_control.py /usr/local/bin/payment_control.py
 COPY octra/docker/native-vpn/single_qualify.py /usr/local/bin/single_qualify.py
 COPY octra/docker/native-vpn/tun_gate.py /usr/local/bin/tun_gate.py

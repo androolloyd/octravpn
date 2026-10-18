@@ -1,0 +1,172 @@
+{
+  "schema": "octra_public_observer_adoption_v1",
+  "at": "2026-10-17T17:48:02.056179+00:00",
+  "status": "serving_and_forward_progress_observed",
+  "source_commit": "44458a5ae25922414be0bd1ef6946b213c49485d",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "binary_sha256": "04cf5ab0b7be1d9fe7fafed814efe40989128485274c11ac5a66072d2e4e36ec",
+  "chain_id": "octra-devnet-9871-cluster",
+  "config_sha256": "77a1713c64c3baf2c57a67bb6a9f261bfb5280347bbe71358dbb0984e53c40eb",
+  "retained_before": {
+    "sequence": 11512,
+    "epoch": 1709272
+  },
+  "retained_after": {
+    "sequence": 11590,
+    "epoch": 1709350
+  },
+  "growth": 78,
+  "exex_checkpoints": [
+    {
+      "extension": "devnet-archive",
+      "namespace": "9ebcbe2009256807e94a63b2b4d11865fbe684a7acfcdea1fa96a25111a53981",
+      "sequence": 11590,
+      "epoch": 1709350,
+      "root": "cd61a16c8c1f8aed6f80ac0e7bd6ba95b35f6727b2964ceaee26f2967ea0f758"
+    }
+  ],
+  "healthy_observation": {
+    "at": "2026-10-17T17:43:50.311265+00:00",
+    "pid": 96735,
+    "process_query_exit": 0,
+    "process": "96735 96734 Sat Oct 17 14:12:12 2026     31:38  16:43.76 101.4 32476944 R    /Users/androolloyd/Development/octra/out/core-parity-public-20261017/release/octra-node run-network --config /Users/androolloyd/Development/octra/out/octranet-public-20261017/network.json",
+    "exit_evidence": false,
+    "/operator/status": {
+      "http": 200,
+      "body": {
+        "chain_id": "octra-devnet-9871-cluster",
+        "epoch": 1709349,
+        "peers": 2,
+        "pending": 0,
+        "serving": true,
+        "state_root": "8ea39de8e580fd12a6227f7ae48ee55fbbe64a87b52911b3d8d666b00d379d69",
+        "suspension_reason": null,
+        "vpn_program": null,
+        "vpn_settlement": "unconfigured"
+      }
+    },
+    "/operator/peers": {
+      "http": 200,
+      "body": {
+        "connected": 2,
+        "connections": {
+          "dialing": 13,
+          "generation": 1,
+          "outcomes": [
+            {
+              "count": 1071,
+              "direction": "outbound",
+              "outcome": "accepted",
+              "phase": "transport"
+            },
+            {
+              "count": 187,
+              "direction": "outbound",
+              "outcome": "timeout",
+              "phase": "transport"
+            },
+            {
+              "count": 113,
+              "direction": "outbound",
+              "outcome": "io",
+              "phase": "transport"
+            },
+            {
+              "count": 981,
+              "direction": "outbound",
+              "outcome": "accepted",
+              "phase": "handshake"
+            },
+            {
+              "count": 33,
+              "direction": "outbound",
+              "outcome": "timeout",
+              "phase": "handshake"
+            },
+            {
+              "count": 57,
+              "direction": "outbound",
+              "outcome": "remote_close",
+              "phase": "handshake"
+            },
+            {
+              "count": 799,
+              "direction": "outbound",
+              "outcome": "accepted",
+              "phase": "admission"
+            },
+            {
+              "count": 23,
+              "direction": "outbound",
+              "outcome": "duplicate",
+              "phase": "admission"
+            },
+            {
+              "count": 159,
+              "direction": "outbound",
+              "outcome": "observer",
+              "phase": "admission"
+            },
+            {
+              "count": 774,
+              "direction": "outbound",
+              "outcome": "remote_close",
+              "phase": "session"
+            },
+            {
+              "count": 23,
+              "direction": "outbound",
+              "outcome": "other",
+              "phase": "session"
+            }
+          ],
+          "proxy": true,
+          "record_dialing": 1,
+          "running": true
+        },
+        "known": 33,
+        "public_sources": 31,
+        "risks": [],
+        "score_reasons": {}
+      }
+    },
+    "/status": {
+      "http": 200,
+      "body": {
+        "current_epoch": 1709350,
+        "validator": "oct1JBUrYbeTQazQ39LQn4ZjnPLHfDpLGXouqon1jZhJfYP",
+        "root_count": 0,
+        "timestamp": 1792259033.303833,
+        "total_accounts": 149104,
+        "total_supply": "996214722.027256",
+        "circulating_supply": "996214722.027256",
+        "encrypted_supply": "12406337.519224",
+        "active_accounts": 141549,
+        "network_version": "v3.0.0-irmin",
+        "storage_backend": "sqlite",
+        "head_epoch": 1709349,
+        "state_root": "8ea39de8e580fd12a6227f7ae48ee55fbbe64a87b52911b3d8d666b00d379d69",
+        "txid_hi": "2759391",
+        "irmin_commit": "93320fd04647e7bff61b76b8e0383f2132164cb982d183e55667bd24ff15ed078de4bb6a4a729da95ca7171a7c9c8816bfa11ec4f07ba87239198f84c8689824"
+      }
+    }
+  },
+  "immutable_prefix_rechecked": true,
+  "archive_prefix_rechecked": true,
+  "identity_preserved": true,
+  "relay_preserved": true,
+  "voting": false,
+  "payments": false,
+  "funds_spent": 0,
+  "artifacts": {
+    "out/core-parity-public-20261017/public-adoption/stopped.json": "46fcd9db54a44d52158c95add1a60480e916024a403a105109ddea78b63e492c",
+    "out/core-parity-public-20261017/public-adoption/launch.json": "cbe1eb3fa5e3e7616f47997c7bb807524610099c428764138266da2a86cdf230",
+    "out/core-parity-public-20261017/public-adoption/after-catchup-v2.json": "6a84e6d94d353d383b9cc443fa3dc7c88a0a80498f1b53fceda5091cdbfe30b8",
+    "out/core-parity-public-20261017/release/manifest.json": "b3baac5c9b946c90346d0db89a86440e408c31152eba58fba6be1333d9b4daab",
+    "out/core-parity-public-20261017/audit-continuity.py": "22e2f46529021111bbacd6cbd9acdf8ac9df3e9028b2bd3fe109afef639fc774",
+    "out/core-parity-public-20261017/supervisor.py": "c0a18a0e08fada2cf7888ddf74cfe05ed8f3a845dbf4399be04df3480e02c3ab",
+    "out/core-parity-public-20261017/observe.py": "162a7fe86293011d3a58d2a416c396ef81af7558b6be460bbd02fb14ad4faa41",
+    "out/core-parity-public-20261017/public-adoption/adoption-observations-v1.jsonl": "2beee4ffcbe52b514e42293a73a8960bebcb72a2d9fd1f1214113c9c2ec20ad4"
+  },
+  "scope": "Normal production binary after retained-state restart; unchanged identity/configuration/relay, cold history audit, serving with authenticated peers and canonical/ExEx/archive forward growth. Read-only continuity helper checks storage consistency, not independent QC authenticity; the node performs finality validation. No paid service, DNS/TLS, newest unqualified working tree or Mainnet deployment claim."
+}

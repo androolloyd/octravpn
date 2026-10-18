@@ -878,6 +878,14 @@ mod tests {
     use super::*;
     use std::sync::OnceLock;
 
+    fn true_binary() -> PathBuf {
+        ["/usr/bin/true", "/bin/true"]
+            .into_iter()
+            .map(PathBuf::from)
+            .find(|path| path.is_file())
+            .expect("supervisor crash tests require the system true executable")
+    }
+
     /// Locate the sidecar binary the same way the IPC-tests crate
     /// does. Returns `None` (and emits a skip line) when the binary
     /// isn't built — keeps `cargo test -p octravpn-node` green on a
@@ -978,15 +986,9 @@ mod tests {
         // exercise the "request after drop" branch with a real
         // subprocess on a CI box that lacks the C++ toolchain. Build
         // an in-memory dummy by spawning against a no-op binary
-        // (`/bin/true` keeps stdin open just long enough; on Linux+macOS
-        // it's always present in the test env, and reading stdout
-        // returns EOF immediately — which is exactly the "subprocess
-        // died" path the supervisor handles).
-        let true_path = PathBuf::from("/bin/true");
-        if !true_path.is_file() {
-            eprintln!("[pvac::tests] /bin/true not present — skipping");
-            return;
-        }
+        // (the system `true` executable exits immediately, giving the
+        // supervisor its real subprocess-death path).
+        let true_path = true_binary();
         let cfg = PvacConfig {
             binary_path: true_path,
             restart_backoff: Duration::from_secs(10), // long → guaranteed not to respawn in this test
@@ -1210,17 +1212,13 @@ mod tests {
 
     #[tokio::test]
     async fn incarnation_crash_triggers_respawn() {
-        // Use /bin/true: it spawns, then exits immediately. The
+        // Use the system true: it spawns, then exits immediately. The
         // supervisor sees stdout EOF, treats it as a crash, and
         // respawns. After the configured back-off, it spawns again
         // (and again, and again). We don't need the request to
         // succeed — we just need the supervisor to NOT panic and to
         // surface a clean error on the in-flight call.
-        let true_path = PathBuf::from("/bin/true");
-        if !true_path.is_file() {
-            eprintln!("[pvac::tests] /bin/true not present — skipping");
-            return;
-        }
+        let true_path = true_binary();
         let cfg = PvacConfig {
             binary_path: true_path,
             restart_backoff: Duration::from_millis(20),
@@ -1228,7 +1226,7 @@ mod tests {
             env: Vec::new(),
         };
         let client = PvacClient::spawn(cfg).await.unwrap();
-        // Fire 3 sequential pings — each "incarnation" of /bin/true
+        // Fire 3 sequential pings — each "incarnation" of true
         // exits before responding. The supervisor must respawn
         // between attempts without panicking the task.
         for _ in 0..3 {
@@ -1439,11 +1437,11 @@ mod tests {
         );
     }
 
-    /// Kill the sidecar mid-call: writing through a `/bin/true` stand-in
+    /// Kill the sidecar mid-call: writing through a system `true` stand-in
     /// guarantees the subprocess has already exited by the time we try
     /// to write. The supervisor must observe stdout EOF, surface a
     /// crash-family error on the in-flight call, respawn, and serve a
-    /// fresh request afterwards. We re-use the existing `/bin/true`
+    /// fresh request afterwards. We re-use the existing `true`
     /// crash path the legacy tests use, then bind a real sidecar back
     /// in for the recovery half — proving the supervisor can route
     /// `receipt_shadow` traffic after a respawn cycle.
@@ -1452,11 +1450,7 @@ mod tests {
         // Phase 1: confirm receipt_shadow surfaces a clean error when
         // the sidecar binary exits immediately (the supervisor's
         // crash + back-off path is identical for every op).
-        let true_path = PathBuf::from("/bin/true");
-        if !true_path.is_file() {
-            eprintln!("[pvac::tests] /bin/true not present — skipping");
-            return;
-        }
+        let true_path = true_binary();
         let cfg = PvacConfig {
             binary_path: true_path,
             restart_backoff: Duration::from_millis(20),
@@ -1464,7 +1458,7 @@ mod tests {
             env: Vec::new(),
         };
         let crashy = PvacClient::spawn(cfg).await.unwrap();
-        // Any request against /bin/true must NOT hang; one of the
+        // Any request against true must NOT hang; one of the
         // crash-family errors is the expected outcome. The op-name is
         // immaterial to the supervisor, so we use a tiny encrypt-const
         // call (its `seed` validation in the sidecar never even runs

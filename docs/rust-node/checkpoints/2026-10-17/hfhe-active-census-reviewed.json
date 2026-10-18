@@ -1,0 +1,442 @@
+{
+  "schema": "octra_hfhe_active_source_census_v1",
+  "prepared_at": "2026-10-18T01:59:53.719169+00:00",
+  "published": true,
+  "review_kind": "Bounded source symbol/export/caller census; no whole-library reachability proof",
+  "original_scope_audit": {
+    "path": "out/octra-parity-final-20261017/hfhe-sidecar-plan/scope-audit.json",
+    "sha256": "3e4d558b189714cc4869833279ec9a5250e04dac0da5c4c1f0a2d127c07864a7"
+  },
+  "original_review_label": "read-only production source review; no results asserted in this scope note",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "native_head_read_verified": true,
+  "native_source_catalog": {
+    "path": "docs/rust-node/source-map.json",
+    "sha256": "6440fdf5895e791ce99ff1904aea396fc88c7e12645846a32702286aa9c17efa"
+  },
+  "native_catalog_file_count": 1158,
+  "all_native_catalog_hashes_current": true,
+  "original_review_sources_current": {
+    "rust_files": 10,
+    "native_files": 18,
+    "all_hashes_identical": true
+  },
+  "current_reviewed_rust_files": {
+    "crates/octra-hfhe/src/proof/range.rs": "6219f4973890bd50206cfd397650eb410fae2feaa67399cb1458a270cb0c334a",
+    "crates/octra-hfhe/src/recrypt/hidden.rs": "81d8a228ee51e60c757669d93c45f01fbed4da9cdb212504d08ea309507ed139",
+    "crates/octra-hfhe/src/recrypt/native.rs": "cc8193fe67a54c09eddf5301e97623f4c2931c37b29b5eef2e9613a15ddcb2b4",
+    "crates/octra-hfhe/src/recrypt/public.rs": "1a6db6de00312a7ec40461c5135ef806e1c26fb13b7ba5ba56934b39b3dc92d9",
+    "crates/octra-hfhe/src/recrypt/reusable.rs": "fc199c73fcfd091770e084023f58c8b64cd7bc3449a1715bd1d878ea35145d22",
+    "crates/octra-node-runtime/src/circle.rs": "5a34d3366adb25a59c0f84a974a70cbca788df9523ef56ffea2bf7eedca2ddf9",
+    "crates/octra-node-runtime/src/circle_call.rs": "78239ed94d5bb065e00f3a0f89d582a6b0301ae080cbe09ec71c02d5c5d48b46",
+    "crates/octra-node-runtime/src/circle_cell.rs": "ba46c2fc5283ec21a50993d043752c6dd384cc4b3990110c23cdb157345bb2fc",
+    "crates/octra-node-runtime/src/circle_fhe.rs": "d484717bec0732432ca3025be15230e2b735b3941c1d84e8c22de68f453f0ed5",
+    "crates/octra-node-runtime/src/circle_hfhe.rs": "0e2dc7dfcac1c9976f2346a12c73fcad2b7e354623c15ec5c0f5e5502f0cfa4a",
+    "crates/octra-node-runtime/src/circle_hfhe/preflight.rs": "b314fd491aaafda46c4397632a364dce7633678faf9cd59cf97716d6a5f4faf9",
+    "crates/octra-node-runtime/src/circle_query.rs": "fabd8d18fc31e62a9c340f823876b89caad7f5d52479eab210ec51a799293d56",
+    "crates/octra-node-runtime/src/crypto_worker.rs": "a86027e685587a32e68cf1c1f7b7cf3bfc917651e23e5f8e97bf1eb6e6d85349",
+    "crates/octra-node-runtime/src/crypto_worker/private.rs": "232ec45cd96a37b5a722b74e9dad7f3f230fead28ecd479b3dc7201466d5bcb9",
+    "crates/octra-node-runtime/src/crypto_worker/tasks.rs": "1f0b9d806f9d48f060643f5849b6b86bcd1ecefe48fb682a630ee4dde6d37148",
+    "crates/octra-node-runtime/src/octb/fhe.rs": "ff14f09173b903dda8af7187eb950067c9ec03d0540d510e5aed90190a57529f",
+    "crates/octra-node-runtime/src/private_account_rpc.rs": "3ef725511a8f3c543e37d511b02c95a5f88c3466f9fa4eca521256f036090e98",
+    "crates/octra-node-runtime/src/private_balance.rs": "e64d51a0e0f69165863edccce29771e3d9e8f5fa9c346e71b579d2cf41b83365",
+    "crates/octra-node-runtime/src/private_crypto.rs": "1d93efc5827ea3b8dd3fef5897c33ea200d995529d0720063c63b6ea92ac1e22",
+    "crates/octra-node-runtime/src/private_crypto/isolated.rs": "825e468d330f041a6cc3bdb10e858a5e003b96780de865771c60d2f56acaf9a9",
+    "crates/octra-node-runtime/src/private_key/mod.rs": "7617d7fbbc0f4f447d419043cbc4f3f536ad7ef0f55686aef9f9d5ee00aeadd2",
+    "crates/octra-node-runtime/src/private_transfer.rs": "ed31e7e3ff01f8141d2a2aceadec926b74cac9a2cd28769fd6bee01f85300a29",
+    "crates/octra-node-runtime/src/single_private.rs": "a195abe49d7a67442fe503080f63212fb680b8c3c4f658f28aae73d00191f995",
+    "crates/octra-node-runtime/src/single_private/worker.rs": "4ada771fba6868ae654de214fbd27f0b45e05046d4056da4c003de3a854a1834",
+    "crates/octra-node/src/devnet.rs": "d1b1b057df718dcd67178661895d28bb55e1a2cc6fcab049386584480fb0d537",
+    "crates/octra-node/src/executor/single.rs": "d1a600c5c97a540d045295a377aa19bab368ce9b24aa3e69d62677a55d0258bc",
+    "crates/octra-node/src/executor/stage.rs": "0ebb9db9f5761f14eeffcf5d71fdd07a18a26f13b636303934df3a048cb2fa92",
+    "crates/octra-node/src/launch.rs": "a07e424cdb08e12a2997599d119c8885cc0c407c3c7d207ef057fddd1d6908ba",
+    "crates/octra-node/src/network.rs": "c9f65c7c3c7401278cd4165c86e438625ca66983bbb381157c1a985098e18f9f",
+    "crates/octra-node/src/single/launch.rs": "5a4ddfe8829f1829d90a8acfa6c3385c8d4d7e9a44b6c698586dc7ffc8290543",
+    "crates/octravpn-node/src/hub/pvac.rs": "8cf05ee977673c56580fd424a8a384cce6943f5b973afd64faf121ad005b3f98",
+    "pvac-sidecar/src/main.cpp": "ec933f7957bc1de69677bd6d089689f33376997e3adeb5c7740d9102ddad3465"
+  },
+  "current_reviewed_native_files": {
+    "circle_runtime/circle_exec.ml": "bfb390d81dd11f05e24747266c83098207521d7ba0c399791c5eca2534768842",
+    "lib/core/circle_wasm/circle_wasm_hfhe_backend.ml": "5052c8f2b5693b21ffae8f05b78102e4e0ac25d3d6893b517ad77d51b9f299d9",
+    "lib/core/circle_wasm/circle_wasm_host.ml": "dda4b741daf13c7e9690ba337e90b1e8996b3284da7afc199587216da48516fb",
+    "lib/core/preverify_worker.ml": "a4338752618dc621e193f54d1c44fee8b35f6570aade9ab7f34f1362e8096e2b",
+    "lib/core/private_ledger.ml": "6c298ec69409251ba98bf91221cee33412514dbc173241ce2aec582c5b7f45ad",
+    "lib/core/private_transition.ml": "236087d9b077bb5f6e5f89e1cbe2bb19998e960b3fa63b08d52f457d7c9fa993",
+    "lib/core/pvac_verify_worker.ml": "eaf540a7db2e6c164e8969115adefcaadbb6695d1d775b46dfa883b134ba95ac",
+    "lib/vm/runtime/contract_vm.ml": "24bb6cf5271ff85528b16f6bdcec5f9a2559a3cd2b34519703fc1a2ebac7f598",
+    "lib/vm/runtime/fhe_task.ml": "826f9dfd01b366f865856cb53c4e3475b6f07f710e25954d9003bb59de71b1cd",
+    "pvac/include/pvac/ops/arithmetic.hpp": "5a0f71daae1bf57778669671517990cfdc0e37c50b8d9776faf50f0133d88d79",
+    "pvac/include/pvac/ops/range_proof.hpp": "fd44a098d79c20bb62576084fc255f7a1454440ccce74100696405bb27de388c",
+    "pvac/include/pvac/ops/recrypt.hpp": "156aeba8d18c85e2991f5d8a027a5b923b1021a20df9b78f1e5802c339aa977c",
+    "pvac/include/pvac/ops/recrypt_eval.hpp": "271057b0ccf26f0b6ca8a7d548f591e031fc004fe1cabea97396534195c0e82e",
+    "pvac/include/pvac/ops/recrypt_legacy.hpp": "df2a716414bf42d31db37638cb08e01a30347c402a03a8db9a7dff44db7f97a4",
+    "pvac/include/pvac/ops/recrypt_native.hpp": "1b48ccbb847ef84f876e9587cf1da02db0286f24bff27f2cb5efa9f5b4754cec",
+    "pvac/include/pvac/ops/recrypt_public.hpp": "a00b09c76c5266515019117d4f12a70acff2d48eb6dc87e620218a4a2d8d2bb1",
+    "pvac/include/pvac/ops/recrypt_ru.hpp": "1f3f0241f716274d1adcb7429bc26185fc4faaa55e3c523eb0bcadbdb54ef370",
+    "pvac/include/pvac/ops/recrypt_runtime_eval.hpp": "dbd56fef7f40fc5fcab52c9a858c2a69efe7b39032c0627579e4cf0297fc3495",
+    "pvac/include/pvac/ops/recrypt_stmt_legacy.hpp": "0bc1e206544f56c0a970f0678db7102c6cd83716640b7ffc28a9b978b9c35085",
+    "pvac/pvac_c_api.cpp": "5e60c148352656bf9a43b234a784a8f4d51c6caaea198e3fd5883c9fb8c8d590",
+    "pvac/pvac_c_api.h": "2099dfe09e0e21bca780acd35c379a2fbf850761e79cb846957bc2623311fc00",
+    "pvac_ffi/pvac_ffi.ml": "9a231e55c680780a24d1093964b1e90ee256ffe0aa07498bb657b514d8e35105",
+    "pvac_ffi/pvac_ffi.mli": "047570d0eb48cd02c8d99461c03b553411628e7851569ffcf9fdbed611f2ac9c",
+    "pvac_ffi/pvac_stubs.cpp": "492fea49fce2d47b2ebc3705fc6300a619a682494d36459a01dce870819b4cbe"
+  },
+  "active_host_wiring": {
+    "status": "FOUND_IN_REVIEWED_SOURCE",
+    "modern_rust_backend": "octra-hfhe",
+    "caller_families": [
+      "private balance/key/transfer and Circle cell transitions",
+      "Circle WASM HFHE callbacks",
+      "OCTB arithmetic/proof callbacks",
+      "Single private verification"
+    ],
+    "rust_caller_evidence": [
+      {
+        "path": "crates/octra-node-runtime/src/circle.rs",
+        "sha256": "5a34d3366adb25a59c0f84a974a70cbca788df9523ef56ffea2bf7eedca2ddf9",
+        "lines": [
+          72
+        ],
+        "needle": "pub fn isolated("
+      },
+      {
+        "path": "crates/octra-node-runtime/src/circle_hfhe.rs",
+        "sha256": "0e2dc7dfcac1c9976f2346a12c73fcad2b7e354623c15ec5c0f5e5502f0cfa4a",
+        "lines": [
+          408
+        ],
+        "needle": "crate::crypto_worker::circle"
+      },
+      {
+        "path": "crates/octra-node-runtime/src/octb/fhe.rs",
+        "sha256": "ff14f09173b903dda8af7187eb950067c9ec03d0540d510e5aed90190a57529f",
+        "lines": [
+          127
+        ],
+        "needle": "Request::Verify"
+      },
+      {
+        "path": "crates/octra-node-runtime/src/octb/fhe.rs",
+        "sha256": "ff14f09173b903dda8af7187eb950067c9ec03d0540d510e5aed90190a57529f",
+        "lines": [
+          70
+        ],
+        "needle": "Request::Calculate"
+      },
+      {
+        "path": "crates/octra-node-runtime/src/crypto_worker/tasks.rs",
+        "sha256": "1f0b9d806f9d48f060643f5849b6b86bcd1ecefe48fb682a630ee4dde6d37148",
+        "lines": [
+          125
+        ],
+        "needle": "Request::Private(request)"
+      },
+      {
+        "path": "crates/octra-node-runtime/src/crypto_worker/private.rs",
+        "sha256": "232ec45cd96a37b5a722b74e9dad7f3f230fead28ecd479b3dc7201466d5bcb9",
+        "lines": [
+          3
+        ],
+        "needle": "use crate::private_crypto as local"
+      },
+      {
+        "path": "crates/octra-node-runtime/src/private_balance.rs",
+        "sha256": "e64d51a0e0f69165863edccce29771e3d9e8f5fa9c346e71b579d2cf41b83365",
+        "lines": [
+          5
+        ],
+        "needle": "private_crypto::isolated"
+      },
+      {
+        "path": "crates/octra-node-runtime/src/private_key/mod.rs",
+        "sha256": "7617d7fbbc0f4f447d419043cbc4f3f536ad7ef0f55686aef9f9d5ee00aeadd2",
+        "lines": [
+          10
+        ],
+        "needle": "private_crypto::isolated"
+      },
+      {
+        "path": "crates/octra-node-runtime/src/private_transfer.rs",
+        "sha256": "ed31e7e3ff01f8141d2a2aceadec926b74cac9a2cd28769fd6bee01f85300a29",
+        "lines": [
+          5,
+          8
+        ],
+        "needle": "private_crypto::isolated"
+      },
+      {
+        "path": "crates/octra-node-runtime/src/circle_cell.rs",
+        "sha256": "ba46c2fc5283ec21a50993d043752c6dd384cc4b3990110c23cdb157345bb2fc",
+        "lines": [
+          10
+        ],
+        "needle": "private_crypto::isolated"
+      },
+      {
+        "path": "crates/octra-node-runtime/src/single_private.rs",
+        "sha256": "a195abe49d7a67442fe503080f63212fb680b8c3c4f658f28aae73d00191f995",
+        "lines": [
+          291
+        ],
+        "needle": "private_transfer::verify_single"
+      },
+      {
+        "path": "crates/octra-node/src/launch.rs",
+        "sha256": "a07e424cdb08e12a2997599d119c8885cc0c407c3c7d207ef057fddd1d6908ba",
+        "lines": [
+          150
+        ],
+        "needle": "runtime.crypto_pool().is_some()"
+      },
+      {
+        "path": "crates/octra-node/src/network.rs",
+        "sha256": "c9f65c7c3c7401278cd4165c86e438625ca66983bbb381157c1a985098e18f9f",
+        "lines": [
+          217
+        ],
+        "needle": "launch::require_crypto"
+      },
+      {
+        "path": "crates/octra-node/src/devnet.rs",
+        "sha256": "d1b1b057df718dcd67178661895d28bb55e1a2cc6fcab049386584480fb0d537",
+        "lines": [
+          302
+        ],
+        "needle": "launch::require_crypto"
+      },
+      {
+        "path": "crates/octra-node/src/single/launch.rs",
+        "sha256": "5a4ddfe8829f1829d90a8acfa6c3385c8d4d7e9a44b6c698586dc7ffc8290543",
+        "lines": [
+          132
+        ],
+        "needle": "launch::require_crypto"
+      },
+      {
+        "path": "crates/octra-node-runtime/src/circle_query.rs",
+        "sha256": "fabd8d18fc31e62a9c340f823876b89caad7f5d52479eab210ec51a799293d56",
+        "lines": [
+          148
+        ],
+        "needle": "runtime.crypto_scope_until"
+      },
+      {
+        "path": "crates/octra-node/src/executor/stage.rs",
+        "sha256": "0ebb9db9f5761f14eeffcf5d71fdd07a18a26f13b636303934df3a048cb2fa92",
+        "lines": [
+          209
+        ],
+        "needle": "self.runtime.crypto_scope"
+      },
+      {
+        "path": "crates/octra-node-runtime/src/private_crypto/isolated.rs",
+        "sha256": "825e468d330f041a6cc3bdb10e858a5e003b96780de865771c60d2f56acaf9a9",
+        "lines": [
+          30
+        ],
+        "needle": "if !crypto_worker::has_scope()"
+      }
+    ],
+    "native_reference_evidence": [
+      {
+        "path": "lib/core/preverify_worker.ml",
+        "sha256": "a4338752618dc621e193f54d1c44fee8b35f6570aade9ab7f34f1362e8096e2b",
+        "lines": [
+          332
+        ],
+        "needle": "A.Invalid \"recrypt_disabled\""
+      },
+      {
+        "path": "lib/core/private_transition.ml",
+        "sha256": "236087d9b077bb5f6e5f89e1cbe2bb19998e960b3fa63b08d52f457d7c9fa993",
+        "lines": [
+          707
+        ],
+        "needle": "recrypt transaction profile is not released"
+      },
+      {
+        "path": "lib/core/circle_wasm/circle_wasm_host.ml",
+        "sha256": "dda4b741daf13c7e9690ba337e90b1e8996b3284da7afc199587216da48516fb",
+        "lines": [
+          125
+        ],
+        "needle": "Circle_wasm_hfhe_backend.ensure_registered"
+      },
+      {
+        "path": "lib/core/circle_wasm/circle_wasm_hfhe_backend.ml",
+        "sha256": "5052c8f2b5693b21ffae8f05b78102e4e0ac25d3d6893b517ad77d51b9f299d9",
+        "lines": [
+          43
+        ],
+        "needle": "VW.try_verify_zero_sync_classified"
+      },
+      {
+        "path": "lib/vm/runtime/fhe_task.ml",
+        "sha256": "826f9dfd01b366f865856cb53c4e3475b6f07f710e25954d9003bb59de71b1cd",
+        "lines": [
+          34
+        ],
+        "needle": "module Worker = Octra_core.Pvac_verify_worker"
+      },
+      {
+        "path": "lib/vm/runtime/contract_vm.ml",
+        "sha256": "24bb6cf5271ff85528b16f6bdcec5f9a2559a3cd2b34519703fc1a2ebac7f598",
+        "lines": [
+          896
+        ],
+        "needle": "try_classified_result_sync"
+      },
+      {
+        "path": "pvac/include/pvac/ops/range_proof.hpp",
+        "sha256": "fd44a098d79c20bb62576084fc255f7a1454440ccce74100696405bb27de388c",
+        "lines": [
+          382
+        ],
+        "needle": "inline bool verify_aggregated_range"
+      },
+      {
+        "path": "pvac/include/pvac/ops/recrypt_native.hpp",
+        "sha256": "1b48ccbb847ef84f876e9587cf1da02db0286f24bff27f2cb5efa9f5b4754cec",
+        "lines": [
+          68
+        ],
+        "needle": "inline NativeRecryptBundle native_recrypt_seeded"
+      }
+    ],
+    "process_boundary_scope": "Production network/devnet/Single launchers require an explicitly configured crypto pool; reviewed invocation scopes route untrusted work to owned helpers. Unscoped component primitives/local Backend remain explicit in-process APIs. This census performs no resource, cancellation or runtime qualification."
+  },
+  "bounded_export_scan": {
+    "selected_exact_symbols": [
+      "native_recrypt_seeded",
+      "verify_native_recrypt",
+      "make_native_runtime_source_carrier",
+      "make_native_runtime_linear_carrier",
+      "make_native_runtime_product_carrier",
+      "eval_native_runtime_hidden_reset_chain",
+      "recrypt_hidden",
+      "recrypt_hidden_verify"
+    ],
+    "method": "Literal occurrences in the958 ML/Mli files of the1158-file native catalog and five named C/OCaml export boundaries; inspect the named C++ implementations/wrappers separately",
+    "native_ml_file_count": 958,
+    "export_boundary_paths": [
+      "pvac/pvac_c_api.h",
+      "pvac/pvac_c_api.cpp",
+      "pvac_ffi/pvac_ffi.mli",
+      "pvac_ffi/pvac_ffi.ml",
+      "pvac_ffi/pvac_stubs.cpp"
+    ],
+    "matches": {
+      "native_recrypt_seeded": {
+        "native_census_ml": [],
+        "selected_c_and_ocaml_export_boundaries": []
+      },
+      "verify_native_recrypt": {
+        "native_census_ml": [],
+        "selected_c_and_ocaml_export_boundaries": []
+      },
+      "make_native_runtime_source_carrier": {
+        "native_census_ml": [],
+        "selected_c_and_ocaml_export_boundaries": []
+      },
+      "make_native_runtime_linear_carrier": {
+        "native_census_ml": [],
+        "selected_c_and_ocaml_export_boundaries": []
+      },
+      "make_native_runtime_product_carrier": {
+        "native_census_ml": [],
+        "selected_c_and_ocaml_export_boundaries": []
+      },
+      "eval_native_runtime_hidden_reset_chain": {
+        "native_census_ml": [],
+        "selected_c_and_ocaml_export_boundaries": []
+      },
+      "recrypt_hidden": {
+        "native_census_ml": [],
+        "selected_c_and_ocaml_export_boundaries": []
+      },
+      "recrypt_hidden_verify": {
+        "native_census_ml": [],
+        "selected_c_and_ocaml_export_boundaries": []
+      }
+    },
+    "legacy_ct_recrypt_seeded_ml_occurrences": [
+      {
+        "path": "pvac_ffi/pvac_ffi.ml",
+        "line": 76,
+        "text": "external ct_recrypt_seeded : pubkey -> evalkey -> cipher -> bytes -> cipher = \"caml_pvac_ct_recrypt_seeded\""
+      },
+      {
+        "path": "pvac_ffi/pvac_ffi.mli",
+        "line": 41,
+        "text": "val ct_recrypt_seeded : pubkey -> evalkey -> cipher -> bytes -> cipher"
+      }
+    ],
+    "scope_limit": "No interface or ML call to these exact symbols was found in the named scope. This is not a transitive whole-C++ call graph, binary symbol analysis or proof of universal library unreachability."
+  },
+  "optional_whole_library_gaps": [
+    {
+      "native": [
+        "pvac/include/pvac/ops/recrypt_native.hpp::native_recrypt_seeded",
+        "pvac/include/pvac/ops/recrypt_native.hpp::verify_native_recrypt",
+        "pvac/include/pvac/ops/recrypt_runtime_eval.hpp::make_native_runtime_source_carrier",
+        "pvac/include/pvac/ops/recrypt_runtime_eval.hpp::make_native_runtime_linear_carrier",
+        "pvac/include/pvac/ops/recrypt_runtime_eval.hpp::make_native_runtime_product_carrier",
+        "pvac/include/pvac/ops/recrypt_runtime_eval.hpp::eval_native_runtime_hidden_reset_chain",
+        "pvac/include/pvac/ops/recrypt_eval.hpp::recrypt_hidden",
+        "pvac/include/pvac/ops/recrypt_eval.hpp::recrypt_hidden_verify"
+      ],
+      "rust_scope": "Policy/material/digest/reusable key and public equality proof components exist; complete hidden runtime carriers/native reset proof certificates/reusable hidden evaluation are not implemented.",
+      "original_active_node_scope_label": "Exact symbols have no exported C/OCaml node interface or active ML call. They are whole-library gaps, not a released node transaction omission.",
+      "original_cpp_library_call_label": "These functions are used by the C++ recrypt_compact/recrypt_result/nat_* and statement-bound experimental wrappers. There is no ordinary arithmetic implicit call into them and no released node/ML use. Library availability is distinct from active-node reachability.",
+      "current_review_scope": "Classified as optional whole-library work under this bounded exact-symbol/export/caller review; neither original label is upgraded to a transitive whole-library reachability proof."
+    }
+  ],
+  "native_refusals_preserved": [
+    {
+      "feature": "Recrypt transaction",
+      "native": [
+        "lib/core/preverify_worker.ml:332",
+        "lib/core/private_transition.ml:705-707"
+      ],
+      "behavior": "recrypt_disabled; no released transaction profile. Existing ct_recrypt_seeded FFI legacy port is present but has no production ML call."
+    },
+    {
+      "feature": "Direct native/reusable source-cipher policy",
+      "rust": "recrypt::native::source_cipher_allowed returns false",
+      "behavior": "Preserves adopted disabled policy; not an invented universal permit."
+    },
+    {
+      "feature": "Legacy aggregated range verifier",
+      "rust": "proof::range::verify_aggregated_range returns false",
+      "behavior": "Native adopted profile disables this verifier; construction/ordinary range and bound profiles are distinct."
+    }
+  ],
+  "legacy_sidecar_boundary": {
+    "kind": "legacy standalone OctraVPN tooling",
+    "backend": "pvac-sidecar/vendor webcli C++",
+    "callers": [
+      "optional Hub PvacClient",
+      "legacy HFHE/shadow signer and existing IPC tests"
+    ],
+    "resource_boundary": "Separate GPL IPC executable with older fork/format; its43normal+3stress tests do not qualify modern native7f9 node cryptography or new prepaid Program/Circle custody."
+  },
+  "findings": {
+    "missing_active_node_path_identified_in_reviewed_branches": false,
+    "active_rust_node_hfhe_hosts_already_wired": true,
+    "whole_library_substitution_complete": false,
+    "optional_reset_hidden_carrier_reusable_evaluation_still_separate": true
+  },
+  "qualification_limits": [
+    "Source/export/caller review only; no tests, builds, crypto/runtime execution, Docker, public process action or source edits.",
+    "Original native/Rust component counts retain their original evidence labels. This document adds zero Rust or native test cases.",
+    "No full-library reachability, every-input/profile equivalence, side-channel/secret-lifetime, cross-architecture, public-chain or Mainnet proof.",
+    "Unexported reset/hidden-carrier/reusable APIs remain optional library completion work. The observed active host wiring does not close full backend qualification."
+  ],
+  "new_test_or_runtime_execution": false,
+  "new_logical_rust_cases": 0,
+  "universal_equivalence_proven": false,
+  "producer": {
+    "path": "out/octra-parity-final-20261017/hfhe-active-census-v1/prepare.py",
+    "sha256": "48568fcdeeec6e5918990bc0e9fd465ecb3eaaa561cd3bcb0febdad9b4c7e95f"
+  }
+}

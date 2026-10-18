@@ -85,10 +85,13 @@ impl Connect {
 
     /// Raw ASCII signed by the account's receipt key, without a prehash or JSON.
     pub fn signing_message(&self) -> Result<String> {
+        self.message("Octranet connect v1")
+    }
+    fn message(&self, domain: &str) -> Result<String> {
         self.validate()?;
         Ok(format!(
             "{}|{}|{}",
-            self.binding.transcript("Octranet connect v1")?,
+            self.binding.transcript(domain)?,
             self.sequence,
             b64::encode(self.wireguard_key)
         ))
@@ -115,6 +118,25 @@ impl SignedConnect {
         })
     }
 
+    /// Stock raw-IP mode has a distinct signing domain. Its signature cannot
+    /// be replayed through the framed endpoint before the stock first-use write.
+    pub fn sign_stock(request: Connect, key: &KeyPair) -> Result<Self> {
+        let signature = key.sign(request.message("Octranet stock connect v1")?.as_bytes());
+        Ok(Self {
+            request,
+            receipt_key: key.public,
+            signature,
+        })
+    }
+    pub fn verify_stock(&self) -> Result<()> {
+        verify_authorization(
+            &self.receipt_key,
+            self.request
+                .message("Octranet stock connect v1")?
+                .as_bytes(),
+            &self.signature,
+        )
+    }
     /// Cryptographic authorization only. The caller also checks the current
     /// canonical receipt key/generation, sequence, tariff, plan and funding.
     pub fn verify(&self) -> Result<()> {
@@ -436,6 +458,32 @@ mod tests {
         let mut changed = signed;
         changed.signature = usage.signature;
         assert!(changed.verify().is_err());
+    }
+
+    #[test]
+    fn stock_framing_is_signed_and_cannot_steal_the_framed_first_use_sequence() {
+        let key = KeyPair::from_secret_bytes(&[9; 32]);
+        let framed = SignedConnect::sign(request(), &key).unwrap();
+        let stock = SignedConnect::sign_stock(request(), &key).unwrap();
+        framed.verify().unwrap();
+        stock.verify_stock().unwrap();
+        assert_ne!(stock.signature, framed.signature);
+        assert!(stock.verify().is_err());
+        assert!(framed.verify_stock().is_err());
+        for binding in changed_bindings(&stock.request.binding) {
+            let mut changed = stock.clone();
+            changed.request.binding = binding;
+            assert!(changed.verify_stock().is_err());
+        }
+        let mut changed = stock.clone();
+        changed.request.sequence += 1;
+        assert!(changed.verify_stock().is_err());
+        let mut changed = stock.clone();
+        changed.request.wireguard_key[0] ^= 1;
+        assert!(changed.verify_stock().is_err());
+        let mut changed = stock;
+        changed.receipt_key = KeyPair::from_secret_bytes(&[10; 32]).public;
+        assert!(changed.verify_stock().is_err());
     }
 
     #[test]

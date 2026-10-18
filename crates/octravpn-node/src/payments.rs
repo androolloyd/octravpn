@@ -67,11 +67,16 @@ pub(crate) struct Connection {
     pub(crate) meter: Arc<Meter>,
     grant: RwLock<Option<Grant>>,
     stop: Revocation,
+    transport: crate::stock::Transport,
+    stock: Option<Arc<crate::stock::Exit>>,
 }
 impl Connection {
     pub(crate) fn live(&self) -> bool {
         !self.stop.is_revoked()
-            && self.meter.connect_is_current(&self.request)
+            && self.stock_live()
+            && self
+                .meter
+                .transport_is_current(&self.request, &self.transport)
             && self
                 .grant
                 .read()
@@ -84,10 +89,38 @@ impl Connection {
         let grant = grant.as_ref().context("paid plan suspended")?;
         ensure!(grant.admissible && grant.guard.live(), "paid plan revoked");
         ensure!(
-            self.meter.connect_is_current(&self.request),
+            self.meter
+                .transport_is_current(&self.request, &self.transport),
             "paid connection rotated"
         );
-        grant.guard.current(action)
+        ensure!(self.stock_live(), "stock registration changed");
+        grant.guard.current(&mut || match &self.transport {
+            crate::stock::Transport::Framed => action(),
+            crate::stock::Transport::Stock(registration) => self
+                .stock
+                .as_ref()
+                .context("stock exit missing")?
+                .with_registration(registration, action),
+        })
+    }
+    fn stock_live(&self) -> bool {
+        match &self.transport {
+            crate::stock::Transport::Framed => true,
+            crate::stock::Transport::Stock(registration) => self
+                .stock
+                .as_ref()
+                .is_some_and(|exit| exit.current(registration)),
+        }
+    }
+    pub(crate) fn stock_exit(&self) -> Option<&Arc<crate::stock::Exit>> {
+        self.stock.as_ref()
+    }
+    pub(crate) fn stock_registration(&self) -> Option<&crate::stock::Registration> {
+        if let crate::stock::Transport::Stock(registration) = &self.transport {
+            Some(registration)
+        } else {
+            None
+        }
     }
     fn invalidate(&self) {
         *self.grant.write() = None;
@@ -131,6 +164,7 @@ pub(crate) struct Registry {
     connections: RwLock<HashMap<[u8; 32], Arc<Connection>>>,
     meters: RwLock<HashMap<SessionId, Arc<Meter>>>,
     pub(crate) stop: Revocation,
+    stock: RwLock<Option<Arc<crate::stock::Exit>>>,
     // Held by every in-flight control operation and tunnel connection.
     _writer: Arc<std::fs::File>,
 }
@@ -145,6 +179,7 @@ impl Registry {
             connections: RwLock::new(HashMap::new()),
             meters: RwLock::new(HashMap::new()),
             stop: Revocation::default(),
+            stock: RwLock::new(None),
             _writer: writer,
         }
     }
@@ -179,14 +214,64 @@ impl Registry {
         );
         Ok(())
     }
+    pub(crate) fn attach_stock(&self, exit: Arc<crate::stock::Exit>) -> Result<()> {
+        ensure!(
+            self.connections.read().is_empty() && self.meters.read().is_empty(),
+            "stock mode must attach before admission"
+        );
+        let mut stock = self.stock.write();
+        ensure!(stock.is_none(), "stock exit already attached");
+        *stock = Some(exit);
+        Ok(())
+    }
+    pub(crate) fn stock_source(&self, address: &std::net::SocketAddr) -> Option<[u8; 32]> {
+        self.stock
+            .read()
+            .as_ref()
+            .and_then(|exit| exit.sources.lock().get(address).copied())
+    }
+    pub(crate) fn stock_exit(&self) -> Option<Arc<crate::stock::Exit>> {
+        if self.stop.is_revoked() {
+            return None;
+        }
+        self.stock.read().clone()
+    }
+    pub(crate) fn stock_peer(&self, key: &[u8; 32]) -> Option<Arc<crate::stock::Peer>> {
+        if self.stop.is_revoked() {
+            return None;
+        }
+        self.stock.read().as_ref()?.peer(key)
+    }
     async fn connect(&self, request: SignedConnect) -> Result<Arc<Connection>> {
-        request.verify()?;
+        self.connect_mode(request, false).await
+    }
+    async fn connect_mode(
+        &self,
+        request: SignedConnect,
+        raw_stock: bool,
+    ) -> Result<Arc<Connection>> {
+        if raw_stock {
+            request.verify_stock()?;
+        } else {
+            request.verify()?;
+        }
         let _serial = self.serial.lock().await;
         ensure!(!self.stop.is_revoked(), "paid VPN stopped");
         let grant = self.authority.plan(&request.request.binding).await?;
         Self::check(&grant, &request)?;
         let session = grant.binding.session_id()?;
         let key = request.request.wireguard_key;
+        let stock = self.stock.read().clone();
+        let transport = if raw_stock {
+            crate::stock::Transport::Stock(
+                stock
+                    .as_ref()
+                    .context("stock exit not configured")?
+                    .registration(&key)?,
+            )
+        } else {
+            crate::stock::Transport::Framed
+        };
         if let Some(previous) = self.get(&key) {
             ensure!(
                 previous.session == session,
@@ -221,7 +306,7 @@ impl Registry {
             self.meters.write().insert(session.clone(), meter.clone());
             meter
         };
-        meter.check_connect(&request)?;
+        meter.check_transport(&request, &transport)?;
         // Revoke before any cancellable durable rotation. A dropped HTTP task
         // cannot leave the previous connection active behind a newer watermark.
         for previous in self
@@ -232,11 +317,19 @@ impl Registry {
         {
             previous.invalidate();
         }
-        meter.connect(request.clone()).await?;
+        meter
+            .connect_transport(request.clone(), transport.clone())
+            .await?;
         Self::check(&grant, &request)?;
+        if let crate::stock::Transport::Stock(registration) = &transport {
+            ensure!(
+                stock.as_ref().is_some_and(|s| s.current(registration)),
+                "stock registration changed during connect"
+            );
+        }
         // Identical retries preserve transport identity and buffered packets.
         if let Some(previous) = self.get(&key) {
-            if previous.request == request {
+            if previous.request == request && previous.transport == transport {
                 *previous.grant.write() = Some(grant);
                 return Ok(previous);
             }
@@ -247,6 +340,8 @@ impl Registry {
             meter,
             grant: RwLock::new(Some(grant)),
             stop: self.stop.clone(),
+            transport,
+            stock,
         });
         let mut connections = self.connections.write();
         connections.retain(|_, previous| {

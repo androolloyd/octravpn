@@ -12,7 +12,7 @@ import time
 
 
 BODY_LIMIT = 131_072
-ROUTES = frozenset(('/payments/connect', '/payments/status', '/payments/usage'))
+ROUTES = frozenset(('/payments/connect', '/payments/stock/connect', '/payments/status', '/payments/usage'))
 
 
 class _Server(ThreadingHTTPServer):

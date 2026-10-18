@@ -16,7 +16,7 @@
   },
   "app_source_sha256": {
     "crates/octravpn-circle-registry/Cargo.toml": "b6c0703cfbbd8092a69303d0a4e56d143ec7afcc102ba09d771c248ebaee7ef5",
-    "Cargo.lock": "578add0308a1069c1d411294c7940e008354b04e6b0dcb6d7111f33dbd659f05",
+    "Cargo.lock": "c9ed3d28d884256da2799b245c461100c42df67fe26f67c1d84e78ee5a9fe213",
     "crates/octravpn-circle-registry/src/codec.rs": "f27f591c478d08afc6b2dfff5f8e197fa6a9dd2c6677d865976564246c74f6d1",
     "crates/octravpn-circle-registry/src/guest.rs": "0b79437db796592d2cbf519153466bb9dc971312d4ebe7aad65cfcfb2cdf539a",
     "crates/octravpn-circle-registry/src/lib.rs": "b24b82f806fdba2c0c6b85ac7f3821be89826ce7f9aa04bbb798e6fa11473053",

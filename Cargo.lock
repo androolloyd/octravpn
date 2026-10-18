@@ -1364,7 +1364,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding",
- "syn 1.0.109",
+ "syn 2.0.106",
 ]
 
 [[package]]
@@ -2073,7 +2073,7 @@ dependencies = [
 [[package]]
 name = "headscale-api"
 version = "0.1.0"
-source = "git+https://github.com/androolloyd/headscale-rs?rev=64bc54312ff9c4c2946f563f21875cf55e3f8f55#64bc54312ff9c4c2946f563f21875cf55e3f8f55"
+source = "git+https://github.com/androolloyd/headscale-rs?rev=570fa5a60c8ed792b643a301b5e91d3b668ba614#570fa5a60c8ed792b643a301b5e91d3b668ba614"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -2131,7 +2131,7 @@ dependencies = [
 [[package]]
 name = "headscale-api-acl"
 version = "0.1.0"
-source = "git+https://github.com/androolloyd/headscale-rs?rev=64bc54312ff9c4c2946f563f21875cf55e3f8f55#64bc54312ff9c4c2946f563f21875cf55e3f8f55"
+source = "git+https://github.com/androolloyd/headscale-rs?rev=570fa5a60c8ed792b643a301b5e91d3b668ba614#570fa5a60c8ed792b643a301b5e91d3b668ba614"
 dependencies = [
  "ipnet",
  "serde",
@@ -2144,7 +2144,7 @@ dependencies = [
 [[package]]
 name = "headscale-cli"
 version = "0.1.0"
-source = "git+https://github.com/androolloyd/headscale-rs?rev=64bc54312ff9c4c2946f563f21875cf55e3f8f55#64bc54312ff9c4c2946f563f21875cf55e3f8f55"
+source = "git+https://github.com/androolloyd/headscale-rs?rev=570fa5a60c8ed792b643a301b5e91d3b668ba614#570fa5a60c8ed792b643a301b5e91d3b668ba614"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -2189,7 +2189,7 @@ dependencies = [
 [[package]]
 name = "headscale-core"
 version = "0.1.0"
-source = "git+https://github.com/androolloyd/headscale-rs?rev=64bc54312ff9c4c2946f563f21875cf55e3f8f55#64bc54312ff9c4c2946f563f21875cf55e3f8f55"
+source = "git+https://github.com/androolloyd/headscale-rs?rev=570fa5a60c8ed792b643a301b5e91d3b668ba614#570fa5a60c8ed792b643a301b5e91d3b668ba614"
 dependencies = [
  "async-trait",
  "base64",
@@ -2214,7 +2214,7 @@ dependencies = [
 [[package]]
 name = "headscale-db"
 version = "0.1.0"
-source = "git+https://github.com/androolloyd/headscale-rs?rev=64bc54312ff9c4c2946f563f21875cf55e3f8f55#64bc54312ff9c4c2946f563f21875cf55e3f8f55"
+source = "git+https://github.com/androolloyd/headscale-rs?rev=570fa5a60c8ed792b643a301b5e91d3b668ba614#570fa5a60c8ed792b643a301b5e91d3b668ba614"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2236,7 +2236,7 @@ dependencies = [
 [[package]]
 name = "headscale-identity"
 version = "0.1.0"
-source = "git+https://github.com/androolloyd/headscale-rs?rev=64bc54312ff9c4c2946f563f21875cf55e3f8f55#64bc54312ff9c4c2946f563f21875cf55e3f8f55"
+source = "git+https://github.com/androolloyd/headscale-rs?rev=570fa5a60c8ed792b643a301b5e91d3b668ba614#570fa5a60c8ed792b643a301b5e91d3b668ba614"
 dependencies = [
  "blake2",
  "bs58",
@@ -2251,7 +2251,7 @@ dependencies = [
 [[package]]
 name = "headscale-payments"
 version = "0.1.0"
-source = "git+https://github.com/androolloyd/headscale-rs?rev=64bc54312ff9c4c2946f563f21875cf55e3f8f55#64bc54312ff9c4c2946f563f21875cf55e3f8f55"
+source = "git+https://github.com/androolloyd/headscale-rs?rev=570fa5a60c8ed792b643a301b5e91d3b668ba614#570fa5a60c8ed792b643a301b5e91d3b668ba614"
 dependencies = [
  "async-trait",
  "headscale-identity",
@@ -2267,7 +2267,7 @@ dependencies = [
 [[package]]
 name = "headscale-resources"
 version = "0.1.0"
-source = "git+https://github.com/androolloyd/headscale-rs?rev=64bc54312ff9c4c2946f563f21875cf55e3f8f55#64bc54312ff9c4c2946f563f21875cf55e3f8f55"
+source = "git+https://github.com/androolloyd/headscale-rs?rev=570fa5a60c8ed792b643a301b5e91d3b668ba614#570fa5a60c8ed792b643a301b5e91d3b668ba614"
 dependencies = [
  "headscale-identity",
  "prometheus-client",
@@ -2483,7 +2483,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tokio",
  "tower-service",
  "tracing",
@@ -3537,6 +3537,8 @@ dependencies = [
  "futures",
  "h2",
  "hex",
+ "hyper",
+ "hyper-util",
  "num-bigint",
  "octra-browser",
  "octra-exex",
@@ -3546,6 +3548,7 @@ dependencies = [
  "octravpn-core",
  "octravpn-node",
  "rand 0.8.6",
+ "rcgen 0.13.2",
  "reqwest",
  "rustix",
  "serde",
@@ -3554,6 +3557,7 @@ dependencies = [
  "sqlx",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "tower",
  "x25519-dalek",
  "zeroize",
@@ -3867,6 +3871,7 @@ dependencies = [
  "chrono",
  "clap",
  "criterion",
+ "crypto_box",
  "curve25519-dalek",
  "ed25519-dalek",
  "escargot",
@@ -4503,7 +4508,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
 dependencies = [
  "heck",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "multimap",
  "petgraph",
@@ -4524,7 +4529,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.106",
@@ -4590,7 +4595,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -4628,7 +4633,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -4785,6 +4790,7 @@ checksum = "75e669e5202259b5314d1ea5397316ad400819437857b90861765f24c4cf80a2"
 dependencies = [
  "aws-lc-rs",
  "pem",
+ "ring",
  "rustls-pki-types",
  "time",
  "yasna 0.5.2",

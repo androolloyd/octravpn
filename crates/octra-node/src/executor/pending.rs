@@ -607,6 +607,15 @@ impl Native {
         let verified = super::run_worker(self.worker.clone(), move || {
             let _duty = proving_guard;
             let _wallet = proving_wallet;
+            // Native queue intake starts only private/key-switch proof jobs.
+            // Circle bindings are checked against the ordered proposal state;
+            // accepting the queue entry supplies no execution receipt.
+            if matches!(
+                input.op_type,
+                OpType::CircleCall | OpType::CircleBalanceCellPut | OpType::CircleRegisterCellPut
+            ) {
+                return Ok(Checked::Ready(None));
+            }
             let captured = captured.draft();
             let ledger =
                 account_store::ledger(&StateBatch::from_snapshot(captured.state().clone()))?;

@@ -38,6 +38,26 @@ enum Cmd {
         #[arg(long)]
         resume: bool,
     },
+    /// Run an explicitly accepted two/three-operator nested prepaid route (Linux).
+    MultiPayments {
+        #[arg(long)]
+        route: std::path::PathBuf,
+        #[arg(long)]
+        resume: bool,
+    },
+    /// Buy fixed prepaid allowances for an already registered stock Tailscale node.
+    StockPayments {
+        #[arg(long)]
+        plan: std::path::PathBuf,
+        #[arg(long)]
+        journal: std::path::PathBuf,
+        #[arg(long)]
+        receipt_key: String,
+        #[arg(long)]
+        node_key: String,
+        #[arg(long)]
+        resume: bool,
+    },
     /// Print derived addresses/pubkeys for the current wallet.
     Identity,
     /// List active validator-VPN nodes from the on-chain registry.
@@ -314,7 +334,7 @@ pub async fn run() -> Result<()> {
             tun_name,
             resume,
         } => {
-            let client = crate::PaymentClient::open(crate::PaymentOptions {
+            let client = Box::pin(crate::PaymentClient::open(crate::PaymentOptions {
                 plan: crate::AcceptedPlan::load(plan)?,
                 journal: journal.clone(),
                 receipt_key: Arc::new(crate::wallet::load_keypair(receipt_key)?),
@@ -324,13 +344,68 @@ pub async fn run() -> Result<()> {
                 } else {
                     crate::JournalMode::Create
                 },
-            })
+            }))
             .await?;
             let interface = client.interface();
             eprintln!(
                 "Octranet interface {} address {}; provision explicit routes to paid destinations",
                 interface.name, interface.address
             );
+            Box::pin(client.run(async {
+                tokio::signal::ctrl_c().await?;
+                Ok(())
+            }))
+            .await?;
+            return Ok(());
+        }
+        Cmd::MultiPayments { route, resume } => {
+            let mode = if *resume {
+                crate::JournalMode::Resume
+            } else {
+                crate::JournalMode::Create
+            };
+            let client = Box::pin(crate::MultiPaymentClient::open(
+                crate::MultiRoutePlan::load(route)?.options(mode)?,
+            ))
+            .await?;
+            for (index, interface) in client.interfaces().iter().enumerate() {
+                eprintln!(
+                    "Octranet paid route hop {}: {} address {} MTU {}",
+                    index + 1,
+                    interface.name,
+                    interface.address,
+                    interface.mtu
+                );
+            }
+            client
+                .run(async {
+                    tokio::signal::ctrl_c().await?;
+                    Ok(())
+                })
+                .await?;
+            return Ok(());
+        }
+        Cmd::StockPayments {
+            plan,
+            journal,
+            receipt_key,
+            node_key,
+            resume,
+        } => {
+            let client =
+                crate::payment_runner::StockClient::open(crate::payment_runner::StockOptions {
+                    plan: crate::AcceptedPlan::load(plan)?,
+                    journal: journal.clone(),
+                    receipt_key: Arc::new(crate::wallet::load_keypair(receipt_key)?),
+                    node_key: node_key.clone(),
+                    mode: if *resume {
+                        crate::JournalMode::Resume
+                    } else {
+                        crate::JournalMode::Create
+                    },
+                })
+                .await?;
+            eprintln!("Prepaid stock Tailscale allowances are canonical; select the configured Octranet exit in Tailscale");
             Box::pin(client.run(async {
                 tokio::signal::ctrl_c().await?;
                 Ok(())
@@ -518,6 +593,8 @@ pub async fn run() -> Result<()> {
         // Already handled above.
         Cmd::Init { .. }
         | Cmd::Payments { .. }
+        | Cmd::MultiPayments { .. }
+        | Cmd::StockPayments { .. }
         | Cmd::Keygen { .. }
         | Cmd::Doctor
         | Cmd::BugReport { .. }

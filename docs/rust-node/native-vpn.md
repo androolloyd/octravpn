@@ -1,5 +1,23 @@
 # Native VPN source integration
 
+The current prepaid service supports the native framed client, stock Tailscale
+clients and explicit nested paid exits. See the [payment guide](../operators/payment-plans.md),
+[stock transport and HTTPS configuration](../architecture/stock-paid-exit.md),
+[nested client](../architecture/nested-paid-exits.md) and
+[Circle custody variant](../architecture/circle-prepaid.md).
+The [current qualification status](status.md) identifies which binaries and
+runtime paths have completed validation. The v5 evidence below retains its
+original application and transport scope.
+
+The [local integration checkpoint](checkpoints/2026-10-17/native-integration.md)
+records all seven fresh Linux scenarios, including both stock custody modes and
+two- and three-hop Program routes. Its production node is release-built; the
+captured paid-client and standalone-operator tools are debug builds. The private
+Single scenario covers legacy v5. Public paid onboarding, trusted public DNS/TLS
+and Mainnet require their own deployment qualification.
+
+## Legacy v5 transport
+
 The [2026-10-15 checkpoint](checkpoints/2026-10-15/native-vpn.json) records a
 passing combined funded transport/recovery gate, reproduced with
 `docker/native-vpn/run.sh`. It includes actual main-v5/factory deployment,
@@ -26,11 +44,14 @@ an exactly authenticated transaction in the captured canonical prefix, with the
 matching successful opening receipt. Cached opening evidence remains bound to
 its containing canonical head and never substitutes for current state checks.
 
-The client has a real userspace WireGuard driver and session framing. Every
-outbound onion layer uses a fresh ephemeral key; cached receive keys apply only
-to their original ephemeral public key. Only one funded exit is currently wired.
-Multi-hop selection is refused before escrow because authenticated inter-relay
-transport and per-hop funding are not implemented.
+The legacy client has a real userspace WireGuard driver and session framing.
+Every outbound onion layer uses a fresh ephemeral key; cached receive keys apply
+only to their original ephemeral public key. Legacy `connect` remains a
+single-funded-exit path and refuses multi-hop selection before escrow. The
+separate prepaid `multi-payments` client composes two or three independently
+funded tunnels, with one accepted plan and durable purchase journal per hop.
+It uses Linux route ownership and blocking routes beneath each carrier; it
+does not enable the legacy unauthenticated inter-relay forwarding path.
 
 `connect` and `connect-v3` accept either `--udp-target IPv4:PORT` with an optional
 loopback `--udp-bind`, or `--tun-name INTERFACE`. UDP forwarding pins one local
@@ -142,6 +163,8 @@ private credential handoff/rotation/replay refusal, operator restart and combine
 node/ExEx/gateway operation. Its 26 focused tests cover additional framing,
 revocation and recovery boundaries. It does not claim every publication failure
 interleaving or production key lifecycle has been exercised.
+
+## Shared node execution and recovery
 
 Native transaction submission now has source routes for `octra_submit`,
 `octra_submitBatch`, `octra_privateTransfer` and `octra_recommendedFee`.

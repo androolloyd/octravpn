@@ -60,6 +60,10 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gateway: Option<crate::gateway::Config>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stock_portal: Option<crate::gateway::StockPortalConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stock_circle_gateway: Option<crate::gateway::StockCircleConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh: Option<octravpn_node::mesh_control::Config>,
     #[serde(default)]
     pub compute_provider: bool,
@@ -245,6 +249,8 @@ pub async fn init_with_applications(
             control: socket(3),
             tunnel: socket(4),
             gateway: None,
+            stock_portal: None,
+            stock_circle_gateway: None,
             mesh: None,
             compute_provider: false,
             voting: true,
@@ -264,24 +270,25 @@ pub async fn init_with_applications(
 }
 pub fn read(path: &Path) -> Result<Config> {
     let mut config: Config = serde_json::from_slice(&std::fs::read(path)?)?;
+    let source = std::fs::canonicalize(path)?;
+    let parent = source.parent().context("configuration directory")?;
+    if let Some(portal) = &mut config.stock_portal {
+        portal.resolve_paths(parent);
+    }
+    if let Some(circle) = &mut config.stock_circle_gateway {
+        circle.resolve_paths(parent);
+    }
     if let Some(book) = config
         .payments
         .as_mut()
         .and_then(|p| p.ip_tunnel.address_book.as_mut())
     {
         if book.is_relative() {
-            *book = std::fs::canonicalize(path)?
-                .parent()
-                .context("configuration directory")?
-                .join(&*book);
+            *book = parent.join(&*book);
         }
     }
     if let Some(mesh) = &mut config.mesh {
-        mesh.resolve_paths(
-            std::fs::canonicalize(path)?
-                .parent()
-                .context("configuration directory")?,
-        );
+        mesh.resolve_paths(parent);
     }
     Ok(config)
 }
@@ -361,6 +368,8 @@ pub async fn run(
                 control: config.control,
                 tunnel: config.tunnel,
                 gateway: config.gateway,
+                stock_portal: config.stock_portal,
+                stock_circle_gateway: config.stock_circle_gateway,
                 mesh: config.mesh,
             },
             transport: crate::launch::Transport {

@@ -29,6 +29,7 @@ mod relay_claimer;
 mod relay_settlement;
 mod relay_sweeper;
 mod seal;
+pub mod stock;
 mod tunnel;
 mod v3_boot;
 mod v3_cli;

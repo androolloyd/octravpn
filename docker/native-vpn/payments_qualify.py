@@ -20,6 +20,8 @@ import struct
 import subprocess
 import time
 import traceback
+
+from json_snapshot import read_object
 import urllib.error
 import urllib.request
 
@@ -66,8 +68,7 @@ def ip(*args):
 
 
 def target():
-    path = g.EVIDENCE / 'target.json'
-    return json.loads(path.read_text()) if path.exists() else {}
+    return read_object(g.EVIDENCE / 'target.json')
 
 
 def journal():
@@ -778,10 +779,15 @@ def exercise(program, operator, tariff, plan_path, faucet, hop, control):
         'Prepaid consent does not prove delivery; no trustless Web non-delivery slashing or prepaid refund remedy']
 
 
-def main():
+def prepare(validate_environment=g.native_guard, *, custody_cap=200_000_000):
+    """Deploy the actual four-validator payment app and immutable Circle offer.
+
+    Leave validators running; callers configure their real transport before the
+    first operator restart. No grant or canonical receipt is fabricated here.
+    """
     g.JOURNAL.update(scope='isolated four-validator prepaid payment-plan application; real client, '
                      'two endpoint kernels and canonical claims; no public-chain or Mainnet claim')
-    g.native_guard()
+    validate_environment()
     g.ROOT.mkdir(mode=0o700)
     g.EVIDENCE.chmod(0o700)
     shutil.copyfile('/usr/local/share/native-source.json', g.EVIDENCE / 'source.json')
@@ -821,7 +827,7 @@ def main():
                         '--rpc-url', g.RPC, '--ou', g.FEE, '--no-wait'))
     factory = deployed['contract']
     spawned = g.send('deploy native payment application', faucet, factory, 'deploy_payments',
-                     [artifacts['octranet-payments.aml']['factory_payload'], domain, 200_000_000, STAKE])
+                     [artifacts['octranet-payments.aml']['factory_payload'], domain, custody_cap, STAKE])
     program = [event['values'][0] for event in spawned['events']
                if event['event'] == 'PaymentsDeployed'][0]
     assert g.rpc('vm_contract', [program])['owner'] == factory
@@ -884,6 +890,16 @@ def main():
     application = {'program': program, 'code_hash': artifacts['octranet-payments.aml']['code_hash'],
                    'factory': factory, 'factory_code_hash': artifacts['octranet-payments-factory.aml']['code_hash'],
                    'domain': domain, 'operator_circle': circle, 'offer': 0}
+    return {'configs': configs, 'faucet': faucet, 'operator': operator,
+            'operator_key': operator_key, 'program': program, 'tariff': tariff,
+            'plan_path': plan_path, 'application': application, 'circle': circle}
+
+
+def main():
+    fixture = prepare()
+    configs, faucet, operator, program, tariff, plan_path, application = (
+        fixture[name] for name in ['configs', 'faucet', 'operator', 'program',
+                                   'tariff', 'plan_path', 'application'])
     retained_epoch = g.epoch()
     g.stop(0)
     configs[0]['payments'] = {'application': application, 'ip_tunnel': {'name': SERVER},

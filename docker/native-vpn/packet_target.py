@@ -156,11 +156,11 @@ class Hop:
             pass
 
 
-def main():
+def main(hop_factory=Hop):
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda _sig, _frame: stop.set())
-    hop = Hop(Path('/hop'), role='target', name='vpn-remote')
+    hop = hop_factory(Path('/hop'), role='target', name='vpn-remote')
     lock = threading.Lock()
     stats = {'observed_sources': {'udp': [], 'tcp': []},
              'udp_payload_bytes': 0, 'tcp_payload_bytes': 0, 'errors': []}

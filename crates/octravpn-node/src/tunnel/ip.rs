@@ -101,6 +101,47 @@ impl Tunnel {
         let assigned = packet::address(session, key);
         let bytes = packet::decode(payload)?;
         packet::validate_outbound(bytes, assigned)?;
+        self.forward_packet(path, bytes, billable, None).await
+    }
+    pub(super) async fn forward_stock(&self, path: ReturnPath, raw: &[u8]) -> Result<()> {
+        let registration = path.stock().context("stock registration missing")?;
+        let parsed = packet::parse(raw)?;
+        ensure!(parsed.source == registration.ipv4, "stock source differs");
+        let destination = if let Some(portal) = path.portal() {
+            let exit = portal.exit().context("stock exit stopped")?;
+            ensure!(
+                crate::stock::packet::portal(&parsed, &exit.config),
+                "outside fixed stock portal"
+            );
+            packet::GATEWAY
+        } else if path
+            .paid()
+            .and_then(|c| c.stock_exit())
+            .is_some_and(|exit| crate::stock::packet::circle(&parsed, &exit.config))
+        {
+            packet::GATEWAY
+        } else {
+            ensure!(
+                packet::public_ipv4(parsed.destination),
+                "stock private egress refused"
+            );
+            parsed.destination
+        };
+        let assigned = packet::address(path.identity().0, path.identity().1);
+        let port = (parsed.destination == crate::stock::CIRCLE_GATEWAY).then_some(8443);
+        let bytes = crate::stock::packet::rewrite(raw, assigned, destination, None, port)?;
+        self.forward_packet(path, &bytes, raw.len() as u64, Some(raw))
+            .await
+    }
+    async fn forward_packet(
+        &self,
+        path: ReturnPath,
+        bytes: &[u8],
+        billable: u64,
+        original: Option<&[u8]>,
+    ) -> Result<()> {
+        let (session, key) = path.identity();
+        let assigned = packet::address(session, key);
         ensure!(path.allowed(), "VPN IP grant expired");
         {
             let mut routes = self.routes.lock();
@@ -136,11 +177,25 @@ impl Tunnel {
         if let Some(connection) = path.paid() {
             let ticket = connection
                 .meter
-                .reserve(bytes, octravpn_core::payments::Direction::Outbound)
+                .reserve(
+                    original.unwrap_or(bytes),
+                    octravpn_core::payments::Direction::Outbound,
+                )
                 .await?;
             return connection
-                .handoff(ticket, bytes.len(), || self.device.try_send(bytes))
+                .handoff(ticket, bytes.len(), || {
+                    path.handoff(|| self.device.try_send(bytes))
+                })
                 .await;
+        }
+        if let Some(portal) = path.portal() {
+            return portal.current(&mut || {
+                ensure!(
+                    path.handoff(|| self.device.try_send(bytes))? == bytes.len(),
+                    "partial stock portal write"
+                );
+                Ok(())
+            });
         }
         let written = tokio::time::timeout(Duration::from_secs(1), self.device.send(bytes))
             .await
@@ -168,10 +223,47 @@ impl Tunnel {
                 continue;
             };
             let assigned = packet::address(path.identity().0, path.identity().1);
-            if packet::validate_inbound(parsed.bytes, assigned).is_err() || !path.allowed() {
+            if !path.allowed() || parsed.destination != assigned {
                 continue;
             }
-            let Ok(payload) = packet::encode(parsed.bytes) else {
+            let mut returned = None;
+            if let Some(registration) = path.stock() {
+                let source = if let Some(portal) = path.portal() {
+                    let Some(exit) = portal.exit() else {
+                        continue;
+                    };
+                    if !crate::stock::packet::portal_return(&parsed, exit.config.portal_port) {
+                        continue;
+                    }
+                    exit.config.operator_ipv4
+                } else if path
+                    .paid()
+                    .and_then(|c| c.stock_exit())
+                    .is_some_and(|exit| exit.config.circle_gateway)
+                    && crate::stock::packet::circle_return(&parsed)
+                {
+                    crate::stock::CIRCLE_GATEWAY
+                } else {
+                    if !packet::public_ipv4(parsed.source) {
+                        continue;
+                    }
+                    parsed.source
+                };
+                let source_port = (source == crate::stock::CIRCLE_GATEWAY).then_some(443);
+                let Ok(bytes) = crate::stock::packet::rewrite(
+                    parsed.bytes,
+                    source,
+                    registration.ipv4,
+                    source_port,
+                    None,
+                ) else {
+                    continue;
+                };
+                returned = Some(bytes);
+            } else if packet::validate_inbound(parsed.bytes, assigned).is_err() {
+                continue;
+            }
+            let Ok(payload) = packet::encode(returned.as_deref().unwrap_or(parsed.bytes)) else {
                 continue;
             };
             if let Err(error) = path.reply_body(&payload).await {

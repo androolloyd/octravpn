@@ -1,6 +1,6 @@
 {
   "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
-  "scope": "real native storage/recovery boundary; synthetic transactions, no consensus or peer finality qualification",
+  "scope": "real native storage/recovery boundary and unchanged epoch_source on exact exported native header bytes under independent fixture keys; synthetic transactions, no consensus or peer finality qualification",
   "source_sha256": {
     "bin/bft_control_tx.ml": "fe495c135f098796e0e9e03637d7692bbab716396c3453ce5eb9c411a552aedc",
     "bin/check_store.ml": "55b9e2ce997a449b04bdab32cfebfa46f191d0d72aaa2d426848d8f7119d1172",
@@ -1162,19 +1162,19 @@
     "zk_ffi/zk_stubs.cpp": "7a688e497dbdf338e8a165669fed85961afc1c343eebc82949132920fa7f6f1b"
   },
   "adapter_sha256": {
-    "native-history-export.ml": "2171b5f5b99f592e2771146ede8ec72e62efc825b8c9c4c05b0662a07bed64b6",
+    "native-history-export.ml": "71c069d6e351c2f199d0c785d55714c576a8c8b8642229b55a0642010f835a30",
     "native-history-main.ml": "4f13f9a9d69643e77ace5a8a0ee0a5296499216911ad122be678432a8c9c702c",
-    "native-history-fixtures.ml": "9634f06b8da39f86a44b7e57de3fdcb71b39717135af267ec2ce9da2eeef1427"
+    "native-history-fixtures.ml": "4c2de1796f6816d6f71e15e7baf1a913c4f079efedfa34083f5eb0e6230739eb"
   },
   "cases": {
     "empty": {
-      "format": "octra-exex-history-v1",
+      "format": "octra-exex-history-v2",
       "head_commit_id": "wal-phase",
       "head": {
         "epoch": 0,
         "state_root": "7246ce7f88187e722c7268c3c3dac3e7048184bcf7bce0945b4c0b5457d3d7a5",
         "ledger_root": "d7700cfcca05af77f7d65220acf1a08906804a58f03ff13014547e3bd3d070b869f2fb0fc74c5a5338c90ecafa6fda41440f31b0a718037fbf41b62db61d182c",
-        "irmin_commit": "c756515ef5bf00f98e18a0ac974f4b8d180c6abf8f229489945fdc4539f96c03957d1e8de915d534af79d94f88867c26bbfe2b1130320239b93f6323df9babc1",
+        "irmin_commit": "6de1251b94311e7577537ac559fa11d8f43d061f4790d0cb6e4c6d40e11f5b58ecad1552614580bb69994c692b1275c365f515cc596021a74a22775f6e791aac",
         "index_hash": "e152a6a0ff846e83fd959c6df398f17276a2848bc99e574a69105c82d3b1eb0f",
         "index_root": "52deea464a9d551bd01be124c974fa357a165499c261fd38b036bd523f1247b6",
         "txid_hi": 0
@@ -1183,7 +1183,7 @@
         "epoch": 0,
         "state_root": "7246ce7f88187e722c7268c3c3dac3e7048184bcf7bce0945b4c0b5457d3d7a5",
         "ledger_root": "d7700cfcca05af77f7d65220acf1a08906804a58f03ff13014547e3bd3d070b869f2fb0fc74c5a5338c90ecafa6fda41440f31b0a718037fbf41b62db61d182c",
-        "irmin_commit": "c756515ef5bf00f98e18a0ac974f4b8d180c6abf8f229489945fdc4539f96c03957d1e8de915d534af79d94f88867c26bbfe2b1130320239b93f6323df9babc1",
+        "irmin_commit": "6de1251b94311e7577537ac559fa11d8f43d061f4790d0cb6e4c6d40e11f5b58ecad1552614580bb69994c692b1275c365f515cc596021a74a22775f6e791aac",
         "index_hash": "e152a6a0ff846e83fd959c6df398f17276a2848bc99e574a69105c82d3b1eb0f",
         "index_root": "52deea464a9d551bd01be124c974fa357a165499c261fd38b036bd523f1247b6",
         "txid_hi": 0
@@ -1191,13 +1191,13 @@
       "epochs": []
     },
     "after_head": {
-      "format": "octra-exex-history-v1",
+      "format": "octra-exex-history-v2",
       "head_commit_id": "fixture-1",
       "head": {
         "epoch": 1,
         "state_root": "c6d244d3577d960738f80ba6c88cc6dd62b3ff4146cb08eaa0c5dcdd8827a31f",
         "ledger_root": "bac917090b383bed95ebbd673002bb54b55a73a98dc84991a07b4c7ec197bc470ee2d8421c4e54b3a2c9af1606f7566e1239ced9cdb8e89c6a32f434d0820dd6",
-        "irmin_commit": "b87bfe54e3060c20169115700835d15252e5816c0feb50d9cd005f81d7776ece0e33ad00a98ff081cfa13f520f1123f85f9eeb4fbb99c881d9eb019f592aac30",
+        "irmin_commit": "2db54020fa1801536e8644cc0fbb257fc4b7c40a8e03b533f3401e9f28f768a516c571963cc03c13a8b8fd4a7fdb98fac27d2ec21c4770683744a79411719672",
         "index_hash": "92b337fdb6f626790bdc3f61e985ec1c1cf281e24410b04ace7bc6ed95bebdb5",
         "index_root": "c02d20c960a81b768aa78aff87631d1cf7a9dd6e864b146636a3e517cf3f84ed",
         "txid_hi": 1
@@ -1206,7 +1206,7 @@
         "epoch": 0,
         "state_root": "7246ce7f88187e722c7268c3c3dac3e7048184bcf7bce0945b4c0b5457d3d7a5",
         "ledger_root": "d7700cfcca05af77f7d65220acf1a08906804a58f03ff13014547e3bd3d070b869f2fb0fc74c5a5338c90ecafa6fda41440f31b0a718037fbf41b62db61d182c",
-        "irmin_commit": "c756515ef5bf00f98e18a0ac974f4b8d180c6abf8f229489945fdc4539f96c03957d1e8de915d534af79d94f88867c26bbfe2b1130320239b93f6323df9babc1",
+        "irmin_commit": "6de1251b94311e7577537ac559fa11d8f43d061f4790d0cb6e4c6d40e11f5b58ecad1552614580bb69994c692b1275c365f515cc596021a74a22775f6e791aac",
         "index_hash": "e152a6a0ff846e83fd959c6df398f17276a2848bc99e574a69105c82d3b1eb0f",
         "index_root": "52deea464a9d551bd01be124c974fa357a165499c261fd38b036bd523f1247b6",
         "txid_hi": 0
@@ -1217,14 +1217,15 @@
             "epoch": 1,
             "state_root": "c6d244d3577d960738f80ba6c88cc6dd62b3ff4146cb08eaa0c5dcdd8827a31f",
             "ledger_root": "bac917090b383bed95ebbd673002bb54b55a73a98dc84991a07b4c7ec197bc470ee2d8421c4e54b3a2c9af1606f7566e1239ced9cdb8e89c6a32f434d0820dd6",
-            "irmin_commit": "b87bfe54e3060c20169115700835d15252e5816c0feb50d9cd005f81d7776ece0e33ad00a98ff081cfa13f520f1123f85f9eeb4fbb99c881d9eb019f592aac30",
+            "irmin_commit": "2db54020fa1801536e8644cc0fbb257fc4b7c40a8e03b533f3401e9f28f768a516c571963cc03c13a8b8fd4a7fdb98fac27d2ec21c4770683744a79411719672",
             "index_hash": "92b337fdb6f626790bdc3f61e985ec1c1cf281e24410b04ace7bc6ed95bebdb5",
             "index_root": "c02d20c960a81b768aa78aff87631d1cf7a9dd6e864b146636a3e517cf3f84ed",
             "txid_hi": 1
           },
           "parent_root": "7246ce7f88187e722c7268c3c3dac3e7048184bcf7bce0945b4c0b5457d3d7a5",
-          "parent_commit": "c756515ef5bf00f98e18a0ac974f4b8d180c6abf8f229489945fdc4539f96c03957d1e8de915d534af79d94f88867c26bbfe2b1130320239b93f6323df9babc1",
+          "parent_commit": "6de1251b94311e7577537ac559fa11d8f43d061f4790d0cb6e4c6d40e11f5b58ecad1552614580bb69994c692b1275c365f515cc596021a74a22775f6e791aac",
           "start_txid": 1,
+          "epoch_header": "eyJpZCI6MSwic3RhdGVfcm9vdCI6ImM2ZDI0NGQzNTc3ZDk2MDczOGY4MGJhNmM4OGNjNmRkNjJiM2ZmNDE0NmNiMDhlYWEwYzVkY2RkODgyN2EzMWYiLCJwcmV2X3N0YXRlX3Jvb3QiOiI3MjQ2Y2U3Zjg4MTg3ZTcyMmM3MjY4YzNjM2RhYzNlNzA0ODE4NGJjZjdiY2UwOTQ1YjRjMGI1NDU3ZDNkN2E1IiwicGFyZW50X2NvbW1pdCI6IjZkZTEyNTFiOTQzMTFlNzU3NzUzN2FjNTU5ZmExMWQ4ZjQzZDA2MWY0NzkwZDBjYjZlNGM2ZDQwZTExZjViNThlY2FkMTU1MjYxNDU4MGJiNjk5OTRjNjkyYjEyNzVjMzY1ZjUxNWNjNTk2MDIxYTc0YTIyNzc1ZjZlNzkxYWFjIiwic3RhcnRfdHhpZCI6IjEiLCJ0eF9jb3VudCI6MSwiZmluYWxpemVkX2J5IjoiZml4dHVyZSIsImZpbmFsaXplZF9hdCI6MC4wLCJjcmVhdG9yX2FkZHIiOiIiLCJjb21taXRfcm91bmQiOjAsImZlZXNfdG90YWwiOiIwIiwiZmVlc19idXJuZWQiOiIwIiwiYmFzZV9yZXdhcmQiOiIwIiwidG90YWxfcmV3YXJkIjoiMCIsInByb3Bvc2VyX3Jld2FyZCI6IjAiLCJ2YWxpZGF0b3JfcmV3YXJkX2VhY2giOiIwIiwicmV3YXJkX3JlY2lwaWVudHMiOltdLCJyZXdhcmRfc291cmNlIjpudWxsfQ==",
           "transactions": [
             {
               "txid": 1,
@@ -1239,13 +1240,13 @@
       ]
     },
     "after_recovery": {
-      "format": "octra-exex-history-v1",
+      "format": "octra-exex-history-v2",
       "head_commit_id": "fixture-1",
       "head": {
         "epoch": 1,
         "state_root": "c6d244d3577d960738f80ba6c88cc6dd62b3ff4146cb08eaa0c5dcdd8827a31f",
         "ledger_root": "bac917090b383bed95ebbd673002bb54b55a73a98dc84991a07b4c7ec197bc470ee2d8421c4e54b3a2c9af1606f7566e1239ced9cdb8e89c6a32f434d0820dd6",
-        "irmin_commit": "b87bfe54e3060c20169115700835d15252e5816c0feb50d9cd005f81d7776ece0e33ad00a98ff081cfa13f520f1123f85f9eeb4fbb99c881d9eb019f592aac30",
+        "irmin_commit": "2db54020fa1801536e8644cc0fbb257fc4b7c40a8e03b533f3401e9f28f768a516c571963cc03c13a8b8fd4a7fdb98fac27d2ec21c4770683744a79411719672",
         "index_hash": "92b337fdb6f626790bdc3f61e985ec1c1cf281e24410b04ace7bc6ed95bebdb5",
         "index_root": "c02d20c960a81b768aa78aff87631d1cf7a9dd6e864b146636a3e517cf3f84ed",
         "txid_hi": 1
@@ -1254,7 +1255,7 @@
         "epoch": 0,
         "state_root": "7246ce7f88187e722c7268c3c3dac3e7048184bcf7bce0945b4c0b5457d3d7a5",
         "ledger_root": "d7700cfcca05af77f7d65220acf1a08906804a58f03ff13014547e3bd3d070b869f2fb0fc74c5a5338c90ecafa6fda41440f31b0a718037fbf41b62db61d182c",
-        "irmin_commit": "c756515ef5bf00f98e18a0ac974f4b8d180c6abf8f229489945fdc4539f96c03957d1e8de915d534af79d94f88867c26bbfe2b1130320239b93f6323df9babc1",
+        "irmin_commit": "6de1251b94311e7577537ac559fa11d8f43d061f4790d0cb6e4c6d40e11f5b58ecad1552614580bb69994c692b1275c365f515cc596021a74a22775f6e791aac",
         "index_hash": "e152a6a0ff846e83fd959c6df398f17276a2848bc99e574a69105c82d3b1eb0f",
         "index_root": "52deea464a9d551bd01be124c974fa357a165499c261fd38b036bd523f1247b6",
         "txid_hi": 0
@@ -1265,14 +1266,15 @@
             "epoch": 1,
             "state_root": "c6d244d3577d960738f80ba6c88cc6dd62b3ff4146cb08eaa0c5dcdd8827a31f",
             "ledger_root": "bac917090b383bed95ebbd673002bb54b55a73a98dc84991a07b4c7ec197bc470ee2d8421c4e54b3a2c9af1606f7566e1239ced9cdb8e89c6a32f434d0820dd6",
-            "irmin_commit": "b87bfe54e3060c20169115700835d15252e5816c0feb50d9cd005f81d7776ece0e33ad00a98ff081cfa13f520f1123f85f9eeb4fbb99c881d9eb019f592aac30",
+            "irmin_commit": "2db54020fa1801536e8644cc0fbb257fc4b7c40a8e03b533f3401e9f28f768a516c571963cc03c13a8b8fd4a7fdb98fac27d2ec21c4770683744a79411719672",
             "index_hash": "92b337fdb6f626790bdc3f61e985ec1c1cf281e24410b04ace7bc6ed95bebdb5",
             "index_root": "c02d20c960a81b768aa78aff87631d1cf7a9dd6e864b146636a3e517cf3f84ed",
             "txid_hi": 1
           },
           "parent_root": "7246ce7f88187e722c7268c3c3dac3e7048184bcf7bce0945b4c0b5457d3d7a5",
-          "parent_commit": "c756515ef5bf00f98e18a0ac974f4b8d180c6abf8f229489945fdc4539f96c03957d1e8de915d534af79d94f88867c26bbfe2b1130320239b93f6323df9babc1",
+          "parent_commit": "6de1251b94311e7577537ac559fa11d8f43d061f4790d0cb6e4c6d40e11f5b58ecad1552614580bb69994c692b1275c365f515cc596021a74a22775f6e791aac",
           "start_txid": 1,
+          "epoch_header": "eyJpZCI6MSwic3RhdGVfcm9vdCI6ImM2ZDI0NGQzNTc3ZDk2MDczOGY4MGJhNmM4OGNjNmRkNjJiM2ZmNDE0NmNiMDhlYWEwYzVkY2RkODgyN2EzMWYiLCJwcmV2X3N0YXRlX3Jvb3QiOiI3MjQ2Y2U3Zjg4MTg3ZTcyMmM3MjY4YzNjM2RhYzNlNzA0ODE4NGJjZjdiY2UwOTQ1YjRjMGI1NDU3ZDNkN2E1IiwicGFyZW50X2NvbW1pdCI6IjZkZTEyNTFiOTQzMTFlNzU3NzUzN2FjNTU5ZmExMWQ4ZjQzZDA2MWY0NzkwZDBjYjZlNGM2ZDQwZTExZjViNThlY2FkMTU1MjYxNDU4MGJiNjk5OTRjNjkyYjEyNzVjMzY1ZjUxNWNjNTk2MDIxYTc0YTIyNzc1ZjZlNzkxYWFjIiwic3RhcnRfdHhpZCI6IjEiLCJ0eF9jb3VudCI6MSwiZmluYWxpemVkX2J5IjoiZml4dHVyZSIsImZpbmFsaXplZF9hdCI6MC4wLCJjcmVhdG9yX2FkZHIiOiIiLCJjb21taXRfcm91bmQiOjAsImZlZXNfdG90YWwiOiIwIiwiZmVlc19idXJuZWQiOiIwIiwiYmFzZV9yZXdhcmQiOiIwIiwidG90YWxfcmV3YXJkIjoiMCIsInByb3Bvc2VyX3Jld2FyZCI6IjAiLCJ2YWxpZGF0b3JfcmV3YXJkX2VhY2giOiIwIiwicmV3YXJkX3JlY2lwaWVudHMiOltdLCJyZXdhcmRfc291cmNlIjpudWxsfQ==",
           "transactions": [
             {
               "txid": 1,
@@ -1287,13 +1289,13 @@
       ]
     },
     "full": {
-      "format": "octra-exex-history-v1",
+      "format": "octra-exex-history-v2",
       "head_commit_id": "fixture-3",
       "head": {
         "epoch": 3,
         "state_root": "0ac3e946498d972a6e8d4f7870cc8f3a36e3ebaaf8b8452d8bc53dc30f5cc8b5",
         "ledger_root": "fefdc2f56e6a4b0911ba671f0106b6c69fb46489ef414a5faf74c5eeb75c247dcf3e653013bf1378af58f86b2e661abd88953daee4b79c7a15c6051bd529498a",
-        "irmin_commit": "0720e1cd32ad930292d805e94d55f47df1b73bdd5e182e22283e965a4b0a729d52e9ec22240cf137598742e500ff88e1de18fd803e011362981fe187654639ba",
+        "irmin_commit": "d6ff6b7cf25df5f592945836928b9db297688629a0eb7d847d29879910b56c0435eb898f2ff651c00551530e8f500da87e8e9ad6173d36658119a440bf321a33",
         "index_hash": "6371ec4c5484a3a809145cdf4976d0fd01db240243c26717b79df6f772a7612c",
         "index_root": "740fc30b36054356da11cdb112a2724aab4da84b09f7430204a8e1b78a4dab4d",
         "txid_hi": 3
@@ -1302,7 +1304,7 @@
         "epoch": 0,
         "state_root": "7246ce7f88187e722c7268c3c3dac3e7048184bcf7bce0945b4c0b5457d3d7a5",
         "ledger_root": "d7700cfcca05af77f7d65220acf1a08906804a58f03ff13014547e3bd3d070b869f2fb0fc74c5a5338c90ecafa6fda41440f31b0a718037fbf41b62db61d182c",
-        "irmin_commit": "c756515ef5bf00f98e18a0ac974f4b8d180c6abf8f229489945fdc4539f96c03957d1e8de915d534af79d94f88867c26bbfe2b1130320239b93f6323df9babc1",
+        "irmin_commit": "6de1251b94311e7577537ac559fa11d8f43d061f4790d0cb6e4c6d40e11f5b58ecad1552614580bb69994c692b1275c365f515cc596021a74a22775f6e791aac",
         "index_hash": "e152a6a0ff846e83fd959c6df398f17276a2848bc99e574a69105c82d3b1eb0f",
         "index_root": "52deea464a9d551bd01be124c974fa357a165499c261fd38b036bd523f1247b6",
         "txid_hi": 0
@@ -1313,14 +1315,15 @@
             "epoch": 1,
             "state_root": "c6d244d3577d960738f80ba6c88cc6dd62b3ff4146cb08eaa0c5dcdd8827a31f",
             "ledger_root": "bac917090b383bed95ebbd673002bb54b55a73a98dc84991a07b4c7ec197bc470ee2d8421c4e54b3a2c9af1606f7566e1239ced9cdb8e89c6a32f434d0820dd6",
-            "irmin_commit": "b87bfe54e3060c20169115700835d15252e5816c0feb50d9cd005f81d7776ece0e33ad00a98ff081cfa13f520f1123f85f9eeb4fbb99c881d9eb019f592aac30",
+            "irmin_commit": "2db54020fa1801536e8644cc0fbb257fc4b7c40a8e03b533f3401e9f28f768a516c571963cc03c13a8b8fd4a7fdb98fac27d2ec21c4770683744a79411719672",
             "index_hash": "92b337fdb6f626790bdc3f61e985ec1c1cf281e24410b04ace7bc6ed95bebdb5",
             "index_root": "c02d20c960a81b768aa78aff87631d1cf7a9dd6e864b146636a3e517cf3f84ed",
             "txid_hi": 1
           },
           "parent_root": "7246ce7f88187e722c7268c3c3dac3e7048184bcf7bce0945b4c0b5457d3d7a5",
-          "parent_commit": "c756515ef5bf00f98e18a0ac974f4b8d180c6abf8f229489945fdc4539f96c03957d1e8de915d534af79d94f88867c26bbfe2b1130320239b93f6323df9babc1",
+          "parent_commit": "6de1251b94311e7577537ac559fa11d8f43d061f4790d0cb6e4c6d40e11f5b58ecad1552614580bb69994c692b1275c365f515cc596021a74a22775f6e791aac",
           "start_txid": 1,
+          "epoch_header": "eyJpZCI6MSwic3RhdGVfcm9vdCI6ImM2ZDI0NGQzNTc3ZDk2MDczOGY4MGJhNmM4OGNjNmRkNjJiM2ZmNDE0NmNiMDhlYWEwYzVkY2RkODgyN2EzMWYiLCJwcmV2X3N0YXRlX3Jvb3QiOiI3MjQ2Y2U3Zjg4MTg3ZTcyMmM3MjY4YzNjM2RhYzNlNzA0ODE4NGJjZjdiY2UwOTQ1YjRjMGI1NDU3ZDNkN2E1IiwicGFyZW50X2NvbW1pdCI6IjZkZTEyNTFiOTQzMTFlNzU3NzUzN2FjNTU5ZmExMWQ4ZjQzZDA2MWY0NzkwZDBjYjZlNGM2ZDQwZTExZjViNThlY2FkMTU1MjYxNDU4MGJiNjk5OTRjNjkyYjEyNzVjMzY1ZjUxNWNjNTk2MDIxYTc0YTIyNzc1ZjZlNzkxYWFjIiwic3RhcnRfdHhpZCI6IjEiLCJ0eF9jb3VudCI6MSwiZmluYWxpemVkX2J5IjoiZml4dHVyZSIsImZpbmFsaXplZF9hdCI6MC4wLCJjcmVhdG9yX2FkZHIiOiIiLCJjb21taXRfcm91bmQiOjAsImZlZXNfdG90YWwiOiIwIiwiZmVlc19idXJuZWQiOiIwIiwiYmFzZV9yZXdhcmQiOiIwIiwidG90YWxfcmV3YXJkIjoiMCIsInByb3Bvc2VyX3Jld2FyZCI6IjAiLCJ2YWxpZGF0b3JfcmV3YXJkX2VhY2giOiIwIiwicmV3YXJkX3JlY2lwaWVudHMiOltdLCJyZXdhcmRfc291cmNlIjpudWxsfQ==",
           "transactions": [
             {
               "txid": 1,
@@ -1337,14 +1340,15 @@
             "epoch": 2,
             "state_root": "517b2b9848af0bb144015784385eb7a3166aac14023506de079b33cd957effe1",
             "ledger_root": "aa5a119b2467d6c751ad866b98f643f2c275e14f09382e414cbca93ac5551e41130d266fc39c87744d11ab056b6e28da7c9ba1512792479c60e8d047f2ac69eb",
-            "irmin_commit": "189c90f06aaacdb7bae3da20026046ad80e9011e767bece9959cfef33c03b7852e832544c8f4dbe6991b911d85af0ab65ea9a330ea5c2b1c1dac155cc1b67030",
+            "irmin_commit": "2284e5b1c6c79c3d6187f2ed9f7ff0c5d31c0b143e7225615a338dcc332bc01697beb72e4b0fdc962db0aa8d22b42aafa24477b885480330edb40399c9e7cfaa",
             "index_hash": "e1f9f25444260d57fd236561dc13558433752d35fa69bcd6261be4edad595363",
             "index_root": "e8e20fab70388cec685cc498f98cf34135eea281c5c1d158910c673371b03a97",
             "txid_hi": 1
           },
           "parent_root": "c6d244d3577d960738f80ba6c88cc6dd62b3ff4146cb08eaa0c5dcdd8827a31f",
-          "parent_commit": "b87bfe54e3060c20169115700835d15252e5816c0feb50d9cd005f81d7776ece0e33ad00a98ff081cfa13f520f1123f85f9eeb4fbb99c881d9eb019f592aac30",
+          "parent_commit": "2db54020fa1801536e8644cc0fbb257fc4b7c40a8e03b533f3401e9f28f768a516c571963cc03c13a8b8fd4a7fdb98fac27d2ec21c4770683744a79411719672",
           "start_txid": 2,
+          "epoch_header": "eyJpZCI6Miwic3RhdGVfcm9vdCI6IjUxN2IyYjk4NDhhZjBiYjE0NDAxNTc4NDM4NWViN2EzMTY2YWFjMTQwMjM1MDZkZTA3OWIzM2NkOTU3ZWZmZTEiLCJwcmV2X3N0YXRlX3Jvb3QiOiJjNmQyNDRkMzU3N2Q5NjA3MzhmODBiYTZjODhjYzZkZDYyYjNmZjQxNDZjYjA4ZWFhMGM1ZGNkZDg4MjdhMzFmIiwicGFyZW50X2NvbW1pdCI6IjJkYjU0MDIwZmExODAxNTM2ZTg2NDRjYzBmYmIyNTdmYzRiN2M0MGE4ZTAzYjUzM2YzNDAxZTlmMjhmNzY4YTUxNmM1NzE5NjNjYzAzYzEzYThiOGZkNGE3ZmRiOThmYWMyN2QyZWMyMWM0NzcwNjgzNzQ0YTc5NDExNzE5NjcyIiwic3RhcnRfdHhpZCI6IjIiLCJ0eF9jb3VudCI6MCwiZmluYWxpemVkX2J5IjoiZml4dHVyZSIsImZpbmFsaXplZF9hdCI6MC4wLCJjcmVhdG9yX2FkZHIiOiIiLCJjb21taXRfcm91bmQiOjAsImZlZXNfdG90YWwiOiIwIiwiZmVlc19idXJuZWQiOiIwIiwiYmFzZV9yZXdhcmQiOiIwIiwidG90YWxfcmV3YXJkIjoiMCIsInByb3Bvc2VyX3Jld2FyZCI6IjAiLCJ2YWxpZGF0b3JfcmV3YXJkX2VhY2giOiIwIiwicmV3YXJkX3JlY2lwaWVudHMiOltdLCJyZXdhcmRfc291cmNlIjpudWxsfQ==",
           "transactions": []
         },
         {
@@ -1352,14 +1356,15 @@
             "epoch": 3,
             "state_root": "0ac3e946498d972a6e8d4f7870cc8f3a36e3ebaaf8b8452d8bc53dc30f5cc8b5",
             "ledger_root": "fefdc2f56e6a4b0911ba671f0106b6c69fb46489ef414a5faf74c5eeb75c247dcf3e653013bf1378af58f86b2e661abd88953daee4b79c7a15c6051bd529498a",
-            "irmin_commit": "0720e1cd32ad930292d805e94d55f47df1b73bdd5e182e22283e965a4b0a729d52e9ec22240cf137598742e500ff88e1de18fd803e011362981fe187654639ba",
+            "irmin_commit": "d6ff6b7cf25df5f592945836928b9db297688629a0eb7d847d29879910b56c0435eb898f2ff651c00551530e8f500da87e8e9ad6173d36658119a440bf321a33",
             "index_hash": "6371ec4c5484a3a809145cdf4976d0fd01db240243c26717b79df6f772a7612c",
             "index_root": "740fc30b36054356da11cdb112a2724aab4da84b09f7430204a8e1b78a4dab4d",
             "txid_hi": 3
           },
           "parent_root": "517b2b9848af0bb144015784385eb7a3166aac14023506de079b33cd957effe1",
-          "parent_commit": "189c90f06aaacdb7bae3da20026046ad80e9011e767bece9959cfef33c03b7852e832544c8f4dbe6991b911d85af0ab65ea9a330ea5c2b1c1dac155cc1b67030",
+          "parent_commit": "2284e5b1c6c79c3d6187f2ed9f7ff0c5d31c0b143e7225615a338dcc332bc01697beb72e4b0fdc962db0aa8d22b42aafa24477b885480330edb40399c9e7cfaa",
           "start_txid": 2,
+          "epoch_header": "eyJpZCI6Mywic3RhdGVfcm9vdCI6IjBhYzNlOTQ2NDk4ZDk3MmE2ZThkNGY3ODcwY2M4ZjNhMzZlM2ViYWFmOGI4NDUyZDhiYzUzZGMzMGY1Y2M4YjUiLCJwcmV2X3N0YXRlX3Jvb3QiOiI1MTdiMmI5ODQ4YWYwYmIxNDQwMTU3ODQzODVlYjdhMzE2NmFhYzE0MDIzNTA2ZGUwNzliMzNjZDk1N2VmZmUxIiwicGFyZW50X2NvbW1pdCI6IjIyODRlNWIxYzZjNzljM2Q2MTg3ZjJlZDlmN2ZmMGM1ZDMxYzBiMTQzZTcyMjU2MTVhMzM4ZGNjMzMyYmMwMTY5N2JlYjcyZTRiMGZkYzk2MmRiMGFhOGQyMmI0MmFhZmEyNDQ3N2I4ODU0ODAzMzBlZGI0MDM5OWM5ZTdjZmFhIiwic3RhcnRfdHhpZCI6IjIiLCJ0eF9jb3VudCI6MiwiZmluYWxpemVkX2J5IjoiZml4dHVyZSIsImZpbmFsaXplZF9hdCI6MC4wLCJjcmVhdG9yX2FkZHIiOiIiLCJjb21taXRfcm91bmQiOjAsImZlZXNfdG90YWwiOiIwIiwiZmVlc19idXJuZWQiOiIwIiwiYmFzZV9yZXdhcmQiOiIwIiwidG90YWxfcmV3YXJkIjoiMCIsInByb3Bvc2VyX3Jld2FyZCI6IjAiLCJ2YWxpZGF0b3JfcmV3YXJkX2VhY2giOiIwIiwicmV3YXJkX3JlY2lwaWVudHMiOltdLCJyZXdhcmRfc291cmNlIjpudWxsfQ==",
           "transactions": [
             {
               "txid": 2,
@@ -1382,13 +1387,13 @@
       ]
     },
     "first_page": {
-      "format": "octra-exex-history-v1",
+      "format": "octra-exex-history-v2",
       "head_commit_id": "fixture-3",
       "head": {
         "epoch": 3,
         "state_root": "0ac3e946498d972a6e8d4f7870cc8f3a36e3ebaaf8b8452d8bc53dc30f5cc8b5",
         "ledger_root": "fefdc2f56e6a4b0911ba671f0106b6c69fb46489ef414a5faf74c5eeb75c247dcf3e653013bf1378af58f86b2e661abd88953daee4b79c7a15c6051bd529498a",
-        "irmin_commit": "0720e1cd32ad930292d805e94d55f47df1b73bdd5e182e22283e965a4b0a729d52e9ec22240cf137598742e500ff88e1de18fd803e011362981fe187654639ba",
+        "irmin_commit": "d6ff6b7cf25df5f592945836928b9db297688629a0eb7d847d29879910b56c0435eb898f2ff651c00551530e8f500da87e8e9ad6173d36658119a440bf321a33",
         "index_hash": "6371ec4c5484a3a809145cdf4976d0fd01db240243c26717b79df6f772a7612c",
         "index_root": "740fc30b36054356da11cdb112a2724aab4da84b09f7430204a8e1b78a4dab4d",
         "txid_hi": 3
@@ -1397,7 +1402,7 @@
         "epoch": 0,
         "state_root": "7246ce7f88187e722c7268c3c3dac3e7048184bcf7bce0945b4c0b5457d3d7a5",
         "ledger_root": "d7700cfcca05af77f7d65220acf1a08906804a58f03ff13014547e3bd3d070b869f2fb0fc74c5a5338c90ecafa6fda41440f31b0a718037fbf41b62db61d182c",
-        "irmin_commit": "c756515ef5bf00f98e18a0ac974f4b8d180c6abf8f229489945fdc4539f96c03957d1e8de915d534af79d94f88867c26bbfe2b1130320239b93f6323df9babc1",
+        "irmin_commit": "6de1251b94311e7577537ac559fa11d8f43d061f4790d0cb6e4c6d40e11f5b58ecad1552614580bb69994c692b1275c365f515cc596021a74a22775f6e791aac",
         "index_hash": "e152a6a0ff846e83fd959c6df398f17276a2848bc99e574a69105c82d3b1eb0f",
         "index_root": "52deea464a9d551bd01be124c974fa357a165499c261fd38b036bd523f1247b6",
         "txid_hi": 0
@@ -1408,14 +1413,15 @@
             "epoch": 1,
             "state_root": "c6d244d3577d960738f80ba6c88cc6dd62b3ff4146cb08eaa0c5dcdd8827a31f",
             "ledger_root": "bac917090b383bed95ebbd673002bb54b55a73a98dc84991a07b4c7ec197bc470ee2d8421c4e54b3a2c9af1606f7566e1239ced9cdb8e89c6a32f434d0820dd6",
-            "irmin_commit": "b87bfe54e3060c20169115700835d15252e5816c0feb50d9cd005f81d7776ece0e33ad00a98ff081cfa13f520f1123f85f9eeb4fbb99c881d9eb019f592aac30",
+            "irmin_commit": "2db54020fa1801536e8644cc0fbb257fc4b7c40a8e03b533f3401e9f28f768a516c571963cc03c13a8b8fd4a7fdb98fac27d2ec21c4770683744a79411719672",
             "index_hash": "92b337fdb6f626790bdc3f61e985ec1c1cf281e24410b04ace7bc6ed95bebdb5",
             "index_root": "c02d20c960a81b768aa78aff87631d1cf7a9dd6e864b146636a3e517cf3f84ed",
             "txid_hi": 1
           },
           "parent_root": "7246ce7f88187e722c7268c3c3dac3e7048184bcf7bce0945b4c0b5457d3d7a5",
-          "parent_commit": "c756515ef5bf00f98e18a0ac974f4b8d180c6abf8f229489945fdc4539f96c03957d1e8de915d534af79d94f88867c26bbfe2b1130320239b93f6323df9babc1",
+          "parent_commit": "6de1251b94311e7577537ac559fa11d8f43d061f4790d0cb6e4c6d40e11f5b58ecad1552614580bb69994c692b1275c365f515cc596021a74a22775f6e791aac",
           "start_txid": 1,
+          "epoch_header": "eyJpZCI6MSwic3RhdGVfcm9vdCI6ImM2ZDI0NGQzNTc3ZDk2MDczOGY4MGJhNmM4OGNjNmRkNjJiM2ZmNDE0NmNiMDhlYWEwYzVkY2RkODgyN2EzMWYiLCJwcmV2X3N0YXRlX3Jvb3QiOiI3MjQ2Y2U3Zjg4MTg3ZTcyMmM3MjY4YzNjM2RhYzNlNzA0ODE4NGJjZjdiY2UwOTQ1YjRjMGI1NDU3ZDNkN2E1IiwicGFyZW50X2NvbW1pdCI6IjZkZTEyNTFiOTQzMTFlNzU3NzUzN2FjNTU5ZmExMWQ4ZjQzZDA2MWY0NzkwZDBjYjZlNGM2ZDQwZTExZjViNThlY2FkMTU1MjYxNDU4MGJiNjk5OTRjNjkyYjEyNzVjMzY1ZjUxNWNjNTk2MDIxYTc0YTIyNzc1ZjZlNzkxYWFjIiwic3RhcnRfdHhpZCI6IjEiLCJ0eF9jb3VudCI6MSwiZmluYWxpemVkX2J5IjoiZml4dHVyZSIsImZpbmFsaXplZF9hdCI6MC4wLCJjcmVhdG9yX2FkZHIiOiIiLCJjb21taXRfcm91bmQiOjAsImZlZXNfdG90YWwiOiIwIiwiZmVlc19idXJuZWQiOiIwIiwiYmFzZV9yZXdhcmQiOiIwIiwidG90YWxfcmV3YXJkIjoiMCIsInByb3Bvc2VyX3Jld2FyZCI6IjAiLCJ2YWxpZGF0b3JfcmV3YXJkX2VhY2giOiIwIiwicmV3YXJkX3JlY2lwaWVudHMiOltdLCJyZXdhcmRfc291cmNlIjpudWxsfQ==",
           "transactions": [
             {
               "txid": 1,
@@ -1430,13 +1436,13 @@
       ]
     },
     "remaining": {
-      "format": "octra-exex-history-v1",
+      "format": "octra-exex-history-v2",
       "head_commit_id": "fixture-3",
       "head": {
         "epoch": 3,
         "state_root": "0ac3e946498d972a6e8d4f7870cc8f3a36e3ebaaf8b8452d8bc53dc30f5cc8b5",
         "ledger_root": "fefdc2f56e6a4b0911ba671f0106b6c69fb46489ef414a5faf74c5eeb75c247dcf3e653013bf1378af58f86b2e661abd88953daee4b79c7a15c6051bd529498a",
-        "irmin_commit": "0720e1cd32ad930292d805e94d55f47df1b73bdd5e182e22283e965a4b0a729d52e9ec22240cf137598742e500ff88e1de18fd803e011362981fe187654639ba",
+        "irmin_commit": "d6ff6b7cf25df5f592945836928b9db297688629a0eb7d847d29879910b56c0435eb898f2ff651c00551530e8f500da87e8e9ad6173d36658119a440bf321a33",
         "index_hash": "6371ec4c5484a3a809145cdf4976d0fd01db240243c26717b79df6f772a7612c",
         "index_root": "740fc30b36054356da11cdb112a2724aab4da84b09f7430204a8e1b78a4dab4d",
         "txid_hi": 3
@@ -1445,7 +1451,7 @@
         "epoch": 1,
         "state_root": "c6d244d3577d960738f80ba6c88cc6dd62b3ff4146cb08eaa0c5dcdd8827a31f",
         "ledger_root": "bac917090b383bed95ebbd673002bb54b55a73a98dc84991a07b4c7ec197bc470ee2d8421c4e54b3a2c9af1606f7566e1239ced9cdb8e89c6a32f434d0820dd6",
-        "irmin_commit": "b87bfe54e3060c20169115700835d15252e5816c0feb50d9cd005f81d7776ece0e33ad00a98ff081cfa13f520f1123f85f9eeb4fbb99c881d9eb019f592aac30",
+        "irmin_commit": "2db54020fa1801536e8644cc0fbb257fc4b7c40a8e03b533f3401e9f28f768a516c571963cc03c13a8b8fd4a7fdb98fac27d2ec21c4770683744a79411719672",
         "index_hash": "92b337fdb6f626790bdc3f61e985ec1c1cf281e24410b04ace7bc6ed95bebdb5",
         "index_root": "c02d20c960a81b768aa78aff87631d1cf7a9dd6e864b146636a3e517cf3f84ed",
         "txid_hi": 1
@@ -1456,14 +1462,15 @@
             "epoch": 2,
             "state_root": "517b2b9848af0bb144015784385eb7a3166aac14023506de079b33cd957effe1",
             "ledger_root": "aa5a119b2467d6c751ad866b98f643f2c275e14f09382e414cbca93ac5551e41130d266fc39c87744d11ab056b6e28da7c9ba1512792479c60e8d047f2ac69eb",
-            "irmin_commit": "189c90f06aaacdb7bae3da20026046ad80e9011e767bece9959cfef33c03b7852e832544c8f4dbe6991b911d85af0ab65ea9a330ea5c2b1c1dac155cc1b67030",
+            "irmin_commit": "2284e5b1c6c79c3d6187f2ed9f7ff0c5d31c0b143e7225615a338dcc332bc01697beb72e4b0fdc962db0aa8d22b42aafa24477b885480330edb40399c9e7cfaa",
             "index_hash": "e1f9f25444260d57fd236561dc13558433752d35fa69bcd6261be4edad595363",
             "index_root": "e8e20fab70388cec685cc498f98cf34135eea281c5c1d158910c673371b03a97",
             "txid_hi": 1
           },
           "parent_root": "c6d244d3577d960738f80ba6c88cc6dd62b3ff4146cb08eaa0c5dcdd8827a31f",
-          "parent_commit": "b87bfe54e3060c20169115700835d15252e5816c0feb50d9cd005f81d7776ece0e33ad00a98ff081cfa13f520f1123f85f9eeb4fbb99c881d9eb019f592aac30",
+          "parent_commit": "2db54020fa1801536e8644cc0fbb257fc4b7c40a8e03b533f3401e9f28f768a516c571963cc03c13a8b8fd4a7fdb98fac27d2ec21c4770683744a79411719672",
           "start_txid": 2,
+          "epoch_header": "eyJpZCI6Miwic3RhdGVfcm9vdCI6IjUxN2IyYjk4NDhhZjBiYjE0NDAxNTc4NDM4NWViN2EzMTY2YWFjMTQwMjM1MDZkZTA3OWIzM2NkOTU3ZWZmZTEiLCJwcmV2X3N0YXRlX3Jvb3QiOiJjNmQyNDRkMzU3N2Q5NjA3MzhmODBiYTZjODhjYzZkZDYyYjNmZjQxNDZjYjA4ZWFhMGM1ZGNkZDg4MjdhMzFmIiwicGFyZW50X2NvbW1pdCI6IjJkYjU0MDIwZmExODAxNTM2ZTg2NDRjYzBmYmIyNTdmYzRiN2M0MGE4ZTAzYjUzM2YzNDAxZTlmMjhmNzY4YTUxNmM1NzE5NjNjYzAzYzEzYThiOGZkNGE3ZmRiOThmYWMyN2QyZWMyMWM0NzcwNjgzNzQ0YTc5NDExNzE5NjcyIiwic3RhcnRfdHhpZCI6IjIiLCJ0eF9jb3VudCI6MCwiZmluYWxpemVkX2J5IjoiZml4dHVyZSIsImZpbmFsaXplZF9hdCI6MC4wLCJjcmVhdG9yX2FkZHIiOiIiLCJjb21taXRfcm91bmQiOjAsImZlZXNfdG90YWwiOiIwIiwiZmVlc19idXJuZWQiOiIwIiwiYmFzZV9yZXdhcmQiOiIwIiwidG90YWxfcmV3YXJkIjoiMCIsInByb3Bvc2VyX3Jld2FyZCI6IjAiLCJ2YWxpZGF0b3JfcmV3YXJkX2VhY2giOiIwIiwicmV3YXJkX3JlY2lwaWVudHMiOltdLCJyZXdhcmRfc291cmNlIjpudWxsfQ==",
           "transactions": []
         },
         {
@@ -1471,14 +1478,15 @@
             "epoch": 3,
             "state_root": "0ac3e946498d972a6e8d4f7870cc8f3a36e3ebaaf8b8452d8bc53dc30f5cc8b5",
             "ledger_root": "fefdc2f56e6a4b0911ba671f0106b6c69fb46489ef414a5faf74c5eeb75c247dcf3e653013bf1378af58f86b2e661abd88953daee4b79c7a15c6051bd529498a",
-            "irmin_commit": "0720e1cd32ad930292d805e94d55f47df1b73bdd5e182e22283e965a4b0a729d52e9ec22240cf137598742e500ff88e1de18fd803e011362981fe187654639ba",
+            "irmin_commit": "d6ff6b7cf25df5f592945836928b9db297688629a0eb7d847d29879910b56c0435eb898f2ff651c00551530e8f500da87e8e9ad6173d36658119a440bf321a33",
             "index_hash": "6371ec4c5484a3a809145cdf4976d0fd01db240243c26717b79df6f772a7612c",
             "index_root": "740fc30b36054356da11cdb112a2724aab4da84b09f7430204a8e1b78a4dab4d",
             "txid_hi": 3
           },
           "parent_root": "517b2b9848af0bb144015784385eb7a3166aac14023506de079b33cd957effe1",
-          "parent_commit": "189c90f06aaacdb7bae3da20026046ad80e9011e767bece9959cfef33c03b7852e832544c8f4dbe6991b911d85af0ab65ea9a330ea5c2b1c1dac155cc1b67030",
+          "parent_commit": "2284e5b1c6c79c3d6187f2ed9f7ff0c5d31c0b143e7225615a338dcc332bc01697beb72e4b0fdc962db0aa8d22b42aafa24477b885480330edb40399c9e7cfaa",
           "start_txid": 2,
+          "epoch_header": "eyJpZCI6Mywic3RhdGVfcm9vdCI6IjBhYzNlOTQ2NDk4ZDk3MmE2ZThkNGY3ODcwY2M4ZjNhMzZlM2ViYWFmOGI4NDUyZDhiYzUzZGMzMGY1Y2M4YjUiLCJwcmV2X3N0YXRlX3Jvb3QiOiI1MTdiMmI5ODQ4YWYwYmIxNDQwMTU3ODQzODVlYjdhMzE2NmFhYzE0MDIzNTA2ZGUwNzliMzNjZDk1N2VmZmUxIiwicGFyZW50X2NvbW1pdCI6IjIyODRlNWIxYzZjNzljM2Q2MTg3ZjJlZDlmN2ZmMGM1ZDMxYzBiMTQzZTcyMjU2MTVhMzM4ZGNjMzMyYmMwMTY5N2JlYjcyZTRiMGZkYzk2MmRiMGFhOGQyMmI0MmFhZmEyNDQ3N2I4ODU0ODAzMzBlZGI0MDM5OWM5ZTdjZmFhIiwic3RhcnRfdHhpZCI6IjIiLCJ0eF9jb3VudCI6MiwiZmluYWxpemVkX2J5IjoiZml4dHVyZSIsImZpbmFsaXplZF9hdCI6MC4wLCJjcmVhdG9yX2FkZHIiOiIiLCJjb21taXRfcm91bmQiOjAsImZlZXNfdG90YWwiOiIwIiwiZmVlc19idXJuZWQiOiIwIiwiYmFzZV9yZXdhcmQiOiIwIiwidG90YWxfcmV3YXJkIjoiMCIsInByb3Bvc2VyX3Jld2FyZCI6IjAiLCJ2YWxpZGF0b3JfcmV3YXJkX2VhY2giOiIwIiwicmV3YXJkX3JlY2lwaWVudHMiOltdLCJyZXdhcmRfc291cmNlIjpudWxsfQ==",
           "transactions": [
             {
               "txid": 2,
@@ -1501,13 +1509,13 @@
       ]
     },
     "caught_up": {
-      "format": "octra-exex-history-v1",
+      "format": "octra-exex-history-v2",
       "head_commit_id": "fixture-3",
       "head": {
         "epoch": 3,
         "state_root": "0ac3e946498d972a6e8d4f7870cc8f3a36e3ebaaf8b8452d8bc53dc30f5cc8b5",
         "ledger_root": "fefdc2f56e6a4b0911ba671f0106b6c69fb46489ef414a5faf74c5eeb75c247dcf3e653013bf1378af58f86b2e661abd88953daee4b79c7a15c6051bd529498a",
-        "irmin_commit": "0720e1cd32ad930292d805e94d55f47df1b73bdd5e182e22283e965a4b0a729d52e9ec22240cf137598742e500ff88e1de18fd803e011362981fe187654639ba",
+        "irmin_commit": "d6ff6b7cf25df5f592945836928b9db297688629a0eb7d847d29879910b56c0435eb898f2ff651c00551530e8f500da87e8e9ad6173d36658119a440bf321a33",
         "index_hash": "6371ec4c5484a3a809145cdf4976d0fd01db240243c26717b79df6f772a7612c",
         "index_root": "740fc30b36054356da11cdb112a2724aab4da84b09f7430204a8e1b78a4dab4d",
         "txid_hi": 3
@@ -1516,13 +1524,30 @@
         "epoch": 3,
         "state_root": "0ac3e946498d972a6e8d4f7870cc8f3a36e3ebaaf8b8452d8bc53dc30f5cc8b5",
         "ledger_root": "fefdc2f56e6a4b0911ba671f0106b6c69fb46489ef414a5faf74c5eeb75c247dcf3e653013bf1378af58f86b2e661abd88953daee4b79c7a15c6051bd529498a",
-        "irmin_commit": "0720e1cd32ad930292d805e94d55f47df1b73bdd5e182e22283e965a4b0a729d52e9ec22240cf137598742e500ff88e1de18fd803e011362981fe187654639ba",
+        "irmin_commit": "d6ff6b7cf25df5f592945836928b9db297688629a0eb7d847d29879910b56c0435eb898f2ff651c00551530e8f500da87e8e9ad6173d36658119a440bf321a33",
         "index_hash": "6371ec4c5484a3a809145cdf4976d0fd01db240243c26717b79df6f772a7612c",
         "index_root": "740fc30b36054356da11cdb112a2724aab4da84b09f7430204a8e1b78a4dab4d",
         "txid_hi": 3
       },
       "epochs": []
     },
+    "reward_sources": [
+      {
+        "epoch": 1,
+        "header_sha256": "102d13fdfc06a0274a6a65bf44b4f590552980ecf02604ff92360eb273c463c8",
+        "source": "AAAAB2ZpeHR1cmUBAAAAIGFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhAAAAAgAAAAdmaXh0dXJlAQAAACBhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYQAAAAExAAAACnZhbGlkYXRvckIBAAAAIGJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiAAAAATE="
+      },
+      {
+        "epoch": 2,
+        "header_sha256": "495ed258064e233e6fec88ca3efd14b34b0b5bf30fe415ae955d2e6f4deaabf1",
+        "source": "AAAAB2ZpeHR1cmUBAAAAIGFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhAAAAAgAAAAdmaXh0dXJlAQAAACBhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYQAAAAExAAAACnZhbGlkYXRvckIBAAAAIGJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiAAAAATE="
+      },
+      {
+        "epoch": 3,
+        "header_sha256": "748df1c23e77de5a77f9feb0ea50472a27ea0042d20e2242acbac642a2124625",
+        "source": "AAAAB2ZpeHR1cmUBAAAAIGFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhAAAAAgAAAAdmaXh0dXJlAQAAACBhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYQAAAAExAAAACnZhbGlkYXRvckIBAAAAIGJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiAAAAATE="
+      }
+    ],
     "refusals": {
       "before_head": "Failure(\"native recovery must complete before history export\")",
       "future": "Failure(\"history anchor exceeds HEAD\")",

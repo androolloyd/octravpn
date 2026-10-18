@@ -10,6 +10,7 @@ use octra_node_protocol::{
     consensus::{catchup, hash, CatchupEpochRecord},
     native_json::Document,
     state_sync::{http, range_part},
+    transaction::Transaction,
 };
 use octra_node_runtime::{canonical::Head, validator_history::CanonicalValidators};
 use reqwest::Url;
@@ -185,6 +186,66 @@ impl Client {
         );
         Ok(records)
     }
+    // Native response_payload_error rejects malformed payload/continuity for
+    // the whole response before selecting a QC-valid prefix.
+    fn payload(records: &[CatchupEpochRecord], from: i64, parent: &Head) -> Result<()> {
+        catchup::verify_chain_continuity(records, from, &parent.cursor.state_root.0)?;
+        for record in records {
+            let hashes = record
+                .txs_json
+                .iter()
+                .map(|raw| {
+                    let document = Document::parse(raw)?;
+                    Ok(Transaction::from_document(&document)?.hash()?.to_vec())
+                })
+                .collect::<Result<Vec<_>>>()?;
+            catchup::verify_record_hashes(record, &hashes)?;
+            catchup::verify_record_receipts(record)?;
+        }
+        Ok(())
+    }
+
+    // Only certificate/record finality belongs to native check_qcs. Reward,
+    // execution-rule, execution and publication checks stay in import_record;
+    // their errors must never be interpreted as a harmless invalid-QC suffix.
+    async fn record_qc<A: Host>(
+        node: &Node<A>,
+        parent: &Head,
+        record: &CatchupEpochRecord,
+    ) -> Result<bool> {
+        if u64::try_from(record.epoch_id).ok() != parent.cursor.epoch.0.checked_add(1)
+            || record.prev_state_root != parent.cursor.state_root.0
+        {
+            return Ok(false);
+        }
+        let relief = node.store.reader().relief_after(parent).await?;
+        let Ok(authority) = node
+            .host
+            .resolve(parent, record.epoch_id as u64, relief)
+            .await
+        else {
+            // Native check_qcs truncates when locally selected membership is
+            // unavailable; untrusted advertised sets never supply the gap.
+            return Ok(false);
+        };
+        let next_txid = parent
+            .txid_hi
+            .checked_add(1)
+            .and_then(|first| {
+                i64::try_from(record.tx_hashes.len())
+                    .ok()
+                    .and_then(|count| first.checked_add(count))
+            })
+            .context("catch-up transaction index exhausted")?;
+        Ok(catchup::verify_record_finality(
+            node.store.chain().chain_id.as_bytes(),
+            &hash::validator_set_hash(&authority.validators)?,
+            next_txid,
+            record,
+        )
+        .is_ok())
+    }
+
     /// A far head is usable only when its QC is signed by independently known
     /// canonical membership. A consecutive range beside the retained head is
     /// an availability target only; every record is authenticated on import.
@@ -281,8 +342,10 @@ impl Client {
         }
         Ok(best)
     }
-    /// Recover a previously proved target with native multi-source range
-    /// fallback. The caller must explicitly resume serving after recovery.
+    /// Recover a previously proved target with native multi-source HTTP
+    /// fallback. Each response may advance through its bounded sixteen-record
+    /// QC-valid prefix, beyond the target (a minimum, never a suffix obligation).
+    /// The caller must explicitly resume serving after the complete prefix.
     pub async fn catch_up<A: Host>(
         &self,
         node: &Node<A>,
@@ -311,16 +374,19 @@ impl Client {
                 });
             }
             let from = (head.cursor.epoch.0 + 1) as i64;
-            let max = (target - head.cursor.epoch.0).min(catchup::RANGE_EPOCHS as u64) as i64;
+            // Native HTTP fallback requests a complete bounded chunk even
+            // when the independently proved target is only the next epoch.
+            let max = catchup::RANGE_EPOCHS;
             let mut selected = None;
             for (index, source) in self.sources.iter().enumerate() {
                 let source_deadline = Self::source_deadline(deadline, self.sources.len() - index);
                 let candidate = async {
                     let records = self.range(source, from, max, source_deadline).await?;
-                    catchup::verify_chain_continuity(&records, from, &head.cursor.state_root.0)?;
-                    node.publisher
-                        .verify_record(&head, &records[0], &executor.graph())
-                        .await?;
+                    Self::payload(&records, from, &head)?;
+                    ensure!(
+                        Self::record_qc(node, &head, &records[0]).await?,
+                        "join range has no QC-valid prefix"
+                    );
                     Ok::<_, anyhow::Error>(records)
                 }
                 .await;
@@ -347,8 +413,26 @@ impl Client {
                         reached: false,
                     });
                 }
-                // Every subsequent epoch resolves authority again against its
-                // actual committed parent, including validator transitions.
+                // Native check_qcs accepts only the contiguous QC-valid
+                // prefix. Resolve against the actual committed parent, so an
+                // earlier epoch's validator transition is not guessed.
+                let parent = node.head().await?;
+                if !Self::record_qc(node, &parent, &record).await? {
+                    return Ok(crate::sync::Progress {
+                        reached: parent.cursor.epoch.0 >= target,
+                        head: parent,
+                    });
+                }
+                // A trusted authority read can itself exhaust the caller's
+                // absolute budget. Do not start another execution afterward.
+                if Instant::now() >= deadline {
+                    return Ok(crate::sync::Progress {
+                        head: parent,
+                        reached: false,
+                    });
+                }
+                // Full reward/rules/execution/publication failures stay hard.
+                // They do not become QC-prefix truncation or restore services.
                 node.import_record(&record, executor).await?;
             }
         }

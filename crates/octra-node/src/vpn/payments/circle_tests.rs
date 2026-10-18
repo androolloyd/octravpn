@@ -231,14 +231,14 @@ impl Circle {
             "failed value must roll back"
         );
     }
-    fn view(&self, method: &str, params: Value) -> Value {
+    fn view(&self, method: &str, params: &Value) -> Value {
         let snapshot = self.host.state.snapshot();
         let profile = Profile {
             proof_exec: RuleMode::Active,
             math: true,
             ..Profile::prior(100)
         };
-        let params = Document::parse(&serde_json::to_vec(&params).unwrap()).unwrap();
+        let params = Document::parse(&serde_json::to_vec(params).unwrap()).unwrap();
         let result = Query::new(&snapshot, &profile)
             .unwrap()
             .with_runtime(&self.host.runtime)
@@ -357,10 +357,10 @@ fn parent_owned_spawn_is_uninitialized_and_permissionless_init_has_only_pinned_t
     let root = c.host.state.root().unwrap();
     c.call(13, "initialize", json!([]), 0);
     assert_eq!(c.host.state.root().unwrap(), root);
-    assert_eq!(c.view("get_domain", json!([])), host::DOMAIN);
-    assert_eq!(c.view("get_custody_cap", json!([])), CAP.to_string());
+    assert_eq!(c.view("get_domain", &json!([])), host::DOMAIN);
+    assert_eq!(c.view("get_custody_cap", &json!([])), CAP.to_string());
     assert_eq!(
-        c.view("get_min_operator_stake", json!([])),
+        c.view("get_min_operator_stake", &json!([])),
         host::STAKE.to_string()
     );
     // A signed wallet cannot use the parent Circle address as its own identity.
@@ -585,10 +585,14 @@ fn plain_transfer_does_not_create_channel_credit_or_purchase_authority() {
 }
 
 #[test]
-#[ignore = "requires OCTRA_CIRCLE_PREPAID_ORACLE from the unchanged-native generator"]
 fn native_circle_artifact_is_the_exact_local_specialization() {
-    let path =
-        std::env::var("OCTRA_CIRCLE_PREPAID_ORACLE").expect("native Circle artifact required");
+    let path = std::env::var_os("OCTRA_CIRCLE_PREPAID_ORACLE").map_or_else(
+        || {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../octra-node-runtime/tests/fixtures/circle-prepaid.json")
+        },
+        std::path::PathBuf::from,
+    );
     let fixture: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     let terms = &fixture["build"]["terms"];
     let actual = build::compile(

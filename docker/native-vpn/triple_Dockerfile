@@ -1,0 +1,5 @@
+ARG NODE_IMAGE
+FROM ${NODE_IMAGE}
+COPY triple_fixture.py triple_client.py multi_link.py multi_target.py stock_operator.py json_snapshot.py /usr/local/bin/
+COPY multi_fixture.py /usr/local/bin/base_multi_fixture.py
+ENTRYPOINT []

@@ -52,6 +52,10 @@ pub enum Application {
     Circle,
 }
 impl Application {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "Serde's skip_serializing_if callback takes a reference"
+    )]
     fn is_program(&self) -> bool {
         *self == Self::Program
     }

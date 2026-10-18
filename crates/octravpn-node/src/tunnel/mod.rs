@@ -53,6 +53,8 @@ use crate::onion::{Direction, OnionRouter};
 pub(crate) mod backend;
 mod binding;
 mod egress;
+mod stock;
+mod stock_peer;
 use binding::Binding;
 pub(crate) mod ip;
 
@@ -201,6 +203,7 @@ pub(crate) struct Server {
     /// construction; defaults to `default_shard_count()`. See
     /// Perf-Data-Plane #2 in the module docstring.
     shard_count: usize,
+    stock_peers: Arc<stock_peer::Peers>,
     /// Whitelist of permitted peer pubkeys, populated by the control
     /// plane when a client announces a session.
     allowlist: Arc<octravpn_core::bounded::BoundedMap<[u8; 32], AllowedClient>>,
@@ -273,6 +276,7 @@ impl Server {
                 PEER_IDLE_TTL,
             )),
             shard_count: default_shard_count(),
+            stock_peers: Arc::default(),
             allowlist,
             metrics: None,
             shield: Arc::new(Mutex::new(shield)),
@@ -348,6 +352,26 @@ impl Server {
                     continue;
                 }
             };
+            if buf[..n].starts_with(crate::stock::relay::MAGIC) {
+                if let Some(exit) = self.payments.as_ref().and_then(|p| p.stock_exit()) {
+                    if let Some((registration, reply)) = exit.disco_reply(&buf[..n], src) {
+                        let _ = exit.current_registration(&registration, &mut || {
+                            sock.try_send_to(&reply, src)?;
+                            Ok(())
+                        });
+                    }
+                }
+                continue;
+            }
+            if let Some(expected) = self.payments.as_ref().and_then(|p| p.stock_source(&src)) {
+                if self
+                    .peers
+                    .get(&src)
+                    .is_some_and(|peer| peer.client_pubkey != expected)
+                {
+                    self.peers.remove(&src);
+                }
+            }
             let stripped_len = {
                 let mut consumed = false;
                 self.shield.lock().wrap_recv(&mut buf, |_out| {
@@ -396,6 +420,21 @@ impl Server {
                     .map_err(std::io::Error::other)?;
                 return Ok(sent);
             }
+            if let Some(portal) = self
+                .peers
+                .get(&dst)
+                .and_then(|peer| self.binding(&peer.client_pubkey))
+                .and_then(|b| b.portal().cloned())
+            {
+                let mut written = 0;
+                portal
+                    .current(&mut || {
+                        written = self.outbound_sock().try_send_to(bytes, dst)?;
+                        Ok(())
+                    })
+                    .map_err(std::io::Error::other)?;
+                return Ok(written);
+            }
             // Only the rate limiter cookie can precede authenticated admission.
             if bytes.get(..4) == Some([3, 0, 0, 0].as_slice()) {
                 return self.outbound_sock().try_send_to(bytes, dst);
@@ -407,12 +446,25 @@ impl Server {
 
     async fn handle_packet(&self, packet: &[u8], src: SocketAddr, work: &mut [u8]) {
         self.handshake_limiter.reset_count();
+        if self.handle_stock_packet(packet, src, work).await {
+            return;
+        }
         let Some(peer) = self.peers.get(&src) else {
             self.try_admit_peer(packet, src, work).await;
             return;
         };
 
         let binding = self.binding(&peer.client_pubkey);
+        if binding
+            .as_ref()
+            .is_some_and(|binding| binding.stock().is_some())
+        {
+            // A key switching from framed to stock cannot retain a second
+            // endpoint-sharded Noise/replay state for the stock registration.
+            self.peers.remove(&src);
+            self.try_admit_peer(packet, src, work).await;
+            return;
+        }
         if !binding.as_ref().is_some_and(Binding::live) {
             if binding
                 .as_ref()
@@ -555,7 +607,19 @@ impl Server {
             return;
         };
         let pk = identity.peer_static_public;
-        if !self.binding(&pk).is_some_and(|binding| binding.live()) {
+        if self
+            .payments
+            .as_ref()
+            .and_then(|p| p.stock_source(&src))
+            .is_some_and(|expected| expected != pk)
+        {
+            return;
+        }
+        let Some(binding) = self.binding(&pk).filter(Binding::live) else {
+            return;
+        };
+        if let Some(registration) = binding.stock() {
+            self.admit_stock(registration, packet, src, work).await;
             return;
         }
         let mut tun = Tunn::new(
@@ -601,6 +665,15 @@ impl Server {
     /// sender always supplies an onion; only an explicitly selected legacy
     /// direct policy may bypass peeling.
     async fn dispatch_frame(&self, packet: &[u8], src: SocketAddr) {
+        let binding = self
+            .peers
+            .get(&src)
+            .and_then(|peer| self.binding(&peer.client_pubkey));
+        if binding.is_some_and(|b| b.stock().is_some()) {
+            // Stock data must authenticate through its registration-bound
+            // identity/index table, never a retained framed-session shard.
+            return;
+        }
         if let Ok(layer) = octravpn_core::tunnel_frame::decode(packet) {
             self.dispatch_inner(layer, src).await;
         }

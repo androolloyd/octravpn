@@ -5,13 +5,22 @@ use std::sync::Arc;
 pub(super) struct GuardedRegistration {
     admission: Admission,
     members: Option<Arc<dyn RegistrationGate>>,
+    reserved: Option<[u8; 32]>,
 }
 
 impl GuardedRegistration {
     pub(super) fn new(admission: Admission, members: Option<Arc<dyn RegistrationGate>>) -> Self {
-        Self { admission, members }
+        Self {
+            admission,
+            members,
+            reserved: None,
+        }
     }
 
+    pub(super) fn reserved(mut self, key: Option<[u8; 32]>) -> Self {
+        self.reserved = key;
+        self
+    }
     fn check(&self) -> Result<(), String> {
         if (self.admission)() {
             Ok(())
@@ -25,6 +34,12 @@ impl GuardedRegistration {
 impl RegistrationGate for GuardedRegistration {
     async fn admit(&self, request: RegistrationAdmission<'_>) -> Result<(), String> {
         self.check()?;
+        if self
+            .reserved
+            .is_some_and(|key| hex::encode(key) == request.node_key_hex)
+        {
+            return Err("operator virtual key cannot register as a client".into());
+        }
         if let Some(members) = &self.members {
             members.admit(request).await?;
         }

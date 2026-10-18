@@ -96,3 +96,82 @@ local `octra-node compile-legacy --source ... --loops --point-ops` build and
 unchanged binary factory admission. Its v1 source certificate pins the emitted
 OCTB but grants no typed ABI/storage authority. No source is sent to a public
 compiler, and no compiler, VM or consensus admission rule is changed.
+
+The stock-client integration gate is a separate, fresh qualification after the
+native image has been built from the frozen context. Its source is prepared;
+execution results must be retained before describing this path as qualified:
+
+```sh
+python3 docker/native-vpn/stock_run.py \
+  --node-image <fresh-native-vpn-image> --context <frozen-context> \
+  --headscale-commit <exact-root-lock-commit> --application program \
+  --out <fresh-program-evidence-directory>
+python3 docker/native-vpn/stock_run.py \
+  --node-image <same-fresh-native-vpn-image> --context <same-frozen-context> \
+  --headscale-commit <same-exact-root-lock-commit> --application circle \
+  --out <fresh-circle-evidence-directory>
+```
+
+Each invocation verifies the image's complete source manifest against the frozen
+`octra`, `octra-foundry` and `headscale-rs` context. It copies the digest-pinned
+Tailscale image and requires version 1.104.1. A fresh internal Docker network
+contains the actual stock kernel client and four Rust validators; a third
+network-disabled container supplies the independent application target kernel.
+The existing bounded Unix packet link carries only the fixture's public target.
+An exact container-only UDP DNAT rule and namespace `route_localnet` connect
+the internal underlay to the unchanged devnet's loopback listener, preserving
+the real peer source and native WireGuard/Disco authentication. No cryptography
+or admission is terminated by this fixture forwarding rule.
+Neither the host network nor the host VPN is used.
+
+The gate requires genuine canonical prepaid purchases, a fixed Circle asset
+portal over trusted TLS/MagicDNS, separately paid general Circle HTTPS, direct
+and forced native TLS DERP carriage, TCP/UDP/ICMP, restart, registration rotation,
+class exhaustion, instant channel revocation and matching claims in all four
+ExEx archives. The payment controller uses only the payer key and public stock
+node key; stock WireGuard secrets stay inside tailscaled. Generated TLS keys,
+preauth values and the private command mailbox are under `private/`; publish
+only the public evidence and redacted logs. Each application mode uses a fresh
+chain and genuinely executes its own Program or Circle custody application.
+This gate does not establish public-network availability, Web delivery proofs,
+non-delivery slashing, or a mainnet deployment.
+
+The nested route gate uses two actual native operators in different network
+namespaces, a separate kernel client and a separate kernel application target.
+Run both independently selected exhaustion/revocation cases with fresh outputs:
+
+```sh
+python3 docker/native-vpn/multi_run.py \
+  --node-image <fresh-native-vpn-image> --context <frozen-context> \
+  --headscale-commit <exact-root-lock-commit> --exhaust-hop 0 \
+  --out <fresh-entry-hop-evidence-directory>
+python3 docker/native-vpn/multi_run.py \
+  --node-image <same-fresh-native-vpn-image> --context <same-frozen-context> \
+  --headscale-commit <same-exact-root-lock-commit> --exhaust-hop 1 \
+  --out <fresh-exit-hop-evidence-directory>
+```
+
+This gate genuinely stops and relocates validator1's existing canonical store,
+key, signing history and ExEx archive; it verifies their complete stopped-file
+hashes before starting the second namespace. Bounded opaque TCP links preserve
+the native isolated launcher's loopback endpoints while the native peers still
+authenticate their own frames, roots, bundles and finality. Exact namespace UDP
+DNAT rules expose the two public fixture aliases to their native loopback
+WireGuard listeners. The entry forwards only encrypted UDP to the next operator;
+the exit carries the target web traffic. Each has its own operator key, payer
+key, quote, plan, journal, canonical purchase and durable packet meter.
+
+The entry UDP IP and accepted control IPs are explicit physical management
+exceptions. In this isolated fixture the accepted loopback HTTP controls use
+opaque TCP links through the entry IP to the two actual native control services.
+These are IP exceptions, not a per-socket firewall or public TLS qualification.
+The gate checks the all-hop purchase barrier, both directions of kernel traffic,
+the conservative1075-byte final profile and TCP MSS, oversized profile refusal,
+operator/client restarts, specific downstream blackholes after carrier loss,
+foreign priority1 rule refusal, each hop's finite exhaustion and canonical
+withdrawal, and identical claims in four ExEx archives. Crash resume deliberately
+verifies and removes only the exact fixture-owned routes after the writer and
+TUNs have stopped; it never flushes a routing table or silently repairs host
+policy. Both invocations are two-hop Program custody qualifications; three-hop
+and Circle custody paths require their own gates. The harness source alone is
+not a passing result.

@@ -1,0 +1,2075 @@
+{
+  "schema": "octra_public_checkpoint_draft_v8",
+  "at": "2026-10-18T03:00:19.353894+00:00",
+  "draft_only": false,
+  "published": true,
+  "publication_ready": true,
+  "qualification_observed": true,
+  "candidate_state": "PASS_COMPOSITE",
+  "public_deployment_qualified": false,
+  "mainnet_qualified": false,
+  "candidate_source_sha256": "1d7406970ed0fc75442355237bce02481b051c7c22675c5bc603c9f595e3e41f",
+  "implementation_source_sha256": "7ef76d9b4d0e3823a7d84216b2966c9c732719ec440b929f5e65cc02c6fd4b8f",
+  "published_source": {
+    "sources_sha256": "0664277bb2c6ba10d870172e823762d3b92ea4b47ba10e2eb1b0eb52c471903e",
+    "manifest": {
+      "path": "out/octra-parity-final-20261017/triple-tested-publication-v10/published-sources.json",
+      "sha256": "3020c0d1215147e7048ebc06e7f6da5a511625fdab7e5c933a0252c7dd2aa4c2"
+    },
+    "qualification_basis": "The exact five identical tested harness additions; implementation gates remain bound to their original source."
+  },
+  "source_manifest": {
+    "path": "out/octra-parity-final-20261017/metadata-fixture-allfeatures-v13-sources.json",
+    "sha256": "5ff290330aed7a5a6cde1d685f693aa359d3c99c74298e72cde08f23c359f432"
+  },
+  "source_report": {
+    "path": "out/octra-parity-final-20261017/metadata-fixture-allfeatures-v13.json",
+    "sha256": "5e5fc78317331e53de9dad614d1820c5b77dbff9656661f8fd66421776be4c81"
+  },
+  "git": {
+    "head": "7b468ddf0e73db350a842c164856b16f3363b253",
+    "clean": false,
+    "meaning": "Read-only repository metadata; qualification binds the separate candidate source snapshot."
+  },
+  "upstream": {
+    "commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "mapped_files": 1158,
+    "source_map": {
+      "path": "docs/rust-node/source-map.json",
+      "sha256": "6440fdf5895e791ce99ff1904aea396fc88c7e12645846a32702286aa9c17efa"
+    },
+    "scope": "Exact adopted-source binding; mapped files and finite cases are not a full-parity theorem."
+  },
+  "dependencies": {
+    "cargo_lock_sha256": "c9ed3d28d884256da2799b245c461100c42df67fe26f67c1d84e78ee5a9fe213",
+    "git_pins": [
+      {
+        "repository": "https://github.com/androolloyd/headscale-rs",
+        "revision": "570fa5a60c8ed792b643a301b5e91d3b668ba614",
+        "packages": [
+          {
+            "name": "headscale-api",
+            "version": "0.1.0"
+          },
+          {
+            "name": "headscale-api-acl",
+            "version": "0.1.0"
+          },
+          {
+            "name": "headscale-cli",
+            "version": "0.1.0"
+          },
+          {
+            "name": "headscale-core",
+            "version": "0.1.0"
+          },
+          {
+            "name": "headscale-db",
+            "version": "0.1.0"
+          },
+          {
+            "name": "headscale-identity",
+            "version": "0.1.0"
+          },
+          {
+            "name": "headscale-payments",
+            "version": "0.1.0"
+          },
+          {
+            "name": "headscale-resources",
+            "version": "0.1.0"
+          }
+        ],
+        "requested_revision": "570fa5a60c8ed792b643a301b5e91d3b668ba614"
+      }
+    ]
+  },
+  "normal_release": {
+    "manifest": {
+      "path": "out/octra-parity-final-20261017/normal-release-fixed-v12/manifest.json",
+      "sha256": "0dfb6467b90bb7df279bcf6d77b09997c830ca734e7d4425cc00a11eef0ae768"
+    },
+    "binary": {
+      "path": "out/octra-parity-final-20261017/normal-release-fixed-v12/octra-node",
+      "sha256": "a4d46e4679efc1c9294d1f8e67d7c0b5378eb5d2f82bce801b9ae7f203a55e8e"
+    },
+    "source_sha256": "7ef76d9b4d0e3823a7d84216b2966c9c732719ec440b929f5e65cc02c6fd4b8f",
+    "gate_status": "pass",
+    "test_helpers": false
+  },
+  "tools": {
+    "rust_toolchain": {
+      "channel": "1.96.0",
+      "components": [
+        "rustfmt",
+        "clippy"
+      ]
+    },
+    "rust_toolchain_sha256": "abd8063388c533b3e6b91666cd66d6229e61d13fc1139d20006492c2980141f5",
+    "generator_python": "3.14.7",
+    "lean_toolchain": "leanprover/lean4:v4.10.0",
+    "lean_toolchain_sha256": "f3ea78fdd417d39483583b721709727c225eeea0c0e9d29283de43f577411095",
+    "linux_rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)\nbinary: rustc\ncommit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96\ncommit-date: 2026-05-25\nhost: aarch64-unknown-linux-gnu\nrelease: 1.96.0\nLLVM version: 22.1.2\n",
+    "native_builder_image": "sha256:e61194220c65f9f0b8034a4816fb15d47dfe7dda8ece1087d9850b6d838bae95"
+  },
+  "gate_counts": {
+    "pass": 35
+  },
+  "gates": [
+    {
+      "name": "current-exact-source-and-metadata",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/metadata-fixture-allfeatures-v13.json",
+          "sha256": "5e5fc78317331e53de9dad614d1820c5b77dbff9656661f8fd66421776be4c81"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/metadata-fixture-allfeatures-v13-data.json",
+          "sha256": "0a31c59358fdf1197c106b8d04d0b5ed7ddaa44a9fce517ffc92065c15101509"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/fixture-component-applicability-v13.json",
+          "sha256": "5a14b0f04888cccfb7a87bf6f5aae294729df133c31296a73c6f5c9d4ee03d11"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/fixed-source-changes-v12.json",
+          "sha256": "5cfe02fa4a4a08b5c518fcee5bb300e666bc2b76e08fdc6c8db2b87852953d8c"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/circle-intake-rpc-fixed-v12.json",
+          "sha256": "0f2a204ce2cf14b69b761bfa479de222ac7826868749d8858c1c2168dec18de3"
+        }
+      ]
+    },
+    {
+      "name": "dependency-closure-package-test-matrix",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/dependency-matrix-fixed-v12-corrected-v1/matrix.json",
+          "sha256": "f3e2b8ada50c365e6dcb55b21168899245487e81a221ed97e5b22214eca05be9"
+        }
+      ],
+      "fresh_runtime_acceptance_is_separate": true
+    },
+    {
+      "name": "strict-fixed-v12",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/strict-fixed-v12.json",
+          "sha256": "ab8864f81212c0f6ae22cb781358a98c08c4b04c0fc9d799cafe0ae919b18fd6"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "normal-cli-build-fixed-v12",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/normal-cli-build-fixed-v12.json",
+          "sha256": "481d592e69c6d9c3b9066b3ca12c4fa23d03a18e7f996a49dc27753c64b32527"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "normal-service-fixed-v12",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/normal-service-fixed-v12.json",
+          "sha256": "7ef727288e000a4a21d083c869efcf7ebd70fef011da3803748b68a5f9ab124b"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "doctests-fixed-v12",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/doctests-fixed-v12.json",
+          "sha256": "78a0279a8a2aac6b3035f1167409c115d799a6bdf8bc2c48b52993643194f5df"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "format-fixed-v12",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/format-fixed-v12.json",
+          "sha256": "7d7d6e3d6b576674c3f483126a34fb81c54297fcbb0740db0bf07ab137366ae3"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "native-vendored-fixed-v12",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/native-vendored-fixed-v12.json",
+          "sha256": "36e739fa4ee392ff33d4a7514e94d49335cee910d6dc6419d0f452b605afe8fe"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "diff-check-fixed-v12",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/diff-check-fixed-v12.json",
+          "sha256": "7c88ef66a08009efcb718ed6b5f0ec6fb74a95366bdd63578b29e938630fe914"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "retained-normal-production-artifact",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/normal-release-fixed-v12/manifest.json",
+          "sha256": "0dfb6467b90bb7df279bcf6d77b09997c830ca734e7d4425cc00a11eef0ae768"
+        }
+      ]
+    },
+    {
+      "name": "dependency-audit-recorded-snapshot",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/dependency-audit-v1.json",
+          "sha256": "b2e7283bb43b2dbab41fed23f32d248709366daa5e17f10ccf12d356ec3a3671"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "dependency-policy-unchanged-witness",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/dependency-policy-fixed-v2.json",
+          "sha256": "240aed20460dbcec2763abc5789e71d8d239a63535a60a1df26c24abcf0b1620"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/dependency-policy-fixed-v2-witness.json",
+          "sha256": "f61b4e9b284606420d12d1c88bfb55099115c6deb928a5ab431e4d9c94621c20"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "headscale-component-v1",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/headscale-component-v1.json",
+          "sha256": "dc37c0a3ac51ea076468363aa1b24b1e3cb4f826ee7f512f3e2af30b2032f091"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "headscale-derp-v1",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/headscale-derp-v1.json",
+          "sha256": "eb7e130ecd8f4d9d85c22a49040e6bef39ecc71e82d656df33b679af3ca68aa8"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "headscale-strict-v1",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/headscale-strict-v1.json",
+          "sha256": "3dcb6d8ace283aaa7ac138b5b15016f73db1783e668872d215a65bcdfdfa027c"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "headscale-fmt-v2",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/headscale-fmt-v2.json",
+          "sha256": "7dd358e91807174a03e05a238618fc98df0dbb0240c449ae81897ea1f01e5171"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "headscale-ff-push-v1",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/headscale-ff-push-v1.json",
+          "sha256": "2ec8e34509a2d63be9b968e3c2a563865d6582cb8cb5b82fa5119794d4873932"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "lean-model39-unchanged-scope",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/auxiliary-v1.json",
+          "sha256": "09d7ea018cf007f6ee473d64a0e1e2dbae2954410ffcbf015972f42c6f31cb4c"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/lean-v1.json",
+          "sha256": "4763e466004c0f2cc13604771a798340a9b2d29cae72b4f4d9c3fef3074fae4c"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "yaml-unchanged-syntax-inputs",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/auxiliary-v1.json",
+          "sha256": "09d7ea018cf007f6ee473d64a0e1e2dbae2954410ffcbf015972f42c6f31cb4c"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "hfhe49-legacy-cpp43plus3-unchanged-closure",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/hfhe-sidecar-v1/finalization.json",
+          "sha256": "0e149e9b225b2d8738338915445bca9e791e3c59915e4070acb66b59074f3b68"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/dependency-matrix-fixed-v12-corrected-v1/matrix.json",
+          "sha256": "f3e2b8ada50c365e6dcb55b21168899245487e81a221ed97e5b22214eca05be9"
+        }
+      ],
+      "new_execution": false
+    },
+    {
+      "name": "native1158-unchanged-source-binding",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "docs/rust-node/source-map.json",
+          "sha256": "6440fdf5895e791ce99ff1904aea396fc88c7e12645846a32702286aa9c17efa"
+        }
+      ]
+    },
+    {
+      "name": "native-registry9-with-fresh-default-recheck",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/registry-native-v1.json",
+          "sha256": "ed95dafeb10ac2d1226da5f6e0ec12cc0be1ff512638f7d065a7ef4c0d664483"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/registry-native-final.json",
+          "sha256": "f2d2b15cb5363c9256aaf174de5617a2ac65a2ecbbbced97ae62fcf08a49e75c"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/circle-engine-final.json",
+          "sha256": "07dc311858bad6f836336114e73fbf0d2a95a5c290189f7054099e1c7c2fe7f4"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/registry-adapter-inputs-before.json",
+          "sha256": "bc2e2106ed5898b55d854ca83234542ffd0e6303ea770613efbe4436a506b236"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/registry-adapter-inputs-after.json",
+          "sha256": "d39eed2936de4f0c22ff91f0363bb75ef0cf304b57fcaaf5247d29db0da3ca00"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/circle-parity-fixed-v12.json",
+          "sha256": "6680e94c7a97d30efad8f0ef94c376e409fcb7dd24c18dd7cf07496c4a4cee07"
+        }
+      ]
+    },
+    {
+      "name": "retained-native-peer",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/native-peer/result.json",
+          "sha256": "30b184605452a7ce8bb5f2773e44ea491f51d451bd6ec9c78a6b1f6fd8be1138"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/native-peer/provenance.json",
+          "sha256": "6a208c64fc25830a82c691addd4440732f49c7b954da4951e82774626060df8a"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/normal-release-fixed-v12/manifest.json",
+          "sha256": "0dfb6467b90bb7df279bcf6d77b09997c830ca734e7d4425cc00a11eef0ae768"
+        }
+      ],
+      "fresh_execution": false
+    },
+    {
+      "name": "retained-browser21plus8",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/browser/result.json",
+          "sha256": "e1a523dfaa3ef8cd4b180669592a404c34b3ae4fd305b7d8709517d21daf313d"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/browser/preparation.json",
+          "sha256": "a7920251683ec32fd0a11ab9ea77d4c78437d0e5256ccf6361b6c3988f018efe"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/normal-release-fixed-v12/manifest.json",
+          "sha256": "0dfb6467b90bb7df279bcf6d77b09997c830ca734e7d4425cc00a11eef0ae768"
+        }
+      ],
+      "fresh_execution": false
+    },
+    {
+      "name": "retained-physical-native40",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/result.json",
+          "sha256": "bac703086f2f02f77dafebdb157e70f40014cb88cab5243dec09fa33cce288c1"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/preparation.json",
+          "sha256": "0898545dfa246395ca8610159198d78798d45a1a0318d34b656842f1193a625f"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/cleanup-audit.json",
+          "sha256": "7d5fa8d82ed795737a810275d4e8533581828f03824f48b43076f269b8278b97"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/commands.json",
+          "sha256": "8bb8844eaf995917ae442a3c779176b8e34bf873a34902da318d3c6e084bd0f2"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/normal-release-fixed-v12/manifest.json",
+          "sha256": "0dfb6467b90bb7df279bcf6d77b09997c830ca734e7d4425cc00a11eef0ae768"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36227.cid",
+          "sha256": "f3849d086a50e92227b86a5ccd56155a81da27c0b1b760fd99fd959b7b8b85a3"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36258.cid",
+          "sha256": "23a04a1fddf76fabc96d824d5c0bcc404faa6a28e3e1a84db675dc6202daeb08"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36267.cid",
+          "sha256": "d7ef3610a1498181310b7d243e786a72bc567946d583dfa1b8a3311902bdaa7d"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36274.cid",
+          "sha256": "e04a4dc2200a33ad153bf75312aba06cccc309f15239db38ba5b77c5565895aa"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36292.cid",
+          "sha256": "44cbd786dbdb8a56e64f907fc82a648ffd2e7922803daf49d47937fd95809ecc"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36308.cid",
+          "sha256": "ae927c430d74bac836566488d76b1e9dfea9d1172ac84d80f951f537b6438dd7"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36329.cid",
+          "sha256": "e75d01a7620a19627965ebb346a6cdfc8d6906425e80363ff90a6821898838d4"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36354.cid",
+          "sha256": "f80d0ee53661d5443dca45c45b9284dad34f14d0a59bed5b452b0cb68e2a8cfd"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36615.cid",
+          "sha256": "2d88b496883a6b9d8b732d6667fa9b699480539a20a309f21c4f47447231f931"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36633.cid",
+          "sha256": "756f336dedf788656f4aa1cf08e2875945b4c88730cc507ef88946cbdefb79d5"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36674.cid",
+          "sha256": "de54f16113b0c1759ccf3e0060476939c697490a2df4f8ee0ea696ca8f0aa893"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36761.cid",
+          "sha256": "d271673ca51c1500079f07297af97b53fd12dfc58db56fa5de7f4c15188fc32d"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36799.cid",
+          "sha256": "dc774f96571a0fbb571192a6e48f228803b089a794f41ee7c6d17ba3ccc00e98"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36847.cid",
+          "sha256": "2e996901166fb176db2b7c1dc45b1d28c507cdffd98f58b80400828a510c0460"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36865.cid",
+          "sha256": "9bb7af4635fdcd9853c790f523d43fec8cccd2d1c751ae04b59c1e5cfe4a17b9"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36906.cid",
+          "sha256": "7161b29b988bd7b03c16dfff587aa524ef3598b11b805c0dd78f5727a027a25b"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36916.cid",
+          "sha256": "0460676c331a1457bfddce3799c3d9f84f066e0694812d1e315b077ca21ef719"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36924.cid",
+          "sha256": "b2a06e5b6026da30a54f5810afaf1ce7bc50ebe1569d2201424fd213fc986243"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36957.cid",
+          "sha256": "1607489d2a5c67f11d5e6d5415224ac27e37c4c992df2cae7139dafe8fe0d73e"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36971.cid",
+          "sha256": "6d57cf71ab8f7fe4ba930fd1d09ff5657aa608cc0000c72f8e4562d62066452d"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36989.cid",
+          "sha256": "5c8d4f39c50cceddab40a5000c5c1500c216f5782ce863b144e6674c2415d98d"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37052.cid",
+          "sha256": "ab6b400f02f9b2d93c272c737647f7b2837990e4fe1de2ec6713843c52e5ec75"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37071.cid",
+          "sha256": "495481fed6c09d7a4eb5d2876d45c0eab34fadfb0a956f83fd73e3b3debc798a"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37081.cid",
+          "sha256": "14e9f8f4aabaa876120521c05fc18e511a00dc189a271357f137896edba8e4e1"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37119.cid",
+          "sha256": "8cf9c50512a1ae420a88bbf3e930e60ec139851de0f5f9d88453c6fe862b2cdc"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37159.cid",
+          "sha256": "f569b1b43961e8cd05fed9bdfdb300810efd0b337b22685b0fd1595be81f9d90"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37202.cid",
+          "sha256": "56d6c0922574023a838b888da4309f71f6ecf801603597562b126b15a7702f08"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37262.cid",
+          "sha256": "f0181fdc6998fd64dd5c1b2812e914f41758dae49756b91b7c991784cc86f1ad"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37288.cid",
+          "sha256": "d11165f43d89d041e7a1bc6b5cfbf10e02d0fcf1cd0aa707b1460ac3cd017624"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37297.cid",
+          "sha256": "3567a2cf76361451f69a3d516e00bf70283c0399c6d5cf5177556ec2bdd451bf"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37302.cid",
+          "sha256": "339ccdd2cf1703229df66ea791311c3272d18259d2c487c1cff76a6891859297"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37307.cid",
+          "sha256": "43e11c345cae3edb73b51e8ad3373ae0382cdcbc1b7800263a9a201880f4bdb7"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37313.cid",
+          "sha256": "d9eafbfa7559af71755e93fd610b2eb53dff8cbc8a5a76f6e49feb5fb1bc318a"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37324.cid",
+          "sha256": "bbeeea9afe1c3d9a8a338ee7be5f0d3358f6c2f29deccad9e59dac2be3666117"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37330.cid",
+          "sha256": "e0a61d2e5fb6376e70f3ee195c4f1104718272e97fad916c4a85530c84c7c39f"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37345.cid",
+          "sha256": "57fe1718e2a9079edc1b86ae10188f7a0dc06bb85cde6552a8e9d6ac87508dc1"
+        },
+        {
+          "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37348.cid",
+          "sha256": "ebf6473939025fdf111152eaf979f37d0d55310071a74e9638ec4329a27afced"
+        }
+      ],
+      "fresh_execution": false
+    },
+    {
+      "name": "linux-exact-fresh-production-build",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/source-snapshot.json",
+          "sha256": "ea3ca38e057ddaa71db28e3fb28a71b1eb5fe31cf32218e2ad8be26e8232f97f"
+        },
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/image-source.json",
+          "sha256": "c64b40e2b977d46cac039dbab2c52605340b9a88d5b079967f7cbf234c3c7f82"
+        },
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/production-build.json",
+          "sha256": "3f3c36a35af135519c4c3b143fd8150915e561cf43757df332889eab3da2afb8"
+        },
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/framed.json",
+          "sha256": "41ab58a41ebb967835dcf392aa0d497c9f5292ebf33a00de38700c1227f85f75"
+        }
+      ]
+    },
+    {
+      "name": "fresh-linux-eight-stock-peer-regressions",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/stock-peer-tests-v1/result.json",
+          "sha256": "4ac42e90401d33d6f6a8f2351858b02c3e43313de9bf9a0b431c7a58ade75237"
+        },
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/image-source.json",
+          "sha256": "c64b40e2b977d46cac039dbab2c52605340b9a88d5b079967f7cbf234c3c7f82"
+        }
+      ],
+      "fresh_execution": true
+    },
+    {
+      "name": "fresh-linux-framed",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/framed.json",
+          "sha256": "41ab58a41ebb967835dcf392aa0d497c9f5292ebf33a00de38700c1227f85f75"
+        },
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/framed-evidence/qualification.json",
+          "sha256": "77fe53c9ea7674374e4fc4176d0e81f7145950fcf54896c3a5a75a12d8437a0e"
+        }
+      ],
+      "fresh_execution": true
+    },
+    {
+      "name": "fresh-linux-stock-program",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/stock-program.json",
+          "sha256": "37e45608b5e83051033676486ab9265d0c9e0741f5df4c57dd9bb2e2f9002e1f"
+        },
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/stock-program/qualification.json",
+          "sha256": "eddce699329f1d1cfbb82360db7616d4e047b32c977ea9ff07e1b8c7b9bc48e2"
+        }
+      ],
+      "fresh_execution": true
+    },
+    {
+      "name": "fresh-linux-stock-circle",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/stock-circle.json",
+          "sha256": "bf3104011c93d77f8c9c13046ca2dc9fa85874507d956d782469d23e1475b81b"
+        },
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/stock-circle/qualification.json",
+          "sha256": "056ec8b21bab020c8b4dcf6ac732a89036f89abb15f21705109feadc9a26164b"
+        }
+      ],
+      "fresh_execution": true
+    },
+    {
+      "name": "fresh-linux-nested-0",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/nested-0.json",
+          "sha256": "6d45960dfc8301e934f6855168c92a2fa57d890b41ea50d638d7a8675f22d065"
+        },
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/nested-0/qualification.json",
+          "sha256": "7a881e3b8554c7c825a032afcb0b92478a82baeccb3b260aee1b58a3954a6f18"
+        }
+      ],
+      "fresh_execution": true
+    },
+    {
+      "name": "fresh-linux-nested-1",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/nested-1.json",
+          "sha256": "f8808ef7dc31d46aba4c0b265a37844a806c3fd419024e705e92309b2cbb311c"
+        },
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/nested-1/qualification.json",
+          "sha256": "2cd3d1dcda2fb83c1869ad3d0c002179080545c7c75d6b8fc54d8ee074574a6f"
+        }
+      ],
+      "fresh_execution": true
+    },
+    {
+      "name": "fresh-linux-primary-five",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/summary.json",
+          "sha256": "ec3590cc5dafafd09854a0e179416dbd39936bbc6d084f92b3c364d05c622e33"
+        }
+      ]
+    },
+    {
+      "name": "fresh-linux-legacy-private-single",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/single-kernel-final-v1/qualification.json",
+          "sha256": "05fc1a8cfb2d5ce47d1765d57824b973a9de2fa8471f27b25123236c1e35a73f"
+        }
+      ],
+      "fresh_execution": true
+    },
+    {
+      "name": "fresh-linux-triple-prepaid",
+      "status": "pass",
+      "artifacts": [
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/triple-kernel-v1/report.json",
+          "sha256": "1f7927c4ea4adbe338704315bd631c6ca01eb9c7d00355ec3919ab467f0985cd"
+        },
+        {
+          "path": "out/mesh-admission-20261017/full-stack-linux-v19/triple-kernel-v1/gate/qualification.json",
+          "sha256": "a9bfe8e1dd57c94bcb20eab58dd3d248159e39e4d70ba3093710f745ad3bfaee"
+        }
+      ],
+      "fresh_execution": true
+    }
+  ],
+  "deduplicated_rust": {
+    "repositories": {
+      "octra": {
+        "harness-pass": 2687,
+        "explicit-ignore": 8
+      },
+      "headscale-rs": {
+        "harness-pass": 829,
+        "explicit-ignore": 1
+      }
+    },
+    "logical_cases": 3525,
+    "logical_targets": 280,
+    "counting_errors": 0,
+    "scope": "Unique repository/package/kind/target/full-test-name identities; repeated features, component reruns and child helpers are not added twice. Ignored tests are exclusions."
+  },
+  "artifacts": [
+    {
+      "path": "docs/rust-node/source-map.json",
+      "sha256": "6440fdf5895e791ce99ff1904aea396fc88c7e12645846a32702286aa9c17efa"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/framed-evidence/qualification.json",
+      "sha256": "77fe53c9ea7674374e4fc4176d0e81f7145950fcf54896c3a5a75a12d8437a0e"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/framed.json",
+      "sha256": "41ab58a41ebb967835dcf392aa0d497c9f5292ebf33a00de38700c1227f85f75"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/image-source.json",
+      "sha256": "c64b40e2b977d46cac039dbab2c52605340b9a88d5b079967f7cbf234c3c7f82"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/nested-0.json",
+      "sha256": "6d45960dfc8301e934f6855168c92a2fa57d890b41ea50d638d7a8675f22d065"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/nested-0/qualification.json",
+      "sha256": "7a881e3b8554c7c825a032afcb0b92478a82baeccb3b260aee1b58a3954a6f18"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/nested-1.json",
+      "sha256": "f8808ef7dc31d46aba4c0b265a37844a806c3fd419024e705e92309b2cbb311c"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/nested-1/qualification.json",
+      "sha256": "2cd3d1dcda2fb83c1869ad3d0c002179080545c7c75d6b8fc54d8ee074574a6f"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/production-build.json",
+      "sha256": "3f3c36a35af135519c4c3b143fd8150915e561cf43757df332889eab3da2afb8"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/single-kernel-final-v1/qualification.json",
+      "sha256": "05fc1a8cfb2d5ce47d1765d57824b973a9de2fa8471f27b25123236c1e35a73f"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/source-snapshot.json",
+      "sha256": "ea3ca38e057ddaa71db28e3fb28a71b1eb5fe31cf32218e2ad8be26e8232f97f"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/stock-circle.json",
+      "sha256": "bf3104011c93d77f8c9c13046ca2dc9fa85874507d956d782469d23e1475b81b"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/stock-circle/qualification.json",
+      "sha256": "056ec8b21bab020c8b4dcf6ac732a89036f89abb15f21705109feadc9a26164b"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/stock-peer-tests-v1/result.json",
+      "sha256": "4ac42e90401d33d6f6a8f2351858b02c3e43313de9bf9a0b431c7a58ade75237"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/stock-program.json",
+      "sha256": "37e45608b5e83051033676486ab9265d0c9e0741f5df4c57dd9bb2e2f9002e1f"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/stock-program/qualification.json",
+      "sha256": "eddce699329f1d1cfbb82360db7616d4e047b32c977ea9ff07e1b8c7b9bc48e2"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/summary.json",
+      "sha256": "ec3590cc5dafafd09854a0e179416dbd39936bbc6d084f92b3c364d05c622e33"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/triple-kernel-v1/gate/qualification.json",
+      "sha256": "a9bfe8e1dd57c94bcb20eab58dd3d248159e39e4d70ba3093710f745ad3bfaee"
+    },
+    {
+      "path": "out/mesh-admission-20261017/full-stack-linux-v19/triple-kernel-v1/report.json",
+      "sha256": "1f7927c4ea4adbe338704315bd631c6ca01eb9c7d00355ec3919ab467f0985cd"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/aggregate-fixed-v13.py",
+      "sha256": "9ecd64dbff6daf3b217cda77d86a70e87d62df9449cb41c0772d43df4cdea9c1"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/auxiliary-v1.json",
+      "sha256": "09d7ea018cf007f6ee473d64a0e1e2dbae2954410ffcbf015972f42c6f31cb4c"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/browser/preparation.json",
+      "sha256": "a7920251683ec32fd0a11ab9ea77d4c78437d0e5256ccf6361b6c3988f018efe"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/browser/result.json",
+      "sha256": "e1a523dfaa3ef8cd4b180669592a404c34b3ae4fd305b7d8709517d21daf313d"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/native-peer/provenance.json",
+      "sha256": "6a208c64fc25830a82c691addd4440732f49c7b954da4951e82774626060df8a"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/native-peer/result.json",
+      "sha256": "30b184605452a7ce8bb5f2773e44ea491f51d451bd6ec9c78a6b1f6fd8be1138"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/cleanup-audit.json",
+      "sha256": "7d5fa8d82ed795737a810275d4e8533581828f03824f48b43076f269b8278b97"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/commands.json",
+      "sha256": "8bb8844eaf995917ae442a3c779176b8e34bf873a34902da318d3c6e084bd0f2"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36227.cid",
+      "sha256": "f3849d086a50e92227b86a5ccd56155a81da27c0b1b760fd99fd959b7b8b85a3"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36258.cid",
+      "sha256": "23a04a1fddf76fabc96d824d5c0bcc404faa6a28e3e1a84db675dc6202daeb08"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36267.cid",
+      "sha256": "d7ef3610a1498181310b7d243e786a72bc567946d583dfa1b8a3311902bdaa7d"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36274.cid",
+      "sha256": "e04a4dc2200a33ad153bf75312aba06cccc309f15239db38ba5b77c5565895aa"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36292.cid",
+      "sha256": "44cbd786dbdb8a56e64f907fc82a648ffd2e7922803daf49d47937fd95809ecc"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36308.cid",
+      "sha256": "ae927c430d74bac836566488d76b1e9dfea9d1172ac84d80f951f537b6438dd7"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36329.cid",
+      "sha256": "e75d01a7620a19627965ebb346a6cdfc8d6906425e80363ff90a6821898838d4"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36354.cid",
+      "sha256": "f80d0ee53661d5443dca45c45b9284dad34f14d0a59bed5b452b0cb68e2a8cfd"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36615.cid",
+      "sha256": "2d88b496883a6b9d8b732d6667fa9b699480539a20a309f21c4f47447231f931"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36633.cid",
+      "sha256": "756f336dedf788656f4aa1cf08e2875945b4c88730cc507ef88946cbdefb79d5"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36674.cid",
+      "sha256": "de54f16113b0c1759ccf3e0060476939c697490a2df4f8ee0ea696ca8f0aa893"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36761.cid",
+      "sha256": "d271673ca51c1500079f07297af97b53fd12dfc58db56fa5de7f4c15188fc32d"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36799.cid",
+      "sha256": "dc774f96571a0fbb571192a6e48f228803b089a794f41ee7c6d17ba3ccc00e98"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36847.cid",
+      "sha256": "2e996901166fb176db2b7c1dc45b1d28c507cdffd98f58b80400828a510c0460"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36865.cid",
+      "sha256": "9bb7af4635fdcd9853c790f523d43fec8cccd2d1c751ae04b59c1e5cfe4a17b9"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36906.cid",
+      "sha256": "7161b29b988bd7b03c16dfff587aa524ef3598b11b805c0dd78f5727a027a25b"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36916.cid",
+      "sha256": "0460676c331a1457bfddce3799c3d9f84f066e0694812d1e315b077ca21ef719"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36924.cid",
+      "sha256": "b2a06e5b6026da30a54f5810afaf1ce7bc50ebe1569d2201424fd213fc986243"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36957.cid",
+      "sha256": "1607489d2a5c67f11d5e6d5415224ac27e37c4c992df2cae7139dafe8fe0d73e"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36971.cid",
+      "sha256": "6d57cf71ab8f7fe4ba930fd1d09ff5657aa608cc0000c72f8e4562d62066452d"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/36989.cid",
+      "sha256": "5c8d4f39c50cceddab40a5000c5c1500c216f5782ce863b144e6674c2415d98d"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37052.cid",
+      "sha256": "ab6b400f02f9b2d93c272c737647f7b2837990e4fe1de2ec6713843c52e5ec75"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37071.cid",
+      "sha256": "495481fed6c09d7a4eb5d2876d45c0eab34fadfb0a956f83fd73e3b3debc798a"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37081.cid",
+      "sha256": "14e9f8f4aabaa876120521c05fc18e511a00dc189a271357f137896edba8e4e1"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37119.cid",
+      "sha256": "8cf9c50512a1ae420a88bbf3e930e60ec139851de0f5f9d88453c6fe862b2cdc"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37159.cid",
+      "sha256": "f569b1b43961e8cd05fed9bdfdb300810efd0b337b22685b0fd1595be81f9d90"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37202.cid",
+      "sha256": "56d6c0922574023a838b888da4309f71f6ecf801603597562b126b15a7702f08"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37262.cid",
+      "sha256": "f0181fdc6998fd64dd5c1b2812e914f41758dae49756b91b7c991784cc86f1ad"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37288.cid",
+      "sha256": "d11165f43d89d041e7a1bc6b5cfbf10e02d0fcf1cd0aa707b1460ac3cd017624"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37297.cid",
+      "sha256": "3567a2cf76361451f69a3d516e00bf70283c0399c6d5cf5177556ec2bdd451bf"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37302.cid",
+      "sha256": "339ccdd2cf1703229df66ea791311c3272d18259d2c487c1cff76a6891859297"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37307.cid",
+      "sha256": "43e11c345cae3edb73b51e8ad3373ae0382cdcbc1b7800263a9a201880f4bdb7"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37313.cid",
+      "sha256": "d9eafbfa7559af71755e93fd610b2eb53dff8cbc8a5a76f6e49feb5fb1bc318a"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37324.cid",
+      "sha256": "bbeeea9afe1c3d9a8a338ee7be5f0d3358f6c2f29deccad9e59dac2be3666117"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37330.cid",
+      "sha256": "e0a61d2e5fb6376e70f3ee195c4f1104718272e97fad916c4a85530c84c7c39f"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37345.cid",
+      "sha256": "57fe1718e2a9079edc1b86ae10188f7a0dc06bb85cde6552a8e9d6ac87508dc1"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/evidence/container-ids/37348.cid",
+      "sha256": "ebf6473939025fdf111152eaf979f37d0d55310071a74e9638ec4329a27afced"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/preparation.json",
+      "sha256": "0898545dfa246395ca8610159198d78798d45a1a0318d34b656842f1193a625f"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/result.json",
+      "sha256": "bac703086f2f02f77dafebdb157e70f40014cb88cab5243dec09fa33cce288c1"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/circle-engine-final.json",
+      "sha256": "07dc311858bad6f836336114e73fbf0d2a95a5c290189f7054099e1c7c2fe7f4"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/circle-intake-rpc-fixed-v12.json",
+      "sha256": "0f2a204ce2cf14b69b761bfa479de222ac7826868749d8858c1c2168dec18de3"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/circle-parity-fixed-v12.json",
+      "sha256": "6680e94c7a97d30efad8f0ef94c376e409fcb7dd24c18dd7cf07496c4a4cee07"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/dependency-audit-v1.json",
+      "sha256": "b2e7283bb43b2dbab41fed23f32d248709366daa5e17f10ccf12d356ec3a3671"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/dependency-matrix-fixed-v12-corrected-v1/matrix.json",
+      "sha256": "f3e2b8ada50c365e6dcb55b21168899245487e81a221ed97e5b22214eca05be9"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/dependency-policy-fixed-v2-witness.json",
+      "sha256": "f61b4e9b284606420d12d1c88bfb55099115c6deb928a5ab431e4d9c94621c20"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/dependency-policy-fixed-v2.json",
+      "sha256": "240aed20460dbcec2763abc5789e71d8d239a63535a60a1df26c24abcf0b1620"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/diff-check-fixed-v12.json",
+      "sha256": "7c88ef66a08009efcb718ed6b5f0ec6fb74a95366bdd63578b29e938630fe914"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/doctests-fixed-v12.json",
+      "sha256": "78a0279a8a2aac6b3035f1167409c115d799a6bdf8bc2c48b52993643194f5df"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/fixed-source-changes-v12.json",
+      "sha256": "5cfe02fa4a4a08b5c518fcee5bb300e666bc2b76e08fdc6c8db2b87852953d8c"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/fixture-component-applicability-v13.json",
+      "sha256": "5a14b0f04888cccfb7a87bf6f5aae294729df133c31296a73c6f5c9d4ee03d11"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/format-fixed-v12.json",
+      "sha256": "7d7d6e3d6b576674c3f483126a34fb81c54297fcbb0740db0bf07ab137366ae3"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/headscale-component-v1.json",
+      "sha256": "dc37c0a3ac51ea076468363aa1b24b1e3cb4f826ee7f512f3e2af30b2032f091"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/headscale-derp-v1.json",
+      "sha256": "eb7e130ecd8f4d9d85c22a49040e6bef39ecc71e82d656df33b679af3ca68aa8"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/headscale-ff-push-v1.json",
+      "sha256": "2ec8e34509a2d63be9b968e3c2a563865d6582cb8cb5b82fa5119794d4873932"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/headscale-fmt-v2.json",
+      "sha256": "7dd358e91807174a03e05a238618fc98df0dbb0240c449ae81897ea1f01e5171"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/headscale-strict-v1.json",
+      "sha256": "3dcb6d8ace283aaa7ac138b5b15016f73db1783e668872d215a65bcdfdfa027c"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/hfhe-sidecar-v1/finalization.json",
+      "sha256": "0e149e9b225b2d8738338915445bca9e791e3c59915e4070acb66b59074f3b68"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/lean-v1.json",
+      "sha256": "4763e466004c0f2cc13604771a798340a9b2d29cae72b4f4d9c3fef3074fae4c"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/metadata-fixture-allfeatures-v13-data.json",
+      "sha256": "0a31c59358fdf1197c106b8d04d0b5ed7ddaa44a9fce517ffc92065c15101509"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/metadata-fixture-allfeatures-v13-sources.json",
+      "sha256": "5ff290330aed7a5a6cde1d685f693aa359d3c99c74298e72cde08f23c359f432"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/metadata-fixture-allfeatures-v13.json",
+      "sha256": "5e5fc78317331e53de9dad614d1820c5b77dbff9656661f8fd66421776be4c81"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/native-vendored-fixed-v12.json",
+      "sha256": "36e739fa4ee392ff33d4a7514e94d49335cee910d6dc6419d0f452b605afe8fe"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/normal-cli-build-fixed-v12.json",
+      "sha256": "481d592e69c6d9c3b9066b3ca12c4fa23d03a18e7f996a49dc27753c64b32527"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/normal-release-fixed-v12/manifest.json",
+      "sha256": "0dfb6467b90bb7df279bcf6d77b09997c830ca734e7d4425cc00a11eef0ae768"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/normal-release-fixed-v12/octra-node",
+      "sha256": "a4d46e4679efc1c9294d1f8e67d7c0b5378eb5d2f82bce801b9ae7f203a55e8e"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/normal-service-fixed-v12.json",
+      "sha256": "7ef727288e000a4a21d083c869efcf7ebd70fef011da3803748b68a5f9ab124b"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/registry-adapter-inputs-after.json",
+      "sha256": "d39eed2936de4f0c22ff91f0363bb75ef0cf304b57fcaaf5247d29db0da3ca00"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/registry-adapter-inputs-before.json",
+      "sha256": "bc2e2106ed5898b55d854ca83234542ffd0e6303ea770613efbe4436a506b236"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/registry-native-final.json",
+      "sha256": "f2d2b15cb5363c9256aaf174de5617a2ac65a2ecbbbced97ae62fcf08a49e75c"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/registry-native-v1.json",
+      "sha256": "ed95dafeb10ac2d1226da5f6e0ec12cc0be1ff512638f7d065a7ef4c0d664483"
+    },
+    {
+      "path": "out/octra-parity-final-20261017/strict-fixed-v12.json",
+      "sha256": "ab8864f81212c0f6ae22cb781358a98c08c4b04c0fc9d799cafe0ae919b18fd6"
+    }
+  ],
+  "composite": {
+    "path": "out/octra-parity-final-20261017/final-composite-v13-final-v1/report.json",
+    "sha256": "715d6efc80e1601f00fa67629f9de07fef6ef7e67a7c16557acb32e3e0b40065",
+    "implementation": {
+      "path": "out/octra-parity-final-20261017/aggregate-fixed-v13.py",
+      "sha256": "9ecd64dbff6daf3b217cda77d86a70e87d62df9449cb41c0772d43df4cdea9c1"
+    }
+  },
+  "preserved_attempts": [
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/affected-packages-fixed-v1.json",
+        "sha256": "73b010df225a0a666681822e6f3648a0fb10cd3d101f485c89858e9357d3683a"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/affected-packages-fixed-v2.json",
+        "sha256": "7f83d559966ffbeef75739ccc1d0e0546204f9db76bd5c6de8f5128a21b7a0f5"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/affected-packages-fixed-v3.json",
+        "sha256": "22a6f22da071d1862735534730621d8cac242374ed5a647edd026383de0d9450"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/circle-authority-diagnostic-v1.json",
+        "sha256": "0e09f04e98cfd52ef9bb6c3e5ebaa904c723edfa1290799ae61ca03bc99bbe59"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/circle-intake-rpc-fixed-v8.json",
+        "sha256": "4fafc10ea4d3e78bd752e3250fb7129cc664c76b7cb9e494b429a8cc65da1171"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/current-normal-private-worker-fixed-v12.json",
+        "sha256": "cd3cde069eb88f648c327621d22a1efccac832de2621fa6e50ce7a2c800c911e"
+      },
+      "original_status": "FAILED",
+      "exit_code": 1
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/format-v3.json",
+        "sha256": "98ea146437a8261de9e30aa4382a8447621ad132c95bdda4409a1587ab3c9679"
+      },
+      "original_status": "FAILED",
+      "exit_code": 1
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/headscale-fmt-v1.json",
+        "sha256": "312e46e4fbcf7ddb79228cb2ec2d57d3bf501374d3689312676b26e43e272d96"
+      },
+      "original_status": "FAILED",
+      "exit_code": 1
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/http-prefix-service-fixed-v10.json",
+        "sha256": "afbafdb74a857c65081942a6ae0e0eb6aa010d2cd9f9dc24d3cf9f5fce496bde"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/normal-service-v1.json",
+        "sha256": "e8c82f484b6f7b03c038998556b76605f6fd9c99584c96087f97ddaaf52a0c11"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/strict-fixed-v11.json",
+        "sha256": "a63ebec1c8f28e02513b7d2aafb76f5b97697e6dd370173067fdf9dacb28fc97"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/strict-fixed-v4.json",
+        "sha256": "360730a0129728ea85a6eaf354985a5d22b3cb23ea61e6150dea80359cca9c18"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/strict-fixed-v7.json",
+        "sha256": "483767414e66a985f866bb1f7313bc99024db6604d058903b0f2ccf17cd1efbe"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/strict-v1.json",
+        "sha256": "4dd1f66811fc1d98b89d243e09462604ab8186ec042be012f29f44d35b6f98c5"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/strict-v2.json",
+        "sha256": "3d5eb4fd4730b1f2094111cbb3031c400fe0cc87db98556b07c16b8c93f25e9d"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/strict-v3.json",
+        "sha256": "60a1a70c0f77270d5696c40aa9fb86fb88668c7440da4cc01952f5c6f1b7fb9d"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/strict-v4.json",
+        "sha256": "2cbb9a6e24a3c9466b18795b2561385d62e196c151bee1b4a9051a9c4830fc02"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/strict-v5.json",
+        "sha256": "e28676c510e41206b108ec76e1a581d569e3697bf855db52d9e97542c8b989b4"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/strict-v6.json",
+        "sha256": "5bbdf0c1e504c91bb710f4f5ec38f922328ed80e9b1596e71969fcb0eb1857ae"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/workspace-v2.json",
+        "sha256": "0348e991e89bf395027f2e368a34332afeba632efdfa2afd7c673c98dd041a70"
+      },
+      "original_status": "FAILED",
+      "exit_code": 101
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v1/framed.json",
+        "sha256": "61e8c18e4ca06aef89e328e652d30bb88c1cee79ec44756d174e14092a131ffb"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v1/superseded.json",
+        "sha256": "cb6d94d69fd24b744d33a33e304ede4e379b74990177eec13ba94e1888c72591"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v2/framed.json",
+        "sha256": "890262a6e22217afee704238665a01bbef2eafd5509e6541fdc04feda9482be6"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": 130,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v2/summary.json",
+        "sha256": "1b871bf2e78c0d85c85ae4b3cdc3cb85fb0a4333e7139def6015865c11a1eafc"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v2/superseded.json",
+        "sha256": "b8ba6f644e2cd048e9d645c9a65c647829f8a882e48f386fc373cc8031336977"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v3/framed.json",
+        "sha256": "f851a1fd5f9cda42c10beaae7ffe007b0fd4776ac59204f8f2fd590c5b9866c9"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": 130,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v3/summary.json",
+        "sha256": "1b871bf2e78c0d85c85ae4b3cdc3cb85fb0a4333e7139def6015865c11a1eafc"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v3/superseded.json",
+        "sha256": "39fe7717b57b3fea3ab32c28cec0240b56c24bfd67ac2704fa3d05099b01dbd4"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v4/stock-program.json",
+        "sha256": "c248c9493e776f329020c8a7d831d2ccfa1f96f7b286de3bab09ad7084b8e583"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v4/summary.json",
+        "sha256": "08b6f6b7e4c51a1218926df60a4a5c072f1ed0d44d62c1332ba4518d6a944b0f"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v5/stock-program.json",
+        "sha256": "5976fdcff20b7d8d10c67a9625e92c1b2df5449281ab3c9961ecfb70262ff060"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": 1,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v5/summary.json",
+        "sha256": "bcd5274589de5dba44de3044951e274c7bd2df6490c1fc1f09dca3ef17b06bb2"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v6/controller-preflight-v1.json",
+        "sha256": "396ec6ccdb0c17b36bce47572e48065965e12b1af8cdd34aed5649c1420cdbad"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v6/framed.json",
+        "sha256": "4411a24e13aea95908fd16f75bfb4db0cc8d9183e64740980c46f6304be1ed0a"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": 130,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v6/summary.json",
+        "sha256": "8b80325c3b63eb12e8ec2434ed1c4d981fc953d1d9ad42896ee05da5885c4388"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v6/superseded.json",
+        "sha256": "aa713f8f46a51250052d51214613ad4c00c8551431f4a75558c58373511c5b45"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": null
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v7/stock-program.json",
+        "sha256": "5a73b127da0b220fc503561a8ea05643ddf20040e367315e5b9f0a90ef522df0"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": -2,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v7/summary.json",
+        "sha256": "8e77979f993a7a443f6d29b348dc83921cb7bfca0905a93c2b0a67c2280873f1"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v7/superseded.json",
+        "sha256": "97546c024077c541c48b7f1c8b2b1c40a41f81e533f8f542437cfb975a69fd95"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": null
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v8/summary.json",
+        "sha256": "83f401a5d24349deaa0b6e3c773e4c34fcf282ca6aef9db9a65a036cde1f318a"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v9/stock-program.json",
+        "sha256": "e7ea4c96ead91e0d94273a91d611b67d3b2fddd42dba904b64a5ca0031d1f8b2"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": 1,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v9/summary.json",
+        "sha256": "f1d52958e785729bab999609d19eb2783f1dfb0d7ffc4b8d9d80e6690dcdfe63"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v10/pipeline-a.json",
+        "sha256": "67c2fa66f7d4fcffb7df15bce526c62bf74f04893da6de658cb64d19668feb14"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v10/pipeline-b.json",
+        "sha256": "f9e95b14c63bc0c47657b89a07a5f5d6741d38bfa018f2a2d522a7c98dff1845"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v10/pipeline-c.json",
+        "sha256": "6f1dc7fd270f2abe80a1f2c2be0ba06bb7c0611a6f175977cb407c56eac2e31d"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v10/stock-circle-ready-v1.json",
+        "sha256": "2f8dfc0c9dcd68a5b27606c13e22c5994cb6c2a6436ba30e3a5b68408c8bb8ea"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": -2,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v10/stock-circle.json",
+        "sha256": "9877a612d6f2ea0819bfb2e18207d4461927fc6c8612721e1a731fe877b3ebe5"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": -2,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v10/summary.json",
+        "sha256": "49d1543443aa4d93d3a7db32819318fa8a9c200a3d47faf88fb4e3c0c78bd1e3"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v10/stock-peer-tests/result.json",
+        "sha256": "4e7b53f4ca09dbf4cd873dfc74a969eca24ea243562ee9650de86edcad5a8d78"
+      },
+      "original_status": "PRESERVED_UNQUALIFIED_COMPONENT_ATTEMPT",
+      "exit_code": 1,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v11/pipeline-a-interrupted.json",
+        "sha256": "a49c6f968acec05b953538b8e757e01db3c85b0c823c8e91bc511dd6c3c347e7"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v11/production-build.json",
+        "sha256": "3ef3adeeed58fb5cef426f9879be9447d11f21b729dd217ba682b50a44ec06d7"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": 130,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v11/superseded-test-lint-stop.json",
+        "sha256": "9734cc13a775c09b393a1760f1267c78fc962b82947ceea5960811a557947e66"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v12/superseded-test-oracle.json",
+        "sha256": "d6b92fefaddadce70395d4eaa4e5b2efc014005052b98a37d540fab9918db5b3"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v13/nested-0-failure-diagnostic.json",
+        "sha256": "9794812adeb67c6699e62dc4b1e2ef6b1ce4442da9db00e6e7321f0aad100ee7"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v13/nested-0.json",
+        "sha256": "c0b2576ea249e9a8728daff0ab197ad956223c27efe42d0ca32cdf8b53cae1d5"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": 1,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v13/pipeline-b.json",
+        "sha256": "7a478c883b16e217ab88991c31d9a53c1a2847e1113c58cc1c8b896c5df1c37a"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v13/summary.json",
+        "sha256": "23942cb5850f9de082836c0c6730b388bcd744b4cc57e2c39f9ca39866f06600"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v14/nested-0.json",
+        "sha256": "e24e92c78ca4cc811263ec66c1148c052f0132696c39f2d3c4893b9b5a08def4"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": 1,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v14/pipeline.json",
+        "sha256": "9cea2bd4f45713558857ae288b28833277b33bc0d4131cf2e98bbecc7d396600"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v14/successor-preparation.json",
+        "sha256": "1f0e46f7ed1391bca024627b2c851ba81a90eadb699e1337ef0f6ac61dd0d20d"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v14/summary.json",
+        "sha256": "0d133368f7e5af04dd1b15bf691a6ad4d25dbcfad84ae7f9d5d7e236ad5adb1c"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v15/nested-0-replacement-failure-facts.json",
+        "sha256": "3071636f4ba5078919788159e29d29e31640c685741c133defdb7a74bdc3816d"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v15/nested-0.json",
+        "sha256": "41c1e31f27a4c6007ae88bf643ece1492b8e961e844217419d1e35954b44660d"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": 1,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v15/pipeline.json",
+        "sha256": "db0859a38cb4b07fcba9979f531ec5c864d38a15c6edc8ed31c43a7918dfb7b5"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v15/successor-preparation-v3.json",
+        "sha256": "ad7d711b54becddbf5ddec949f135369d6fe67ce26b9f9a991f942be82af1b06"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v15/successor-preparation.json",
+        "sha256": "6910a2867cd406067b12dd69e0be29657eec0a4095675733ae6cf8413fe81396"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v15/summary.json",
+        "sha256": "be04f23f2e4794c29e3a51f2897d5c2e380051a6b95ed59e334754a7963b3f93"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v15/nested-publication-diagnostic-v1/result.json",
+        "sha256": "199b4d953a5957ee70f7dad2b7a9837ff6b36f6a5e6152e999f47eb91562077f"
+      },
+      "original_status": "DIAGNOSTIC_NOT_ACCEPTANCE",
+      "exit_code": 1
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v15/nested-publication-diagnostic-v2/result.json",
+        "sha256": "c1be48b0160004949a1b41f486e99dfaa681dff8ef91c4cd02ccac6bebc34579"
+      },
+      "original_status": "DIAGNOSTIC_NOT_ACCEPTANCE",
+      "exit_code": 0
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v16/production-build.json",
+        "sha256": "dffbf3b8d46c1907537d0de2c7f8dcd9d82fbe1dc4416dedaec7bce24f502331"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": 130,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v17/production-build.json",
+        "sha256": "39316e7fad4d9724db7700989ebf16256a32bf895b48358af8ca0b588bb58c8c"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": 130,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v18/nested-0.json",
+        "sha256": "35b16d05cc8eb0ef74ec219c647152a95e0d0604f842ab64bcb9ba008ea0a159"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": 1,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v18/pipeline-b.json",
+        "sha256": "7bf93608acef7af433d82f21b2b687b26f0e4effb4d1a0b44944e4fcc0d16a98"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/full-stack-linux-v18/summary.json",
+        "sha256": "23942cb5850f9de082836c0c6730b388bcd744b4cc57e2c39f9ca39866f06600"
+      },
+      "original_status": "FAILED_OR_SUPERSEDED",
+      "exit_code": null,
+      "qualified": false
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/workspace-v1-interrupted.json",
+        "sha256": "8467d18794b2bc17ff627bc6f6e0814622bfaa953d03c1507a8481fee39701ec"
+      },
+      "original_status": "PRESERVED_FAILURE_OR_INTERRUPTION"
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/workspace-v1-closure.json",
+        "sha256": "d3e4c98620205cca1614053810ddeca27892155b4992d089007b995926fb3d93"
+      },
+      "original_status": "PRESERVED_FAILURE_OR_INTERRUPTION"
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/hfhe-sidecar-v1/original-runner-exit.json",
+        "sha256": "835fcfd56b1f1dac8e6af9378e895cf6288c796c11124f03b96e2ec7aca73b96"
+      },
+      "original_status": "PRESERVED_FAILURE_OR_INTERRUPTION"
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/hfhe-sidecar-v1/failure-binding.json",
+        "sha256": "24903f5022c1087bf47be1d8545073ea09b5f506d239d46af2478c7f4b79d5ca"
+      },
+      "original_status": "PRESERVED_FAILURE_OR_INTERRUPTION"
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/legacy-managed-wrapper-v1/qualification-failure.json",
+        "sha256": "e7d05912e763b23628eeaad77a6fafee290c41304e022adc73d24c082ccbf8a3"
+      },
+      "original_status": "PRESERVED_FAILURE_OR_INTERRUPTION"
+    },
+    {
+      "artifact": {
+        "path": "out/octra-parity-final-20261017/portable-pvac-independent-adoption-v1.json",
+        "sha256": "94fda1e7d29b8e2c9e37589c9c34eeda287acef38eb5c550615fa7764c3b6a6b"
+      },
+      "original_status": "PRESERVED_FAILURE_OR_INTERRUPTION"
+    },
+    {
+      "artifact": {
+        "path": "out/mesh-admission-20261017/stock-roam-diagnostic-v2/report.json",
+        "sha256": "36c36f4f42b7af4fa1b13d0e12d4b3262ce8c3298daef56d5dcba87184cb1ae4"
+      },
+      "original_status": "DIAGNOSTIC_NOT_QUALIFIED"
+    }
+  ],
+  "packaging": {
+    "artifact": {
+      "path": "out/octra-parity-final-20261017/triple-tested-publication-v10/report.json",
+      "sha256": "ec88b26d16c8c99466f4a145871b91ec9bc2ed0e58bec603e9cc17aae40faffa"
+    },
+    "qualified": true,
+    "schema": "octra-triple-tested-addition-only-supplement-v10",
+    "implementation_source_sha256": "7ef76d9b4d0e3823a7d84216b2966c9c732719ec440b929f5e65cc02c6fd4b8f",
+    "published_source_sha256": "0664277bb2c6ba10d870172e823762d3b92ea4b47ba10e2eb1b0eb52c471903e",
+    "additions": [
+      {
+        "path": "docker/native-vpn/triple_fixture.py",
+        "before": null,
+        "after": "8a58c278e77f5181b12325444388a701a908e0dedeb45640a9a8749c6e401e91",
+        "method": "identity"
+      },
+      {
+        "path": "docker/native-vpn/triple_client.py",
+        "before": null,
+        "after": "20460bdfab91a71e81d84c8c4f5fa278f8ee1e7eed6b94f39e99b297b58fc9d5",
+        "method": "identity"
+      },
+      {
+        "path": "docker/native-vpn/triple_run.py",
+        "before": null,
+        "after": "2820ec62f98b25680d123fca58a10c589acf24fab9d7033dcfb3df25298a3ea3",
+        "method": "identity"
+      },
+      {
+        "path": "docker/native-vpn/triple_Dockerfile",
+        "before": null,
+        "after": "b1fc300aae0c27e98464ff584313b764e4e6d34f0b60135c5f1552836e4d40aa",
+        "method": "identity"
+      },
+      {
+        "path": "docker/native-vpn/triple-provenance.json",
+        "before": null,
+        "after": "5f51e38b3772cce4daad73102e87a06b6d136932f06b6768f48c05f1841ad832",
+        "method": "identity"
+      }
+    ],
+    "new_runtime_execution_after_copy": false
+  },
+  "limitations": [
+    "Finite exact-source test/dependency-closure/runtime evidence composite. No whole-protocol parity, formal compiler/VM refinement, Internet delivery, public-chain safety or mainnet claim.",
+    "Passing test harness counts do not imply every platform/privilege or optional-artifact positive branch executed.",
+    "Lean verifies the stated abstract payment model; no compiler/VM refinement theorem is inferred.",
+    "Physical native, browser and isolated kernel scenarios are distinct gates rather than extra host Rust unit-test totals.",
+    "Artifact paths identify retained workspace evidence. This draft does not publish raw gate bundles or claim standalone cold-checkout reproduction of the captured runtime suite.",
+    "Prepared or incomplete gates remain pending; failed and interrupted commands are retained with their original status."
+  ],
+  "original_non2xx_exact_cause_confirmed": false,
+  "focused_controls": [
+    {
+      "report": {
+        "path": "out/octra-parity-final-20261017/fixture-view-retry-fixed-v12.json",
+        "sha256": "d563b378861e8803f8c9fff4e925f51b8f7030a8a900fe7f9dfa4a946904269a"
+      },
+      "logical_rust_cases_added": 0,
+      "observed_rust_passes": null,
+      "python_cases": 13,
+      "scope": "Separate Python oracle cases; no Rust-count contribution"
+    },
+    {
+      "report": {
+        "path": "out/octra-parity-final-20261017/client-receipt-retry-fixed-v12.json",
+        "sha256": "f60199065901dac9ae0f303eb90666fabf6eca09c761ecee1a06e05a85ab4984"
+      },
+      "logical_rust_cases_added": 0,
+      "observed_rust_passes": 7,
+      "python_cases": null,
+      "scope": "Names authenticated in the full affected target; additional execution is not an additional logical pass"
+    },
+    {
+      "report": {
+        "path": "out/octra-parity-final-20261017/http-prefix-service-fixed-v12.json",
+        "sha256": "81b9e2976d24072c4a46e75ce871824176dfc5f8caac093880a2cc11e2e6074e"
+      },
+      "logical_rust_cases_added": 0,
+      "observed_rust_passes": 1,
+      "python_cases": null,
+      "scope": "Names authenticated in the full affected target; additional execution is not an additional logical pass"
+    },
+    {
+      "report": {
+        "path": "out/octra-parity-final-20261017/http-prefix-boundaries-fixed-v12.json",
+        "sha256": "5e8e7af01f35621ed30449a24d938914db9baad52805db1bc6104d398796202f"
+      },
+      "logical_rust_cases_added": 0,
+      "observed_rust_passes": 14,
+      "python_cases": null,
+      "scope": "Names authenticated in the full affected target; additional execution is not an additional logical pass"
+    },
+    {
+      "report": {
+        "path": "out/octra-parity-final-20261017/circle-intake-rpc-fixed-v12.json",
+        "sha256": "0f2a204ce2cf14b69b761bfa479de222ac7826868749d8858c1c2168dec18de3"
+      },
+      "logical_rust_cases_added": 0,
+      "observed_rust_passes": 3,
+      "python_cases": null,
+      "scope": "Names authenticated in the full affected target; additional execution is not an additional logical pass"
+    }
+  ],
+  "python_fixture_cases_separate_from_rust": {
+    "current_snapshot_reader_cases": 21,
+    "report": {
+      "path": "out/octra-parity-final-20261017/snapshot-reader-tests-fixed-v13.json",
+      "sha256": "ac546d8ae09e0d7f0c47d1346217f288fd82563ae1eaf50beda484bdc80a770c"
+    },
+    "prior_focused_controls": 13,
+    "extra_logical_rust_cases": 0
+  },
+  "fixture_only_transition": {
+    "producer": {
+      "path": "out/octra-parity-final-20261017/fixture-component-applicability-v1.py",
+      "sha256": "7e265fff885387e915fec6ed9a31c615298d01502a54c4b51bd36e1f085699e0"
+    },
+    "proof": {
+      "path": "out/octra-parity-final-20261017/fixture-component-applicability-v13.json",
+      "sha256": "5a14b0f04888cccfb7a87bf6f5aae294729df133c31296a73c6f5c9d4ee03d11"
+    },
+    "changes": [
+      {
+        "path": "docker/native-vpn/Dockerfile",
+        "before": "6cd4d622514e0098adc31c57268aa6936d6dcbee3eb70263dc81c1f3ee1acaa3",
+        "after": "b84d9f8ab071f92dd698c4296300bb591fb1cbb01786ec4e16dc4ccb7312e51f",
+        "scope": "tested-host-fixture"
+      },
+      {
+        "path": "docker/native-vpn/json_snapshot.py",
+        "before": null,
+        "after": "e219c0b754b0ccde441c8d1d4df1419fbbf0404da3ebf16c85396f4e220cc1b6",
+        "scope": "added-host-fixture"
+      },
+      {
+        "path": "docker/native-vpn/multi_run.py",
+        "before": "8727b5bb14de9d3ba60fe3eaeeefc0563721361745b6548a88072f9d3f2eb661",
+        "after": "d59791d12937f4673c551861ed94ff48c7f07000bd19308ab1dbb3e4e7ad32fd",
+        "scope": "tested-host-fixture"
+      },
+      {
+        "path": "docker/native-vpn/payments_qualify.py",
+        "before": "e142d392c017df1f33937890e5302de7fb2cadbc87cb19b859f5501077e9ba17",
+        "after": "14fbc85394c024cb3e8ac99c484fe0badb8bb9e1788b3d7a97a755c4e50d1fdf",
+        "scope": "tested-host-fixture"
+      },
+      {
+        "path": "docker/native-vpn/stock_run.py",
+        "before": "9094d0befaf5e1d5ab015f5597938065be097c0989c7f2d95e2ab2675b2e7e00",
+        "after": "164803f574f6a4247034b51133c34631faa1aea0fc01c9214e4cbf51f8d19937",
+        "scope": "tested-host-fixture"
+      },
+      {
+        "path": "docker/native-vpn/test_payments_qualify.py",
+        "before": "3a1038e7e23728311be680a7314ecb8ab926a3b602e7ec22a073942202ad3bf3",
+        "after": "8dc9e18808e492e19edc7e8833816fe71e97d64b3d95f5a33a1850269b26dbed",
+        "scope": "tested-host-fixture"
+      },
+      {
+        "path": "docker/native-vpn/tun_gate.py",
+        "before": "0f5d2449a5843ce3b7f4704c852058ca8ed38059980d9bf9fe499bef0fd5a8b4",
+        "after": "10e046faa8c9d719d9eae6f63f71d441a1731586c9ccd33eca3995438a8183bc",
+        "scope": "tested-host-fixture"
+      }
+    ],
+    "original_rust_execution_labels_preserved": true
+  },
+  "linux_runtime_execution_policy": {
+    "retained": [],
+    "mandatory_fresh": [
+      "framed",
+      "stock-program",
+      "stock-circle",
+      "nested-0",
+      "nested-1",
+      "legacy-private-single",
+      "triple-prepaid"
+    ]
+  },
+  "focused_real_rpc_additional_control": {
+    "report": {
+      "path": "out/octra-parity-final-20261017/circle-intake-rpc-fixed-v12.json",
+      "sha256": "0f2a204ce2cf14b69b761bfa479de222ac7826868749d8858c1c2168dec18de3"
+    },
+    "passed": 3,
+    "logical_cases_added": 0
+  },
+  "generator": {
+    "path": "out/octra-parity-final-20261017/public-checkpoint-draft-v8.py",
+    "sha256": "ea29ef526915d842d6514ce452842e82ba92fd8e392381ca6890261a1b350100",
+    "read_only_inputs": true,
+    "no_build_test_deployment_network_or_publishing": true
+  },
+  "publication_scope": "Repository local-qualification checkpoint document only; no service activation or public/mainnet qualification"
+}

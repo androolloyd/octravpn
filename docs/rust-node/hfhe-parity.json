@@ -219,7 +219,7 @@
     }
   },
   "remaining_gates": [
-    "Complete native reset certificates, hidden-carrier arithmetic and reusable recryption evaluation; independently qualify public equality prover wrapper",
+    "Whole-library completion: native reset certificates, hidden-carrier arithmetic and reusable recryption evaluation. The bounded exact-symbol/export/caller census found no interface or active ML caller for these named entry points in the adopted baseline.",
     "Complete verification acceptance and refusal, full backend key/profile policy and resource limits",
     "All retained and active execution/proof profiles through the backend adapter",
     "Side-channel and secret lifetime review, including SHA-256/SHAKE state and compiler copies",
@@ -231,7 +231,7 @@
   "native_limitations_preserved": [
     "Aggregated legacy range verification returns false in pinned native source",
     "Ordinary legacy 64-bit range construction reaches a linear-combination ciphertext beyond the native zero-proof base-layer limit; embedded bound range remains a separate supported path",
-    "ru_cipher/nat_cipher reject materialized source ciphers; abstract hidden-carrier recryption paths remain active and require porting"
+    "ru_cipher/nat_cipher reject materialized source ciphers; abstract hidden-carrier evaluation remains a separate C++ library surface. The bounded census found no direct released ML caller for the named hidden-carrier entry points."
   ],
   "switch_scope": "Full-backend substitution and every retained/active profile remain separate qualification gates. The node already uses the Rust Circle/private HFHE host; switch_completed=false is not a missing-node-adapter claim.",
   "current_host_integration": {
@@ -251,5 +251,16 @@
     "log_sha256": "a0d46cf920bac6633020e3e884b2a0943a0e18985e21e067dc693b47ff6349ed",
     "scope": "Finite native fixture and implementation regression evidence; no whole-backend, side-channel, all-architecture or public deployment certification.",
     "current_status": "docs/rust-node/status.md"
+  },
+  "active_node_scope": {
+    "reviewed_at": "2026-10-17",
+    "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "source_census": "docs/rust-node/checkpoints/2026-10-17/hfhe-active-census.json",
+    "review_evidence": "out/octra-parity-final-20261017/hfhe-sidecar-plan/scope-audit.json",
+    "scope": "Modern private/Circle/OCTB hosts use octra-hfhe. The remaining hidden carrier/reset APIs are whole-library gaps, not missing released node transaction paths. Recrypt and aggregate-range refusals preserve adopted native policy.",
+    "qualification": "Finite native fixture coverage and independent runtime process/network gates; no universal cryptographic equivalence, side-channel or cross-architecture certificate.",
+    "source_census_scope": "Historical source/implementation-gap census. Its original pending-validation labels are preserved; it is not a current runtime qualification record.",
+    "active_source_review": "docs/rust-node/checkpoints/2026-10-17/hfhe-active-census-reviewed.json",
+    "active_source_review_scope": "Bounded exact-symbol/export/caller source review against the adopted native 7f9be448 revision and authenticated current consumed files. No new execution, transitive whole-library reachability proof, or universal equivalence claim."
   }
 }

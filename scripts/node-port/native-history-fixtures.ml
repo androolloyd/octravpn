@@ -43,7 +43,7 @@ let advance dir (head : HM.t) epoch count =
     let state_root = Eic.folded_state_root ~ledger_state_root:ledger_root ~epoch_index_root:root in
     SC.set_epoch chain {EL.empty_epoch_header with id = epoch; state_root;
       prev_state_root = head.state_root; parent_commit = some head.irmin_commit;
-      start_txid; tx_count = count};
+      finalized_by = "fixture"; start_txid; tx_count = count};
     SC.set_epoch_index_commitment chain ~epoch_id:epoch ~epoch_hash ~root;
     SC.commit_batch chain;
     SC.fsync chain;
@@ -113,9 +113,24 @@ let () =
   Recovery_case.with_stores dir (fun _ store ->
     run (SI.Store.Branch.remove store.SI.repo "epoch_0"));
   let pruned = refusal (fun () -> export dir 0 64) in
+  (* Independently chosen fixture policy, never inferred from a header. Invoke
+     the real native attribution callback on the actual exported bytes. *)
+  Unix.putenv Octra_consensus.C_protocol.activation_env "0";
+  let keys = ["fixture", Base64.encode_exn (String.make 32 'a');
+    "validatorB", Base64.encode_exn (String.make 32 'b')] in
+  let reward_sources = full |> member "epochs" |> to_list |> List.map (fun row ->
+    let raw = row |> member "epoch_header" |> to_string |> Base64.decode_exn in
+    let header = some (EL.epoch_of_json raw) in
+    let source = match Octra_node_runtime.Consensus_reward_attribution.epoch_source
+      ~validator_activation_epoch:None ~validator_pubkeys:keys header with
+      | Ok source -> source | Error error -> failwith error in
+    `Assoc ["epoch", `Int header.id; "header_sha256", `String (Digestif.SHA256.(to_hex (digest_string raw)));
+      "source", `String (Base64.encode_exn (Octra_net.Oce1.encode
+        (fun buffer -> Octra_consensus.C_reward_source.encode_into buffer source)))]) in
   let output = `Assoc ["empty", empty; "after_head", after_head;
     "after_recovery", after_recovery; "full", full;
     "first_page", first_page; "remaining", remaining; "caught_up", caught_up;
+    "reward_sources", `List reward_sources;
     "refusals", `Assoc ["before_head", before_head; "future", future;
       "oversize", oversize; "pruned", pruned; "writer_active", writer_active;
       "auxiliary_pending", auxiliary_pending]] in

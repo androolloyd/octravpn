@@ -138,16 +138,22 @@ let export ~data_dir ~chain ~store ~after_epoch ~limit =
       let verified = SC.verify_epoch_index_commitment_raw chain ~epoch_id:epoch
         ~start_txid:header.start_txid ~tx_count:header.tx_count ~prev_root:prior_index in
       require "epoch transaction commitment differs" verified.eic_ok;
+      let epoch_header = Core.Epochlog.epoch_to_json header in
+      bytes := !bytes + String.length epoch_header;
+      require "history byte limit exceeded" (!bytes <= max_bytes / 8);
       let transactions = List.init header.tx_count (fun index ->
         transaction epoch (Int64.add header.start_txid (Int64.of_int index))) in
       let row = `Assoc ["boundary", current; "parent_root", `String header.prev_state_root;
         "parent_commit", `String header.parent_commit;
         "start_txid", `Intlit (Int64.to_string header.start_txid);
+        (* Preserve these exact native serialization bytes for the Rust legacy
+           decoder. This is the bound local header, not a peer/QC proof. *)
+        "epoch_header", `String (Base64.encode_exn epoch_header);
         "transactions", `List transactions] in
       epochs (epoch + 1) current (row :: acc) in
   let* rows = epochs (after_epoch + 1) anchor [] in
   require "HEAD changed during history export" (HM.load data_dir = Some head);
-  let result = `Assoc ["format", `String "octra-exex-history-v1";
+  let result = `Assoc ["format", `String "octra-exex-history-v2";
     "head_commit_id", `String head.commit_id; "head", head_boundary;
     "anchor", anchor; "epochs", `List rows] |> Yojson.Safe.to_string in
   require "history output limit exceeded" (String.length result <= max_bytes);

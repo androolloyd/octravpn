@@ -1,6 +1,7 @@
 """Real VPN TUNs and kernel NAT to a second network-disabled target kernel."""
 import ipaddress,json,os,pathlib,re,signal,socket,struct,subprocess
 from packet_target import Hop
+from json_snapshot import read_object
 
 CLIENT='vpn-client'
 SERVER='vpn-node'
@@ -18,8 +19,7 @@ def _run(g,hop,operator_config,descriptor_path,program,circle,client_config,conf
     command=g.command
     def ip(*args):return command(['ip',*args])
     def target():
-        path=g.EVIDENCE/'target.json'
-        return json.loads(path.read_text()) if path.exists() else {}
+        return read_object(g.EVIDENCE/'target.json')
     assert open('/proc/sys/net/ipv4/ip_forward').read().strip()=='1'
     assert open('/proc/sys/net/ipv4/conf/all/rp_filter').read().strip()=='0'
     ip('address','del',g.PUBLIC+'/32','dev','lo')

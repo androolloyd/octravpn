@@ -42,9 +42,16 @@ struct JoinFixture {
     unavailable: Arc<AtomicBool>,
     head_response: Arc<Mutex<Option<Vec<u8>>>>,
     invalid_epoch: Arc<std::sync::atomic::AtomicI64>,
+    malformed_epoch: Arc<std::sync::atomic::AtomicI64>,
+    discontinuous_epoch: Arc<std::sync::atomic::AtomicI64>,
+    range_sizes: Arc<Mutex<Vec<i64>>>,
+    delay_ms: Arc<std::sync::atomic::AtomicU64>,
 }
 impl JoinFixture {
     async fn new() -> Self {
+        Self::with_epochs(2).await
+    }
+    async fn with_epochs(epochs: usize) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let state = genesis(format!("oct{}", "1".repeat(44)).as_bytes());
         let chain = ChainIdentity::genesis(
@@ -73,7 +80,7 @@ impl JoinFixture {
         let target = nodes.pop().unwrap();
         let source = nodes.pop().unwrap();
         source.resume().await.unwrap();
-        for _ in 0..2 {
+        for _ in 0..epochs {
             let view = source.snapshot().unwrap();
             let mut executed = execute_received(
                 view.head(),
@@ -95,16 +102,25 @@ impl JoinFixture {
                 .await
                 .unwrap();
         }
-        let octra_node_runtime::finality_queries::Range::Found { records, .. } =
-            source.history().range(1, 2).await.unwrap()
-        else {
-            panic!("signed source history missing");
-        };
+        let mut records = Vec::new();
+        for from in (1..=epochs).step_by(16) {
+            let octra_node_runtime::finality_queries::Range::Found { records: chunk, .. } =
+                source.history().range(from as i64, 16).await.unwrap()
+            else {
+                panic!("signed source history missing")
+            };
+            records.extend(chunk);
+        }
+        assert_eq!(records.len(), epochs);
         let first_root = records[0].state_root.clone();
 
         let requests = Arc::new(Mutex::new(Vec::new()));
         let unavailable = Arc::new(AtomicBool::new(false));
         let invalid_epoch = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let malformed_epoch = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let discontinuous_epoch = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let range_sizes = Arc::new(Mutex::new(Vec::new()));
+        let delay_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let base = target.head().await.unwrap();
         let head_response = Arc::new(Mutex::new(Some(http::head_response(
             base.cursor.epoch.0 as i64 + 1,
@@ -140,6 +156,10 @@ impl JoinFixture {
                     let requests = requests.clone();
                     let unavailable = unavailable.clone();
                     let invalid_epoch = invalid_epoch.clone();
+                    let malformed_epoch = malformed_epoch.clone();
+                    let discontinuous_epoch = discontinuous_epoch.clone();
+                    let range_sizes = range_sizes.clone();
+                    let delay_ms = delay_ms.clone();
                     move |axum::extract::Query(query): axum::extract::Query<
                         std::collections::HashMap<String, String>,
                     >| {
@@ -147,10 +167,19 @@ impl JoinFixture {
                         let requests = requests.clone();
                         let unavailable = unavailable.clone();
                         let invalid_epoch = invalid_epoch.clone();
+                        let malformed_epoch = malformed_epoch.clone();
+                        let discontinuous_epoch = discontinuous_epoch.clone();
+                        let range_sizes = range_sizes.clone();
+                        let delay_ms = delay_ms.clone();
                         async move {
                             let from: i64 = query["from_epoch"].parse().unwrap();
                             let max: i64 = query["max_epochs"].parse().unwrap();
                             requests.lock().unwrap().push(from);
+                            range_sizes.lock().unwrap().push(max);
+                            tokio::time::sleep(Duration::from_millis(
+                                delay_ms.load(Ordering::SeqCst),
+                            ))
+                            .await;
                             if unavailable.load(Ordering::SeqCst) {
                                 return (axum::http::StatusCode::SERVICE_UNAVAILABLE, Vec::new());
                             }
@@ -166,6 +195,12 @@ impl JoinFixture {
                                 .take(usize::try_from(max).unwrap())
                                 .collect();
                             for record in &mut records {
+                                if record.epoch_id == malformed_epoch.load(Ordering::SeqCst) {
+                                    record.txs_json.push(b"{not a transaction}".to_vec());
+                                }
+                                if record.epoch_id == discontinuous_epoch.load(Ordering::SeqCst) {
+                                    record.prev_state_root = vec![0; 32];
+                                }
                                 if record.epoch_id == invalid_epoch.load(Ordering::SeqCst) {
                                     record
                                         .finality
@@ -207,6 +242,10 @@ impl JoinFixture {
             unavailable,
             head_response,
             invalid_epoch,
+            malformed_epoch,
+            discontinuous_epoch,
+            range_sizes,
+            delay_ms,
         }
     }
     async fn shutdown(self) {
@@ -235,39 +274,32 @@ async fn http_target_uses_authenticated_successors_with_stale_or_unavailable_hea
             octra_node_runtime::validator_history::Environment::default(),
         );
         let executor = ImportExecutor::new(&fixture.authority, &fixture.target);
-        for expected in [1, 2] {
-            let target = fixture
-                .client
-                .proved_target(
-                    &fixture.target,
-                    &membership,
-                    &executor,
-                    Instant::now() + Duration::from_secs(5),
-                )
-                .await
-                .unwrap();
-            assert_eq!(target, Some(expected));
-            // Selecting a target neither commits nor grants serving. Every
-            // successor resolves its own authority after its actual parent.
-            assert_eq!(
-                fixture.target.head().await.unwrap().cursor.epoch.0,
-                expected - 1
-            );
-            assert!(fixture.target.snapshot().is_err());
-            let progress = fixture
-                .client
-                .catch_up(
-                    &fixture.target,
-                    expected,
-                    &executor,
-                    Instant::now() + Duration::from_secs(5),
-                )
-                .await
-                .unwrap();
-            assert!(progress.reached);
-            assert_eq!(progress.head.cursor.epoch.0, expected);
-            assert!(fixture.target.snapshot().is_err());
-        }
+        let target = fixture
+            .client
+            .proved_target(
+                &fixture.target,
+                &membership,
+                &executor,
+                Instant::now() + Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+        assert_eq!(target, Some(1));
+        assert_eq!(fixture.target.head().await.unwrap().cursor.epoch.0, 0);
+        assert!(fixture.target.snapshot().is_err());
+        let progress = fixture
+            .client
+            .catch_up(
+                &fixture.target,
+                target.unwrap(),
+                &executor,
+                Instant::now() + Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+        assert!(progress.reached);
+        assert_eq!(progress.head.cursor.epoch.0, 2);
+        assert!(fixture.target.snapshot().is_err());
         assert_eq!(
             fixture.target.head().await.unwrap(),
             fixture.source.head().await.unwrap()
@@ -632,5 +664,305 @@ async fn cancelled_http_join_can_recover_without_partial_publication() {
     assert!(progress.reached);
     assert_eq!(progress.head, fixture.source.head().await.unwrap());
     assert_eq!(*fixture.requests.lock().unwrap(), [1, 1]);
+    fixture.shutdown().await;
+}
+
+#[tokio::test]
+async fn http_first_verified_target_imports_one_bounded_sixteen_epoch_prefix() {
+    let fixture = JoinFixture::with_epochs(17).await;
+    let membership_store = CanonicalStore::open(
+        &fixture.directory.path().join("target.db"),
+        &fixture.authority.chain,
+    )
+    .await
+    .unwrap();
+    let membership = octra_node_runtime::validator_history::CanonicalValidators::new(
+        membership_store.reader(),
+        octra_node_runtime::validator_history::Environment::default(),
+    );
+    let executor = ImportExecutor::new(&fixture.authority, &fixture.target);
+    let target = fixture
+        .client
+        .proved_target(
+            &fixture.target,
+            &membership,
+            &executor,
+            Instant::now() + Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+    assert_eq!(target, Some(1));
+    assert_eq!(fixture.target.head().await.unwrap().cursor.epoch.0, 0);
+    assert!(fixture.target.snapshot().is_err());
+    let progress = fixture
+        .client
+        .catch_up(
+            &fixture.target,
+            target.unwrap(),
+            &executor,
+            Instant::now() + Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+    assert!(progress.reached);
+    assert_eq!(progress.head.cursor.epoch.0, 16);
+    assert!(fixture.target.snapshot().is_err());
+    assert_eq!(*fixture.requests.lock().unwrap(), [1, 1]);
+    assert_eq!(*fixture.range_sizes.lock().unwrap(), [16, 16]);
+    assert_eq!(
+        fixture
+            .client
+            .proved_target(
+                &fixture.target,
+                &membership,
+                &executor,
+                Instant::now() + Duration::from_secs(5),
+            )
+            .await
+            .unwrap(),
+        Some(17)
+    );
+    assert_eq!(fixture.target.head().await.unwrap(), progress.head);
+    assert!(fixture.target.snapshot().is_err());
+    membership_store.close().await;
+    fixture.shutdown().await;
+}
+
+#[tokio::test]
+async fn http_corrupt_payload_or_continuity_suffix_rejects_whole_chunk_before_import() {
+    for malformed_payload in [true, false] {
+        let fixture = JoinFixture::new().await;
+        if malformed_payload {
+            fixture.malformed_epoch.store(2, Ordering::SeqCst);
+        } else {
+            fixture.discontinuous_epoch.store(2, Ordering::SeqCst);
+        }
+        let before = fixture.target.head().await.unwrap();
+        let executor = ImportExecutor::new(&fixture.authority, &fixture.target);
+        let progress = fixture
+            .client
+            .catch_up(
+                &fixture.target,
+                1,
+                &executor,
+                Instant::now() + Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+        assert!(!progress.reached);
+        assert_eq!(fixture.target.head().await.unwrap(), before);
+        assert_eq!(progress.head, before);
+        assert!(fixture.target.snapshot().is_err());
+        assert_eq!(*fixture.range_sizes.lock().unwrap(), [16]);
+        fixture.shutdown().await;
+    }
+}
+
+struct FailAfterFirst {
+    inner: ImportExecutor,
+    fail_rules: bool,
+}
+#[async_trait::async_trait]
+impl Executor for FailAfterFirst {
+    fn graph(&self) -> octra_node_protocol::rules::Graph {
+        self.inner.graph()
+    }
+    fn rules(
+        &self,
+        parent: &Head,
+        header: &EpochHeader,
+        context: &octra_node_runtime::execution_rules::Bound,
+    ) -> Result<BundleRules> {
+        if self.fail_rules && header.epoch_id == 2 {
+            anyhow::bail!("fixture valid-QC rules failure");
+        }
+        self.inner.rules(parent, header, context)
+    }
+    async fn execute(&self, request: octra_node::import::Execution<'_>) -> Result<ExecutedEpoch> {
+        if !self.fail_rules && request.finalized.epoch_id == 2 {
+            anyhow::bail!("fixture valid-QC execution failure");
+        }
+        self.inner.execute(request).await
+    }
+}
+
+#[tokio::test]
+async fn http_valid_qc_rules_or_execution_failure_is_not_a_harmless_qc_suffix() {
+    for fail_rules in [true, false] {
+        let fixture = JoinFixture::new().await;
+        let executor = FailAfterFirst {
+            inner: ImportExecutor::new(&fixture.authority, &fixture.target),
+            fail_rules,
+        };
+        let error = fixture
+            .client
+            .catch_up(
+                &fixture.target,
+                1,
+                &executor,
+                Instant::now() + Duration::from_secs(5),
+            )
+            .await
+            .err()
+            .expect("valid-QC rules/execution failure must remain hard");
+        let expected = if fail_rules {
+            "fixture valid-QC rules failure"
+        } else {
+            "fixture valid-QC execution failure"
+        };
+        assert!(format!("{error:#}").contains(expected));
+        assert_eq!(fixture.target.head().await.unwrap().cursor.epoch.0, 1);
+        assert_eq!(
+            fixture
+                .target
+                .head()
+                .await
+                .unwrap()
+                .cursor
+                .state_root
+                .0
+                .as_slice(),
+            fixture.first_root
+        );
+        assert!(fixture.target.snapshot().is_err());
+        fixture.shutdown().await;
+    }
+}
+
+#[tokio::test]
+async fn http_prefix_network_deadline_does_not_start_execution() {
+    let fixture = JoinFixture::new().await;
+    fixture.delay_ms.store(2_000, Ordering::SeqCst);
+    let before = fixture.target.head().await.unwrap();
+    let executor = ImportExecutor::new(&fixture.authority, &fixture.target);
+    let started = Instant::now();
+    let progress = fixture
+        .client
+        .catch_up(
+            &fixture.target,
+            1,
+            &executor,
+            started + Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+    assert!(!progress.reached);
+    assert!(started.elapsed() < Duration::from_secs(3));
+    assert_eq!(progress.head, before);
+    assert_eq!(fixture.target.head().await.unwrap(), before);
+    assert!(fixture.target.snapshot().is_err());
+    assert_eq!(*fixture.range_sizes.lock().unwrap(), [16]);
+    fixture.shutdown().await;
+}
+
+struct SlowSecondQc {
+    inner: finality_host::Authority,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+    until: Arc<Mutex<Option<Instant>>>,
+}
+#[async_trait::async_trait]
+impl ValidatorHistory for SlowSecondQc {
+    async fn resolve(
+        &self,
+        parent: &Head,
+        epoch: u64,
+        relief: ReliefSource,
+    ) -> Result<EpochRules, String> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst);
+        // The first lookup selects this HTTP source; the second belongs to
+        // the per-record QC immediately before execution dispatch.
+        if epoch == 1 && call == 1 {
+            let until = self
+                .until
+                .lock()
+                .unwrap()
+                .expect("deadline installed before request");
+            tokio::time::sleep_until(until).await;
+        }
+        self.inner.resolve(parent, epoch, relief).await
+    }
+}
+impl Host for SlowSecondQc {}
+struct CountExecution {
+    inner: ImportExecutor,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+#[async_trait::async_trait]
+impl Executor for CountExecution {
+    fn graph(&self) -> octra_node_protocol::rules::Graph {
+        self.inner.graph()
+    }
+    fn rules(
+        &self,
+        parent: &Head,
+        header: &EpochHeader,
+        context: &octra_node_runtime::execution_rules::Bound,
+    ) -> Result<BundleRules> {
+        self.inner.rules(parent, header, context)
+    }
+    async fn execute(&self, _: octra_node::import::Execution<'_>) -> Result<ExecutedEpoch> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        anyhow::bail!("execution must not start after QC consumed the deadline")
+    }
+}
+
+#[tokio::test]
+async fn http_trusted_qc_lookup_cannot_dispatch_execution_after_absolute_deadline() {
+    let fixture = JoinFixture::new().await;
+    let state = genesis(format!("oct{}", "1".repeat(44)).as_bytes());
+    let store = CanonicalStore::create(
+        &fixture.directory.path().join("slow-qc.db"),
+        fixture.authority.chain.clone(),
+        state.snapshot(),
+        0,
+    )
+    .await
+    .unwrap();
+    let checkpoint = Arc::new(
+        SqliteCheckpoints::open(&fixture.directory.path().join("slow-qc-exex.db"))
+            .await
+            .unwrap(),
+    );
+    let until = Arc::new(Mutex::new(None));
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let target = Node::open(
+        store,
+        SlowSecondQc {
+            inner: finality_host::Authority {
+                seed: fixture.authority.seed,
+                chain: fixture.authority.chain.clone(),
+            },
+            calls: calls.clone(),
+            until: until.clone(),
+        },
+        circle_host::runtime(),
+        Arc::new(UnavailableHost),
+        checkpoint,
+    )
+    .await
+    .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let before = target.head().await.unwrap();
+    let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let executor = CountExecution {
+        inner: ImportExecutor::new(&fixture.authority, &fixture.target),
+        calls: executions.clone(),
+    };
+    let deadline = Instant::now() + Duration::from_secs(1);
+    *until.lock().unwrap() = Some(deadline + Duration::from_millis(20));
+    let progress = tokio::time::timeout(
+        Duration::from_secs(3),
+        fixture.client.catch_up(&target, 1, &executor, deadline),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert!(!progress.reached);
+    assert_eq!(executions.load(Ordering::SeqCst), 0);
+    assert_eq!(progress.head, before);
+    assert_eq!(target.head().await.unwrap(), before);
+    assert!(target.snapshot().is_err());
+    target.shutdown().await.unwrap();
     fixture.shutdown().await;
 }

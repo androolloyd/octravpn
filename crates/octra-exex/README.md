@@ -11,7 +11,7 @@ compare-and-swap updates. Full u64 sequences survive close/reopen. The node host
 must persist the epoch history with chain commits or reconstruct it reliably;
 checkpoints alone are not an event journal.
 
-`SqliteEpochSource` now supplies that history for a future Rust host whose
+`SqliteEpochSource` supplies that history for the integrated Rust node, whose
 canonical chain state also lives in SQLite. The host passes its chain-state
 transaction to `append`, commits once, and then calls `notify_commit`. Rolling
 back the host transaction also rolls back the extension outbox. The adapter
@@ -41,6 +41,24 @@ an offline directory or invocation under the native host's existing exclusive
 ownership. Its startup verification scans retained history before bounded
 page export, so this is a recovery path rather than a per-epoch polling design.
 
+The v2 exporter also includes the exact bytes returned by native
+`Epochlog.epoch_to_json` for each retained header. These are the native serializer's
+bytes, not a claim to preserve an original epoch-log file representation. Parse
+v2 with `NativeHistory::parse_with_rewards(bytes, &authority)`, where
+`HistoricalRewardAuthority` resolves historical policy and validator keys from an
+independent trusted source. Header recipients never supply their own authority.
+The native legacy attribution fallback applies only before weighted activation;
+missing weighted-era evidence is refused.
+
+The importer retains header bytes, normalized reward evidence and their export
+version in the same transaction as the outbox. `reward_source(sequence,
+&authority)` rechecks header/boundary/transaction commitments and derives the
+same source again. Missing v2 metadata fails; v1 history explicitly has no reward
+metadata. The first schema installation labels existing bound native outbox
+rows as v1; subsequent reopenings cannot repair a deleted version marker. This
+compatibility reader does not repair modern canonical reward
+records or authenticate peer finality.
+
 Regenerate the real-store integration fixture with:
 
 ```sh
@@ -55,5 +73,8 @@ and raw transaction bytes; it does not execute consensus or authenticate peers.
 
 Tests cover replay, ordering, duplicate delivery, gaps, root mismatches, crashes,
 slow consumers, persistence, concurrent checkpoint writers, transactional
-rollback and reopen. The live consensus commit hook and VPN session projection
-remain integration work; this does not establish complete Rust node parity.
+rollback and reopen. The Rust node's canonical publisher writes state, history,
+receipts and this outbox atomically, then notifies its registered extensions.
+An extension event alone does not grant VPN traffic: the payment adapter checks
+the current canonical application state and a host-owned meter. These components
+and their tests do not by themselves establish complete native behavioral parity.

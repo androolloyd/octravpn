@@ -91,6 +91,11 @@ impl Service {
             }),
         })
     }
+    /// Attach an explicitly configured stock exit before starting any workers.
+    pub fn with_stock_exit(self, exit: Arc<crate::stock::Exit>) -> Result<Self> {
+        self.control.registry.attach_stock(exit)?;
+        Ok(self)
+    }
     pub fn control_addr(&self) -> Result<SocketAddr> {
         Ok(self.listener.local_addr()?)
     }
@@ -108,7 +113,11 @@ impl Service {
                 .await
                 .map_err(anyhow::Error::from)
         });
+        let tunnel_addr = self.tunnel.local_addr();
         tasks.spawn(async move { self.tunnel.run().await });
+        if let Some(exit) = registry.stock_exit() {
+            tasks.spawn(exit.run_relay(tunnel_addr));
+        }
         let mut updates = registry.authority.updates();
         tasks.spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
@@ -149,6 +158,7 @@ fn router(control: Arc<Control>) -> Router {
     Router::new()
         .route("/payments/connect", post(connect))
         .route("/payments/status", post(connect))
+        .route("/payments/stock/connect", post(stock_connect))
         .route("/payments/usage", post(usage))
         .layer(DefaultBodyLimit::max(131_072))
         .with_state(control)
@@ -174,11 +184,37 @@ async fn connect(
         (StatusCode::FORBIDDEN, "paid connection unavailable")
     })
 }
+async fn stock_connect(
+    State(state): State<Arc<Control>>,
+    Json(request): Json<SignedConnect>,
+) -> std::result::Result<Json<SignedStatus>, HttpError> {
+    let _slot = state
+        .slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| (StatusCode::TOO_MANY_REQUESTS, "control capacity exhausted"))?;
+    async {
+        let connection = state.registry.connect_mode(request, true).await?;
+        status(&state, &connection)
+    }
+    .await
+    .map(Json)
+    .map_err(|error: anyhow::Error| {
+        tracing::debug!(%error,"stock paid connection refused");
+        (StatusCode::FORBIDDEN, "stock paid connection unavailable")
+    })
+}
 fn status(control: &Control, connection: &Connection) -> Result<SignedStatus> {
     let grant = connection.grant.read();
     let grant = grant.as_ref().context("paid plan suspended")?;
     ensure!(
-        !connection.stop.is_revoked() && grant.admissible && grant.guard.live(),
+        !connection.stop.is_revoked()
+            && connection.stock_live()
+            && connection
+                .meter
+                .transport_is_current(&connection.request, &connection.transport)
+            && grant.admissible
+            && grant.guard.live(),
         "paid plan revoked"
     );
     let snapshot = connection.meter.snapshot()?;

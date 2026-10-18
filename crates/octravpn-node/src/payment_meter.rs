@@ -53,6 +53,7 @@ pub struct Meter {
     published: RwLock<Snapshot>,
     current_connect: RwLock<Option<SignedConnect>>,
     receipts: RwLock<Vec<SignedUsage>>,
+    transport: RwLock<crate::stock::Transport>,
     connect_pending: AtomicBool,
     failed: AtomicBool,
 }
@@ -243,6 +244,7 @@ impl Meter {
                 uncertain: vec![0; canonical.len()],
                 pending: vec![0; canonical.len()],
                 connect: None,
+                transport: crate::stock::Transport::Framed,
                 authorizations: vec![None; canonical.len()],
             },
         };
@@ -251,11 +253,20 @@ impl Meter {
             "meter authorization shape differs"
         );
         if let Some(connect) = &record.connect {
-            connect.verify()?;
+            match &record.transport {
+                crate::stock::Transport::Framed => connect.verify()?,
+                crate::stock::Transport::Stock(_) => connect.verify_stock()?,
+            }
             ensure!(
                 connect.request.binding == binding,
                 "stored connection binding differs"
             );
+            if let crate::stock::Transport::Stock(registration) = &record.transport {
+                ensure!(
+                    registration.node_key == connect.request.wireguard_key,
+                    "stored stock key differs"
+                );
+            }
         }
         for (class, usage) in record.authorizations.iter().enumerate() {
             if let Some(usage) = usage {
@@ -296,6 +307,7 @@ impl Meter {
         disk.persist(&record)?;
         let published = snapshot(&record, &capacity, &tariff)?;
         let current_connect = record.connect.clone();
+        let transport = record.transport.clone();
         let receipts = record.authorizations.iter().flatten().cloned().collect();
         Ok(Arc::new(Self {
             binding,
@@ -311,6 +323,7 @@ impl Meter {
             published: RwLock::new(published),
             current_connect: RwLock::new(current_connect),
             receipts: RwLock::new(receipts),
+            transport: RwLock::new(transport),
             connect_pending: AtomicBool::new(false),
             failed: AtomicBool::new(false),
         }))
@@ -341,8 +354,15 @@ impl Meter {
 
     /// Reject public replays before the host suspends an existing connection.
     pub fn check_connect(&self, connect: &SignedConnect) -> Result<()> {
+        self.check_connect_mode(connect, false)
+    }
+    fn check_connect_mode(&self, connect: &SignedConnect, stock: bool) -> Result<()> {
         self.available()?;
-        connect.verify()?;
+        if stock {
+            connect.verify_stock()?;
+        } else {
+            connect.verify()?;
+        }
         ensure!(
             connect.request.binding == self.binding,
             "connection plan differs"
@@ -357,6 +377,44 @@ impl Meter {
             "connection rotation pending"
         );
         self.available()
+    }
+
+    pub(crate) fn check_transport(
+        &self,
+        connect: &SignedConnect,
+        transport: &crate::stock::Transport,
+    ) -> Result<()> {
+        self.check_connect_mode(
+            connect,
+            matches!(transport, crate::stock::Transport::Stock(_)),
+        )?;
+        if let crate::stock::Transport::Stock(registration) = transport {
+            ensure!(
+                registration.node_key == connect.request.wireguard_key,
+                "stock framing key differs"
+            );
+        }
+        if self
+            .current_connect
+            .read()
+            .as_ref()
+            .is_some_and(|old| old.request.sequence == connect.request.sequence)
+        {
+            ensure!(
+                *self.transport.read() == *transport,
+                "connection framing or registration differs; signed rotation required"
+            );
+        }
+        Ok(())
+    }
+    pub(crate) fn transport_is_current(
+        &self,
+        connect: &SignedConnect,
+        transport: &crate::stock::Transport,
+    ) -> bool {
+        self.connect_is_current(connect)
+            && *self.transport.read() == *transport
+            && self.connect_is_current(connect)
     }
 
     /// Highest durable payer authorization per class, for settlement recovery.
@@ -445,8 +503,16 @@ impl Meter {
     /// its WG identity. An identical retry is idempotent; older keys cannot be
     /// reactivated after rotation or restart.
     pub async fn connect(self: &Arc<Self>, connect: SignedConnect) -> Result<()> {
-        self.check_connect(&connect)?;
-        if self.connect_is_current(&connect) {
+        self.connect_transport(connect, crate::stock::Transport::Framed)
+            .await
+    }
+    pub(crate) async fn connect_transport(
+        self: &Arc<Self>,
+        connect: SignedConnect,
+        transport: crate::stock::Transport,
+    ) -> Result<()> {
+        self.check_transport(&connect, &transport)?;
+        if self.transport_is_current(&connect, &transport) {
             return Ok(());
         }
         ensure!(
@@ -466,9 +532,22 @@ impl Meter {
                 return Err(error);
             }
             let mut record = state.record.clone();
+            if state
+                .record
+                .connect
+                .as_ref()
+                .is_some_and(|old| old.request.sequence == connect.request.sequence)
+            {
+                ensure!(
+                    state.record.transport == transport,
+                    "connection transport changed"
+                );
+            }
             record.connect = Some(connect.clone());
+            record.transport = transport.clone();
             meter.persist(&record)?;
             state.record = record;
+            *meter.transport.write() = transport;
             *meter.current_connect.write() = Some(connect);
             meter.connect_pending.store(false, Ordering::Release);
             Ok(())

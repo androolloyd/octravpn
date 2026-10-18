@@ -41,6 +41,8 @@ pub struct Config {
     pub dns: Option<DnsConfigSpec>,
     pub serve_derp: bool,
     pub derp_map: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stock_exit: Option<crate::stock::Config>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -64,6 +66,7 @@ impl Default for Config {
             dns: None,
             serve_derp: false,
             derp_map: None,
+            stock_exit: None,
         }
     }
 }
@@ -98,7 +101,36 @@ impl Config {
             .as_ref()
             .map(|path| read_token(path))
             .transpose()?;
-        bind_guarded(self, token, None, KnockConfig::disabled(), admission).await
+        ensure!(
+            self.stock_exit.is_none(),
+            "stock exit requires explicit canonical paid host binding"
+        );
+        bind_guarded(self, token, None, KnockConfig::disabled(), admission, None).await
+    }
+    pub async fn bind_stock_guarded(
+        self,
+        admission: Admission,
+        operator_key: [u8; 32],
+        guard: Arc<dyn crate::payments::Guard>,
+    ) -> Result<Service> {
+        ensure!(
+            self.stock_exit.is_some() && self.serve_derp,
+            "stock exit requires explicit config and native DERP"
+        );
+        let token = self
+            .admin_token_file
+            .as_ref()
+            .map(|p| read_token(p))
+            .transpose()?;
+        bind_guarded(
+            self,
+            token,
+            None,
+            KnockConfig::disabled(),
+            admission,
+            Some((operator_key, guard)),
+        )
+        .await
     }
 }
 
@@ -109,9 +141,13 @@ pub struct Service {
     listeners: FuturesUnordered<JoinHandle<std::io::Result<()>>>,
     background: Vec<JoinHandle<()>>,
     _lock: File,
+    stock_exit: Option<Arc<crate::stock::Exit>>,
 }
 
 impl Service {
+    pub fn stock_exit(&self) -> Option<Arc<crate::stock::Exit>> {
+        self.stock_exit.clone()
+    }
     pub async fn run(mut self, mut shutdown: watch::Receiver<bool>) -> Result<()> {
         let result = if *shutdown.borrow_and_update() {
             Ok(())
@@ -159,7 +195,11 @@ pub(crate) async fn bind(
     members: Option<crate::members_policy::MembersPolicySync>,
     knock: KnockConfig,
 ) -> Result<Service> {
-    bind_guarded(config, token, members, knock, Arc::new(|| true)).await
+    ensure!(
+        config.stock_exit.is_none(),
+        "stock exit is not a legacy mesh mode"
+    );
+    bind_guarded(config, token, members, knock, Arc::new(|| true), None).await
 }
 
 async fn bind_guarded(
@@ -168,6 +208,7 @@ async fn bind_guarded(
     members: Option<crate::members_policy::MembersPolicySync>,
     knock: KnockConfig,
     admission: Admission,
+    stock: Option<([u8; 32], Arc<dyn crate::payments::Guard>)>,
 ) -> Result<Service> {
     ensure!(
         config.http_addr.is_some() || config.https_addr.is_some(),
@@ -240,15 +281,34 @@ async fn bind_guarded(
     let machines = Arc::new(MachineRegistry::new());
     let stores = crate::mesh_store::MeshStore::open(&config.state_dir, machines.clone())
         .await?
-        .managed_policy(members.is_some());
+        .managed_policy(members.is_some() || stock.is_some());
     let policy = stores.policy.clone();
     if members.is_some() {
         crate::members_policy::install_boot_deny_all(&policy)?;
     }
+    let relay = headscale_core::derp::native::NativeDerpRelay::new();
+    let stock_exit = match (&config.stock_exit, stock) {
+        (Some(spec), Some((operator, guard))) => Some(crate::stock::Exit::install(
+            spec.clone(),
+            operator,
+            machines.clone(),
+            admission.clone(),
+            guard,
+            relay.clone(),
+            (&config.state_dir, &policy),
+        )?),
+        (None, None) => None,
+        _ => anyhow::bail!("stock exit host/config binding missing"),
+    };
+    let stock_gate = stock_exit
+        .clone()
+        .map(|exit| -> crate::native_derp::PeerGate {
+            Arc::new(move |a: &[u8; 32], b: &[u8; 32]| exit.adjacent(a, b))
+        });
     let native_derp = config
         .serve_derp
         .then(|| {
-            crate::native_derp::load_native_derp_runtime(
+            crate::native_derp::load_with_relay(
                 &config.state_dir,
                 key.public_bytes(),
                 machines.clone(),
@@ -257,6 +317,10 @@ async fn bind_guarded(
                 members
                     .as_ref()
                     .map(crate::members_policy::MembersPolicySync::relay_membership),
+                crate::native_derp::RelayPolicy {
+                    relay: relay.clone(),
+                    extra: stock_gate.clone(),
+                },
             )
         })
         .transpose()?;
@@ -279,12 +343,15 @@ async fn bind_guarded(
         octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
     )
     .registration_store(Some(stores.machines.clone()))
-    .registration_gate(Some(Arc::new(admission::GuardedRegistration::new(
-        admission,
-        members
-            .as_ref()
-            .and_then(crate::members_policy::MembersPolicySync::registration_gate),
-    ))))
+    .registration_gate(Some(Arc::new(
+        admission::GuardedRegistration::new(
+            admission,
+            members
+                .as_ref()
+                .and_then(crate::members_policy::MembersPolicySync::registration_gate),
+        )
+        .reserved(stock_exit.as_ref().map(|exit| exit.operator_key)),
+    )))
     .native_derp(native_derp)
     .knock(knock)
     .build();
@@ -338,6 +405,7 @@ async fn bind_guarded(
         .collect(),
         background: vec![],
         _lock: lock,
+        stock_exit,
     };
     if let Some(path) = wire.dns.spec().extra_records_path.clone() {
         service.background.push(dns::spawn_extra_records_watcher(

@@ -1,0 +1,217 @@
+{
+  "schema": "octra_committed_candidate_release_gate_checkpoint_v2",
+  "at": "2026-10-18T03:04:54.534791+00:00",
+  "candidate_release_gates_qualified": true,
+  "published_local_checkpoint": {
+    "path": "docs/rust-node/checkpoints/2026-10-17/native-integration.json",
+    "sha256": "3c9cf856eea0fa2cc27dfa1af852fdd290cc1940ffccbedb62dd98989568f16c"
+  },
+  "implementation_sources_sha256": "7ef76d9b4d0e3823a7d84216b2966c9c732719ec440b929f5e65cc02c6fd4b8f",
+  "prepack_sources_sha256": "1d7406970ed0fc75442355237bce02481b051c7c22675c5bc603c9f595e3e41f",
+  "published_sources_sha256": "0664277bb2c6ba10d870172e823762d3b92ea4b47ba10e2eb1b0eb52c471903e",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "normal_release": {
+    "path": "out/octra-parity-final-20261017/normal-release-fixed-v12/manifest.json",
+    "sha256": "0dfb6467b90bb7df279bcf6d77b09997c830ca734e7d4425cc00a11eef0ae768"
+  },
+  "binary_sha256": "a4d46e4679efc1c9294d1f8e67d7c0b5378eb5d2f82bce801b9ae7f203a55e8e",
+  "composite": {
+    "path": "out/octra-parity-final-20261017/final-composite-v13-final-v1/report.json",
+    "sha256": "715d6efc80e1601f00fa67629f9de07fef6ef7e67a7c16557acb32e3e0b40065"
+  },
+  "strict_five": {
+    "path": "out/octra-parity-final-20261017/triple-tested-publication-v10/report.json",
+    "sha256": "ec88b26d16c8c99466f4a145871b91ec9bc2ed0e58bec603e9cc17aae40faffa"
+  },
+  "postpack": {
+    "implementation": {
+      "path": "out/octra-parity-final-20261017/post-pack-bindings-v8.py",
+      "sha256": "7c9a2b10619073c988b5d0acc60dd39b781ed4063ad7da74d29b310da9dabc7a"
+    },
+    "index": {
+      "path": "out/octra-parity-final-20261017/post-pack-bindings-v8-final-v1/index.json",
+      "sha256": "4aab447e60f7df4eb3f06529ab2c39e365af695d260f69e9b56e860af3e9553e"
+    },
+    "roles": {
+      "path": "out/octra-parity-final-20261017/post-pack-bindings-v8-final-v1/gate-roles.json",
+      "sha256": "34ce298ab0921f90b1f7633d7e8259fe1a1d7098bf071df60eb748b1c956e06c"
+    }
+  },
+  "role_bindings": [
+    {
+      "role": "workspace",
+      "path": "out/octra-parity-final-20261017/final-composite-v13-final-v1/report.json",
+      "sha256": "715d6efc80e1601f00fa67629f9de07fef6ef7e67a7c16557acb32e3e0b40065",
+      "checks": {
+        "/qualified": true,
+        "/state": "PASS_COMPOSITE",
+        "/candidate_sources_sha256": "1d7406970ed0fc75442355237bce02481b051c7c22675c5bc603c9f595e3e41f",
+        "/gate_counts/pass": 35
+      }
+    },
+    {
+      "role": "strict",
+      "path": "out/octra-parity-final-20261017/strict-fixed-v12.json",
+      "sha256": "ab8864f81212c0f6ae22cb781358a98c08c4b04c0fc9d799cafe0ae919b18fd6",
+      "checks": {
+        "/exit_code": 0,
+        "/sources_unchanged": true
+      }
+    },
+    {
+      "role": "format",
+      "path": "out/octra-parity-final-20261017/format-fixed-v12.json",
+      "sha256": "7d7d6e3d6b576674c3f483126a34fb81c54297fcbb0740db0bf07ab137366ae3",
+      "checks": {
+        "/exit_code": 0,
+        "/sources_unchanged": true
+      }
+    },
+    {
+      "role": "normal_build",
+      "path": "out/octra-parity-final-20261017/normal-cli-build-fixed-v12.json",
+      "sha256": "481d592e69c6d9c3b9066b3ca12c4fa23d03a18e7f996a49dc27753c64b32527",
+      "checks": {
+        "/exit_code": 0,
+        "/sources_unchanged": true,
+        "/sources_sha256": "7ef76d9b4d0e3823a7d84216b2966c9c732719ec440b929f5e65cc02c6fd4b8f"
+      }
+    },
+    {
+      "role": "headscale",
+      "path": "out/octra-parity-final-20261017/headscale-component-v1.json",
+      "sha256": "dc37c0a3ac51ea076468363aa1b24b1e3cb4f826ee7f512f3e2af30b2032f091",
+      "checks": {
+        "/exit_code": 0,
+        "/sources_unchanged": true,
+        "/tests/passed": 787,
+        "/tests/failed": 0
+      }
+    },
+    {
+      "role": "native_references",
+      "path": "out/octra-parity-final-20261017/registry-native-v1.json",
+      "sha256": "ed95dafeb10ac2d1226da5f6e0ec12cc0be1ff512638f7d065a7ef4c0d664483",
+      "checks": {
+        "/exit_code": 0,
+        "/sources_unchanged": true
+      }
+    },
+    {
+      "role": "circle_prepaid_native",
+      "path": "out/octra-parity-final-20261017/post-pack-bindings-v8-final-v1/circle-native-acceptance.json",
+      "sha256": "833b1c32004857ccb3426ac95ff94764352b956f9b9ab86048b53bfbac6b92fe",
+      "checks": {
+        "/qualified": true,
+        "/upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+        "/case_count": 13,
+        "/native_builder_image": "sha256:e61194220c65f9f0b8034a4816fb15d47dfe7dda8ece1087d9850b6d838bae95",
+        "/new_native_or_rust_execution_by_this_producer": false
+      }
+    },
+    {
+      "role": "circle_prepaid_runtime",
+      "path": "out/octra-parity-final-20261017/post-pack-bindings-v8-final-v1/circle-native-acceptance.json",
+      "sha256": "833b1c32004857ccb3426ac95ff94764352b956f9b9ab86048b53bfbac6b92fe",
+      "checks": {
+        "/qualified": true,
+        "/runtime_replay/whole_target/summary/passed": 13,
+        "/runtime_replay/whole_target/summary/failed": 0,
+        "/runtime_replay/named_case/name": "native_prepaid_circle_custody_epochs_match",
+        "/runtime_replay/named_case/status": "ok",
+        "/runtime_replay/new_execution": false,
+        "/new_native_or_rust_execution_by_this_producer": false
+      }
+    },
+    {
+      "role": "lean",
+      "path": "out/octra-parity-final-20261017/lean-v1.json",
+      "sha256": "4763e466004c0f2cc13604771a798340a9b2d29cae72b4f4d9c3fef3074fae4c",
+      "checks": {
+        "/exit_code": 0,
+        "/sources_unchanged": true
+      }
+    },
+    {
+      "role": "hfhe_fresh",
+      "path": "out/octra-parity-final-20261017/post-pack-bindings-v8-final-v1/hfhe-component-acceptance.json",
+      "sha256": "45d49016061ab85dc719a6bf02e9d2f591d354eaa0e750b8ee45ab1b2da15189",
+      "checks": {
+        "/qualified": true,
+        "/new_logical_rust_cases_added": 0
+      }
+    },
+    {
+      "role": "legacy_physical",
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/physical/result.json",
+      "sha256": "bac703086f2f02f77dafebdb157e70f40014cb88cab5243dec09fa33cce288c1",
+      "checks": {
+        "/qualified": true,
+        "/exit_code": 0,
+        "/case_count": 40
+      }
+    },
+    {
+      "role": "browser",
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/browser/result.json",
+      "sha256": "e1a523dfaa3ef8cd4b180669592a404c34b3ae4fd305b7d8709517d21daf313d",
+      "checks": {
+        "/qualified": true
+      }
+    },
+    {
+      "role": "native_peer",
+      "path": "out/octra-parity-final-20261017/candidate-fixed-v12-gates/native-peer/result.json",
+      "sha256": "30b184605452a7ce8bb5f2773e44ea491f51d451bd6ec9c78a6b1f6fd8be1138",
+      "checks": {
+        "/status": "PASS"
+      }
+    },
+    {
+      "role": "linux_paid_stock_and_multihop",
+      "path": "out/octra-parity-final-20261017/final-composite-v13-final-v1/report.json",
+      "sha256": "715d6efc80e1601f00fa67629f9de07fef6ef7e67a7c16557acb32e3e0b40065",
+      "checks": {
+        "/qualified": true,
+        "/linux_requires_actual_rebuilt_production_and_all_fresh_runtime": true
+      }
+    }
+  ],
+  "producer": {
+    "path": "out/octra-parity-final-20261017/release-role-checkpoint-v2/create-role-checkpoint.py",
+    "sha256": "be04e14facb51cc46eb62ee7195ab30499ff0479405ab5fa5bdbd5f9895d03d3"
+  },
+  "adoption": {
+    "qualified": true,
+    "scope": "Candidate release-gate qualification only; actual observer adoption remains separate.",
+    "binary_sha256": "a4d46e4679efc1c9294d1f8e67d7c0b5378eb5d2f82bce801b9ae7f203a55e8e",
+    "workspace_mode": "fixed-candidate-composite",
+    "original_workspace_status": "FAILED",
+    "required_roles": [
+      "workspace",
+      "strict",
+      "format",
+      "normal_build",
+      "headscale",
+      "native_references",
+      "circle_prepaid_native",
+      "circle_prepaid_runtime",
+      "lean",
+      "hfhe_fresh",
+      "legacy_physical",
+      "browser",
+      "native_peer",
+      "linux_paid_stock_and_multihop"
+    ],
+    "gate_index_sha256": "e36b86528ea7a3b42bdbc9a5e0a9d80511d7d26edfb71526129185f4dd518588",
+    "gate_index_encoding": "SHA256 of canonical JSON of the exact private gate bindings including original evidence paths; public role_bindings use workspace-relative paths."
+  },
+  "public_deployment_qualified": false,
+  "public_deployed": false,
+  "mainnet_qualified": false,
+  "actual_adoption": false,
+  "new_test_build_network_docker_or_process_control_execution": false,
+  "read_only_git_inventory_queries_only": true,
+  "new_logical_rust_cases_added": 0,
+  "scope": "Finite source-bound local candidate gates. Clean pushed commit and fresh process/configuration/environment/prefix guards remain separate. This file authorizes no activation."
+}

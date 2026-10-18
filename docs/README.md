@@ -8,6 +8,17 @@ for everything deeper.
 
 If you are landing here cold, pick a path below.
 
+For the current integrated Rust node and prepaid Octranet service, start with
+[qualification status](rust-node/status.md), the
+[local devnet guide](rust-node/devnet.md), and
+[payment plans](operators/payment-plans.md). Transport configuration is in
+[stock Tailscale exits](architecture/stock-paid-exit.md) and
+[nested exits](architecture/nested-paid-exits.md); the
+[Circle custody variant](architecture/circle-prepaid.md) has its own deployment
+binding. The [native integration checkpoint](rust-node/checkpoints/2026-10-17/native-integration.md)
+records the completed local tests and their exact limits. The older deployment
+guides below retain their version-specific scope.
+
 ---
 
 ## I am a...
@@ -30,10 +41,11 @@ Fallback (if `docs/users/` pages aren't live yet on your branch):
 [`tailnet-user-guide.md`](tailnet-user-guide.md) ·
 [`tutorial-client.md`](tutorial-client.md).
 
-### Operator (I want to run a validator + earn OU)
+### Operator (I want to run an exit + earn OCT)
 
-You stake OU, run an exit/relay endpoint, and collect bandwidth
-receipts that settle on-chain.
+You stake OCT and run an exit/relay endpoint. Current prepaid plans settle
+finite byte purchases before forwarding; the protocol takes no commission.
+Operating an exit does not itself require voting in consensus.
 
 1. [`operators/tour-operator.md`](operators/tour-operator.md) — the
    guided narrative tour from cold host to first paid byte.

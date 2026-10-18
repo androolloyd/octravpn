@@ -1,9 +1,9 @@
 # Native prepaid payment plans
 
-The staged `program/octranet-payments.aml` revision sells byte allowances before
-traffic is carried. Its new qualification record must be checked separately
-from earlier postpaid evidence. Existing v5 deployments and stock Tailscale
-enrollment do not become prepaid plans by enabling this configuration.
+The `program/octranet-payments.aml` application sells byte allowances before
+traffic is carried. Check the [current qualification record](../rust-node/status.md)
+separately from earlier postpaid evidence. Existing v5 deployments and stock
+Tailscale enrollment do not become prepaid plans by enabling this configuration.
 
 Build the application locally:
 
@@ -17,6 +17,12 @@ pins source and OCTB hashes; it grants no typed Program admission. Deploy its
 `bytecode` through the deployment-only factory and verify the exact stored hash.
 The flags select local emitter capabilities, not public network activation.
 No public compiler or consensus change is needed.
+
+For first-party Circle hosting, use the source-derived
+[Circle custody variant](../architecture/circle-prepaid.md). It preserves these
+payment rules and uses a separate application kind, factory and signed operation
+domain. Native deferred spawn requires deployment and initialization in separate
+finalized transactions.
 
 An operator's BFT node selects `payments` instead of `vpn`:
 
@@ -103,6 +109,16 @@ TUN access requires host privileges. The command prints the actual interface
 and address. Provision routes and NAT explicitly, keeping control and WireGuard
 endpoints outside their own tunnel. The client installs no default route and
 does not modify an existing Tailscale connection.
+
+Stock Tailscale uses the separate [registration-bound payment path](../architecture/stock-paid-exit.md).
+Its fixed onboarding portal remains available before a purchase. General Circle
+HTTPS and Internet exit traffic require canonical purchased allowance. DNS names
+and trusted TLS certificates must be provisioned for the intended deployment.
+
+For two or three paid exits, use [`multi-payments`](../architecture/nested-paid-exits.md).
+Every hop has an independently accepted plan, signature, key and journal.
+Purchases remain final if a later hop fails. The composite client owns Linux
+routing; its MTU and recovery rules differ from the single-interface command.
 
 `get_channel_balance(account)` reports remaining channel funds plus exit
 earnings, excluding operator stake. Opening a plan automatically moves only the

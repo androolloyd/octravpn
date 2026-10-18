@@ -38,23 +38,35 @@ validator driver, canonical commitments, ExEx, Circle browsing and the opt-in
 paid VPN service. Its adopted reference is lite_node
 `7f9be4489870645cfcc95439638cde40f5da9f50`; this application changes no consensus
 rules. The Rust client library exposes the same paid service as the CLI, with
-explicit startup, shutdown and durable recovery. The
+explicit startup, shutdown and durable recovery. The native integration adds
+[Circle custody](docs/architecture/circle-prepaid.md),
+[stock Tailscale payments and Circle HTTPS](docs/architecture/stock-paid-exit.md),
+and [two- or three-hop prepaid routes](docs/architecture/nested-paid-exits.md).
+Each transport requires its own qualification; enrollment alone grants only the
+fixed onboarding portal. The
 [local devnet guide](docs/rust-node/devnet.md) and
 [current node status](docs/rust-node/status.md) describe configuration and
 qualification. [Offline legacy repair](docs/rust-node/legacy-repair.md) resumes
 trusted native-format plans through a pinned compatibility backend; it does not
 rewind modern canonical history or supply an all-Rust physical backend.
 
-The [core parity checkpoint](docs/rust-node/checkpoints/2026-10-17/core-parity.json)
-records **2,616 passing nonignored tests across 237 targets** and qualifies the
-subsequent driver recovery, proposal/proof caches, isolated private
-workers, native legacy staging and live mesh admission changes. It combines
-source-bound native comparisons, workspace tests, actual Rust/OCaml peers,
-four-validator paid kernel traffic, stock Tailscale relay/restart/ACL checks and
-real browser tests. The [review](docs/rust-node/checkpoints/2026-10-17/core-parity-review.md)
-records test corrections, host storage differences and precise qualification
-limits. Complete upstream behavioral equivalence and public paid service remain
-unqualified.
+The [native integration checkpoint](docs/rust-node/checkpoints/2026-10-17/native-integration.md)
+records **35 passing local gates**, **3,516 passing Rust test identities across
+280 logical targets**, nine explicit exclusions and 21 separate Python tests.
+It combines source-bound native comparisons, recovery and isolated-worker tests,
+Rust/OCaml peers, browser checks and seven freshly executed Linux scenarios:
+framed prepaid traffic, stock Tailscale with Program and Circle custody, both
+two-hop exhaustion directions, legacy-v5 private Single and a three-hop route.
+The production node uses a release build; the captured client and standalone
+operator kernel fixtures use debug builds. Repeated executions are counted once.
+It extends the [earlier core checkpoint](docs/rust-node/checkpoints/2026-10-17/core-parity.json).
+Complete upstream behavioral equivalence and public paid service remain unqualified.
+
+A separate [mixed-validator run](docs/rust-node/checkpoints/2026-10-17/mixed-validators.md)
+finalized sixteen epochs with two Rust validators and two hosts around unchanged
+native libraries. Transfers, state and ExEx histories agree across a clean
+four-node restart. This covers the recorded Standard/private-genesis fixture;
+stock-launcher and mixed Circle/private-proof parity remain separate.
 
 Retained finality audits can [reuse verified work within one process](docs/rust-node/checkpoints/2026-10-17/audit-reuse.md).
 Every audit still rereads the full prefix and authenticates historical validator
@@ -62,14 +74,14 @@ authority; startup, exported records and new publication retain their complete
 verification gates. Demo jobs publish only fresh, complete recording groups
 bound to their GitHub run and source commit.
 
-The [previous public devnet observer adoption](docs/rust-node/checkpoints/2026-10-17/audit-reuse-public-adoption.json)
-preserved the canonical/ExEx/archive prefix at epoch 1,708,425, its key,
-configuration and relay. That launch checkpoint recorded RPC opening and
-authenticated catch-up to epoch 1,708,443. The current parity candidate has not
-replaced that observer; paid service remains unconfigured. Sustained public
-serving, stock Tailscale
-payment/onboarding, portal funding, DNS/TLS and Mainnet remain open qualification
-gates. This prepaid candidate is **not deployed to Mainnet**. Local build
+The [qualified core build is running on public devnet](docs/rust-node/checkpoints/2026-10-17/core-parity-public-adoption.json).
+Its retained-state restart preserved the key, configuration, relay and immutable
+canonical/ExEx/archive prefix at epoch 1,709,272. It then advanced 78 epochs, with
+matching ExEx progress, and was observed serving with authenticated peers. This
+records build `44458a5`; subsequent working-tree changes require fresh combined
+qualification. Public paid service remains unconfigured. Sustained availability,
+stock Tailscale payment/onboarding, portal funding, DNS/TLS and Mainnet remain
+open qualification gates. This prepaid candidate is **not deployed to Mainnet**. Local build
 artifacts and tests do not establish public deployment readiness.
 
 The separate [v5 application](docs/private-administration.md) retains private
@@ -365,20 +377,23 @@ octra/                              # this repo
 └── docs/                           # see Documentation table below
 ```
 
-### Sibling repos (path-deps)
+### Build dependencies
 
 | Repo | Role |
 | --- | --- |
 | [octra-foundry](https://github.com/androolloyd/octra-foundry) | `octraforge` (Forge), `octra-mock-rpc` (Anvil), `octra-core` (types + Circle primitive: `circle_id_of_deploy`, sealed-envelope codec, `resource_key`), `octra-cli` (`cast circle …`, `cast register-pvac`) |
-| [headscale-rs](https://github.com/androolloyd/headscale-rs) | Rust Tailscale-style mesh coordination — v2 coordination layer |
+| [headscale-rs](https://github.com/androolloyd/headscale-rs) | Embedded mesh coordination and admin API, fetched by Cargo at `570fa5a60c8ed792b643a301b5e91d3b668ba614` |
 
 ```sh
 mkdir octravpn-workspace && cd $_
 git clone https://github.com/androolloyd/octravpn.git octra
 git clone https://github.com/androolloyd/octra-foundry.git
-git clone https://github.com/androolloyd/headscale-rs.git    # path-dep
-cd octra && cargo build --workspace
+git -C octra-foundry checkout d5feaad7f14d6a381e2327dfd6738cae8df95b31
+cd octra && cargo build --locked --workspace
 ```
+
+Foundry is the sibling path dependency. A separate Headscale checkout is optional
+for its own development and tests; editing it does not change the pinned build.
 
 > Single-binary install: `octravpn-node` now embeds the entire
 > `headscale` admin CLI under `octravpn-node headscale …`. You no
@@ -390,15 +405,15 @@ cd octra && cargo build --workspace
 
 Prereqs: **Rust** via [rustup](https://rustup.rs) (the repo's
 `rust-toolchain.toml` auto-selects 1.96.0 — no manual version pick) and the
-**two sibling repos** cloned side-by-side, per
-[Sibling repos](#sibling-repos-path-deps) above.
+**Foundry sibling** cloned at the revision above, per
+[Build dependencies](#build-dependencies).
 
 ```sh
-# Build everything (needs both sibling repos cloned side-by-side)
-cargo build --workspace --release
+# Build everything with the pinned dependencies
+cargo build --locked --workspace --release
 
 # Run unit + integration + e2e tests (uses in-process mock RPC)
-cargo test --workspace
+cargo test --locked --release --workspace
 ```
 
 ## Tests
@@ -479,6 +494,7 @@ live mainnet RPC on every PR.
 | State machine v1.1  | TLA+      | `OctraVPN.tla` — 12 invariants, 223,118 distinct states, depth 26 |
 | State machine v2    | TLA+      | `OctraVPN_V2.tla` — circle-keyed, atomic register-bond, per-class price-stamp, 3,805,681 distinct states, depth 31 |
 | Program semantics   | Lean 4    | OctraVPN + OctraVPN_V2 + OctraVPN_V3 + OctraVPN_Rust + WireProtocol modules in `proofs/lean/` — 373 theorems / 0 `sorry` |
+| Prepaid channels    | Lean 4    | `OctranetPayments.lean` — 39 abstract payment theorems; no compiler/VM refinement or Internet-delivery theorem |
 | Crypto protocol     | Tamarin   | receipt unforgeability, double-sign slashable, no link before settle (advisory) |
 | Rust implementation | Kani      | receipt round-trip, monotonic check, payload determinism |
 | Rust runtime        | proptest  | 30 harnesses across `octravpn-core` + `octravpn-mesh` — canonicalization, monotonic seq, security, receipt context binding, sweep determinism |
@@ -495,6 +511,10 @@ cargo test --workspace
 
 ## What's blocked
 
+- **Public paid onboarding remains unqualified.** Local packet and custody
+  qualification does not provision public Circle assets, wallet funding,
+  control reachability or trusted DNS/TLS for `octra.to`. Public observation of
+  devnet does not enable a paid exit. Mainnet is a separate launch gate.
 - **Public HFHE settlement remains unqualified.** The May 20 key-load
   blocker was historical. The October 17 recheck found no registered key
   for its test wallet, outdated RPC arguments and a nonexistent probe method.

@@ -1,0 +1,4 @@
+(executable
+ (name main)
+ (modules fixture execution main)
+ (libraries octra_core octra_crypto_guard octra_node_runtime octra_consensus octra_net octra_vm lwt.unix cohttp-lwt-unix yojson base64 digestif mirage-crypto-ec mirage-crypto-rng.unix))

@@ -9,6 +9,32 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [native integration checkpoint](checkpoints/2026-10-17/native-integration.json)
+  records 35 passing scoped gates, 3,516 distinct passing Rust test identities
+  across 280 logical targets and nine explicit exclusions. Twenty-one Python
+  fixture tests are separate. Seven Linux scenarios executed freshly: framed
+  prepaid traffic, stock Program and Circle custody, both two-hop exhaustion
+  directions, legacy-v5 private Single and three-hop Program traffic. They cover
+  canonical purchases, direct/DERP carriage, paid Circle HTTPS, independent
+  hop limits, restart, carrier-loss blocking, immediate withdrawal and ExEx.
+  Native comparisons, browser and physical recovery retain their own recorded
+  scope; retained Rust results keep their original execution labels. The node
+  and administration tool use release builds; the kernel client/operator tools
+  use debug builds. The [adversarial review](../audit/octranet-native-integration-2026-10-17.md)
+  preserves failures and fixture corrections. These finite results certify
+  neither every native profile/schedule nor public paid deployment or Mainnet.
+- The [mixed-validator checkpoint](checkpoints/2026-10-17/mixed-validators.json)
+  records sixteen finalized epochs with two production Rust validators and two
+  hosts around unchanged native consensus/execution libraries. One Standard
+  transfer finalized before a clean four-process restart at epoch eight and
+  another afterward. Canonical roots, authenticated headers, transaction IDs,
+  receipt roots and immutable ExEx transactions agree; retained prefixes and
+  validator identities survive the restart. All four validators appear in
+  finalized quorums and both implementations create proposals. The
+  [review](checkpoints/2026-10-17/mixed-validators.md) preserves initial fixture
+  failures and a disclosed report-list alias. This finite Prior/private-genesis
+  fixture adds no Rust test count and does not qualify the stock OCaml launcher,
+  mixed Circle/private-proof workloads, crash recovery or public deployment.
 - The [core parity checkpoint](checkpoints/2026-10-17/core-parity.json) closes
   the concrete gaps found in the current active-node review: driver recovery,
   proposal/proof reuse with fresh authority checks, owned private worker
@@ -22,9 +48,10 @@ upstream behavioral parity and public-network deployment remain unqualified.
   Separate actual Rust/OCaml peers, private-process failures, Chrome application
   and gateway checks, four-validator prepaid kernel traffic, Single-mode traffic,
   and stock Tailscale persistence/forced-DERP/live-ACL checks have their exact
-  scope recorded. Stock-client tests use a standalone self-hosted mesh; paid
-  stock onboarding, system DNS, public `octra.to` TLS and portal funding remain
-  open. This candidate has not replaced the retained public observer. Complete
+  scope recorded. That checkpoint's stock-client tests use a standalone
+  self-hosted mesh; they do not qualify paid stock onboarding, system DNS,
+  public `octra.to` TLS or portal funding. Its public observer adoption is
+  recorded separately below. Complete
   upstream behavioral equivalence, whole experimental HFHE library parity and
   Mainnet are not certified by these local results.
 - The [retained-audit checkpoint](checkpoints/2026-10-17/audit-reuse.json) records

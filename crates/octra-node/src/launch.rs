@@ -39,6 +39,8 @@ pub(crate) struct Services {
     pub tunnel: SocketAddr,
     pub gateway: Option<crate::gateway::Config>,
     pub mesh: Option<octravpn_node::mesh_control::Config>,
+    pub stock_portal: Option<crate::gateway::StockPortalConfig>,
+    pub stock_circle_gateway: Option<crate::gateway::StockCircleConfig>,
 }
 pub(crate) struct Transport {
     pub listen: SocketAddr,
@@ -641,6 +643,121 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
             wireguard,
             operator,
         } = crate::vpn::Keys::derive(&key);
+        let mut mesh_service = None;
+        let mut stock_exit = None;
+        if let Some(mut mesh) = services.mesh.clone() {
+            let service = if let Some(stock) = &mesh.stock_exit {
+                anyhow::ensure!(
+                    payments.is_some(),
+                    "stock exit requires canonical prepaid payments"
+                );
+                let portal = services
+                    .stock_portal
+                    .as_ref()
+                    .context("stock exit requires fixed canonical TLS portal")?;
+                anyhow::ensure!(
+                    stock.portal_port == 443
+                        && portal.listen
+                            == SocketAddr::new(octravpn_core::ip_tunnel::GATEWAY.into(), 443),
+                    "stock portal must use dedicated VPN gateway TLS443"
+                );
+                let dns = mesh
+                    .dns
+                    .as_mut()
+                    .context("stock exit requires MagicDNS for its HTTPS portal origin")?;
+                anyhow::ensure!(
+                    dns.magic_dns && dns.extra_records_path.is_none(),
+                    "stock portal requires fixed inline MagicDNS records"
+                );
+                let hostname = portal
+                    .origin
+                    .strip_prefix("https://")
+                    .context("stock portal requires canonical HTTPS origin")?;
+                anyhow::ensure!(
+                    !dns.extra_records.iter().any(|record| record
+                        .name
+                        .trim_end_matches('.')
+                        .eq_ignore_ascii_case(hostname)
+                        && !(record.record_type == "A"
+                            && record.value == stock.operator_ipv4.to_string())),
+                    "stock portal DNS conflicts"
+                );
+                dns.extra_records.push(octravpn_node::stock::DnsRecord {
+                    name: hostname.into(),
+                    record_type: "A".into(),
+                    value: stock.operator_ipv4.to_string(),
+                });
+                anyhow::ensure!(
+                    stock.circle_gateway == services.stock_circle_gateway.is_some(),
+                    "stock Circle gateway config and transport mapping must agree"
+                );
+                if let Some(circle) = &services.stock_circle_gateway {
+                    let host = circle
+                        .origin
+                        .strip_prefix("https://")
+                        .context("stock Circle gateway requires HTTPS DNS origin")?;
+                    anyhow::ensure!(
+                        host != hostname,
+                        "paid Circle and unpaid portal origins must differ"
+                    );
+                    anyhow::ensure!(
+                        !dns.extra_records.iter().any(|record| record
+                            .name
+                            .trim_end_matches('.')
+                            .eq_ignore_ascii_case(host)
+                            && !(record.record_type == "A"
+                                && record.value
+                                    == octravpn_node::stock::CIRCLE_GATEWAY.to_string())),
+                        "stock Circle DNS conflicts"
+                    );
+                    dns.extra_records.push(octravpn_node::stock::DnsRecord {
+                        name: host.into(),
+                        record_type: "A".into(),
+                        value: octravpn_node::stock::CIRCLE_GATEWAY.to_string(),
+                    });
+                    for site in circle.sites.keys() {
+                        anyhow::ensure!(
+                            !dns.extra_records.iter().any(|record| record
+                                .name
+                                .trim_end_matches('.')
+                                .eq_ignore_ascii_case(site)
+                                && !(record.record_type == "A"
+                                    && record.value
+                                        == octravpn_node::stock::CIRCLE_GATEWAY.to_string())),
+                            "stock Circle site DNS conflicts"
+                        );
+                        if !dns.extra_records.iter().any(|record| {
+                            record.name.trim_end_matches('.').eq_ignore_ascii_case(site)
+                        }) {
+                            dns.extra_records.push(octravpn_node::stock::DnsRecord {
+                                name: site.clone(),
+                                record_type: "A".into(),
+                                value: octravpn_node::stock::CIRCLE_GATEWAY.to_string(),
+                            });
+                        }
+                    }
+                }
+                mesh.bind_stock_guarded(
+                    crate::mesh::admission(node.shared.clone()),
+                    x25519_dalek::PublicKey::from(&wireguard).to_bytes(),
+                    crate::mesh::stock_guard(node.shared.clone()),
+                )
+                .await?
+            } else {
+                mesh.bind_guarded(crate::mesh::admission(node.shared.clone()))
+                    .await?
+            };
+            stock_exit = service.stock_exit();
+            mesh_service = Some(service);
+        }
+        anyhow::ensure!(
+            services.stock_portal.is_none() || stock_exit.is_some(),
+            "stock portal requires explicit stock exit"
+        );
+        anyhow::ensure!(
+            services.stock_circle_gateway.is_none() || stock_exit.is_some(),
+            "stock Circle gateway requires explicit prepaid stock exit"
+        );
         let paid = if let Some(config) = payments {
             config.ip_tunnel.validate()?;
             let application = Arc::new(node.payments(config.application, operator.clone())?);
@@ -671,11 +788,20 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                     application,
                     publisher,
                 )
-                .await?,
+                .await?
+                .with_stock_exit(stock_exit.clone())?,
             )
         } else {
             None
         };
+        if let Some(portal) = services.stock_portal.clone() {
+            let service = node.bind_stock_portal(portal).await?;
+            tasks.spawn(service.run(stop.subscribe()));
+        }
+        if let Some(circle) = services.stock_circle_gateway.clone() {
+            let service = node.bind_stock_circle_gateway(circle).await?;
+            tasks.spawn(service.run(stop.subscribe()));
+        }
         let mut ip_tunnel = vpn.as_ref().and_then(|config| config.ip_tunnel.clone());
         if let Some(config) = &mut ip_tunnel {
             config.validate()?;
@@ -785,10 +911,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
             bound = bound.with_settlement(publisher);
         }
         tasks.spawn(bound.run(stop.subscribe()));
-        if let Some(mesh) = services.mesh.clone() {
-            let service = mesh
-                .bind_guarded(crate::mesh::admission(node.shared.clone()))
-                .await?;
+        if let Some(service) = mesh_service {
             tasks.spawn(service.run(stop.subscribe()));
         }
         if let Some(config) = services.gateway.clone() {

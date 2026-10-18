@@ -1,0 +1,21 @@
+{
+  "schema": "octra-three-hop-kernel-source-v1",
+  "scope": "Source-pinned isolated three-operator Program kernel fixture; all five primary gates must pass first",
+  "copied_base_source_sha256": {
+    "stock_run.py": "164803f574f6a4247034b51133c34631faa1aea0fc01c9214e4cbf51f8d19937",
+    "stock_operator.py": "c96aaead0de41b84fe9445d306bca043420806b519b791383893b4937ab1786d",
+    "multi_link.py": "6254fc6cc98adafa97463016721f9a1bcbf7d304b239c38b1f1776b8c68b00a0",
+    "multi_target.py": "1882d56405aa5861bd6ce577e9f232a7e631e84ff53a43dbd0020d73bf3d9bee",
+    "multi_fixture.py": "f7a5d28d4dafa4c32a61305d5d4110bf4741d3e6ff43ff2f6dcdf763a12451fd",
+    "multi_client.py": "6b0572c465caaa93568693faa71a01c3ffe9cea79663faadf4d756c4c5f6653b",
+    "multi_run.py": "d59791d12937f4673c551861ed94ff48c7f07000bd19308ab1dbb3e4e7ad32fd",
+    "json_snapshot.py": "e219c0b754b0ccde441c8d1d4df1419fbbf0404da3ebf16c85396f4e220cc1b6"
+  },
+  "production_source_overrides": [],
+  "limitations": [
+    "Program custody only",
+    "Explicit destination-IP management exemptions; no per-socket isolation",
+    "Manual exact owned-route cleanup before crash resume",
+    "No public-network, mainnet or non-delivery-slashing claim"
+  ]
+}

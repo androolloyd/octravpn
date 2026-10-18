@@ -141,6 +141,12 @@ def main():
             'program/octranet-payments-circle-init.aml.in','program/octranet-payments-circle-factory.aml',
             'crates/octra-node/src/vpn/payments/build.rs']},
         scope='Unchanged native compiler and full epoch Circle host: source-derived immutable initialization, parent-owned deferred spawn, real value custody/withdrawal, Ed25519 advance purchase, repeated claim refusal, canonical epoch clock, retained multi-epoch exact day/week boundaries, rate cancellation/reschedule and rollback. No BFT admission, public deployment or delivery proof.')
+    # Keep the actual native output even when a scenario assertion fails.
+    # A failed run is diagnostic evidence, never a promoted golden fixture.
+    observed = args.out.with_name(args.out.stem + '.observed.json')
+    if observed.exists():
+        raise SystemExit('Require fresh observed output')
+    observed.write_text(json.dumps(report, indent=2)+'\n')
     expected_refusals = [[12,13,17],list(range(2,8)),[5],[],
         [],[0],[0],[1],[],[],[],[0,1],[0]]
     assert len(report['cases']) == len(expected_refusals)
@@ -148,7 +154,10 @@ def main():
         result = case['expected']['result']
         assert 'error' not in result, case['input']['name']
         assert [row['index'] for row in result['rejected']] == rejected, (case['input']['name'],result)
-        assert all(row['charged'] for row in result['rejected']), case['input']['name']
+        # Epoch_exec's `charged` outcome marker is reserved for the three
+        # compute money operations. Circle failures can still retain VM fees;
+        # the golden replay compares the real fee totals and ledger accounts.
+        assert all(row['charged'] is False for row in result['rejected']), case['input']['name']
         assert len(result['confirmed']) + len(rejected) == len(case['input']['transactions'])
     # Actual receipt clock, not process wall time, determines day/week boundaries.
     import base64

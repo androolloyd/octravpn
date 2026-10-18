@@ -27,8 +27,36 @@ pub(crate) fn load_native_derp_runtime(
     admission: crate::mesh_control::Admission,
     members: Option<crate::members_policy::SharedMembership>,
 ) -> Result<Arc<NativeDerpRuntime>> {
+    load_with_relay(
+        state_dir,
+        noise_public,
+        machines,
+        policy,
+        admission,
+        members,
+        RelayPolicy {
+            relay: NativeDerpRelay::new(),
+            extra: None,
+        },
+    )
+}
+
+pub(crate) type PeerGate = Arc<dyn Fn(&[u8; 32], &[u8; 32]) -> bool + Send + Sync>;
+pub(crate) struct RelayPolicy {
+    pub relay: NativeDerpRelay,
+    pub extra: Option<PeerGate>,
+}
+pub(crate) fn load_with_relay(
+    state_dir: impl AsRef<Path>,
+    noise_public: [u8; 32],
+    machines: Arc<MachineRegistry>,
+    policy: PolicyStore,
+    admission: crate::mesh_control::Admission,
+    members: Option<crate::members_policy::SharedMembership>,
+    RelayPolicy { relay, extra }: RelayPolicy,
+) -> Result<Arc<NativeDerpRuntime>> {
     let key_path = state_dir.as_ref().join("derp.key");
-    let runtime = NativeDerpRuntime::load_or_generate(&key_path, NativeDerpRelay::new())
+    let runtime = NativeDerpRuntime::load_or_generate(&key_path, relay)
         .with_context(|| format!("load native DERP key from {}", key_path.display()))?;
     ensure!(
         runtime.public_key() != noise_public,
@@ -45,7 +73,9 @@ pub(crate) fn load_native_derp_runtime(
                     .is_some_and(|record| live(&record, client_members.as_ref()))
         })
         .with_peer_verifier(move |source, destination| {
-            admission() && peer_allowed(&machines, &policy, members.as_ref(), source, destination)
+            admission()
+                && extra.as_ref().is_none_or(|gate| gate(source, destination))
+                && peer_allowed(&machines, &policy, members.as_ref(), source, destination)
         });
     Ok(Arc::new(runtime))
 }

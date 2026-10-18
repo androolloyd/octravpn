@@ -11,6 +11,8 @@ use crate::{
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 
+pub mod legacy;
+
 pub fn full_set(proposer: &[u8], public_keys: &[(Bytes, Bytes)]) -> Attribution {
     Attribution {
         proposer: proposer.to_vec(),

@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, path::Path, sync::Arc};
 
-mod storage;
+pub(crate) mod storage;
 use storage::Store;
 
 /// Creation is an explicit fresh-plan operation. Recovery never infers creation
@@ -35,6 +35,8 @@ struct Identity {
     original_budget_ou: u64,
     prepaid_bytes: Vec<u64>,
     receipt_key: PublicKey,
+    #[serde(default, skip_serializing_if = "is_false")]
+    stock: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -53,6 +55,14 @@ struct State {
     pending: Option<Pending>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     uncertain_bytes: Vec<u64>,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "Serde's callback takes a reference"
+)]
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[expect(
@@ -240,6 +250,41 @@ impl Journal {
         key: Arc<KeyPair>,
         mode: OpenMode,
     ) -> Result<Self> {
+        Self::open_mode(
+            path,
+            binding,
+            tariff,
+            original_budget_ou,
+            prepaid_bytes,
+            (key, false),
+            mode,
+        )
+    }
+    pub(crate) fn open_stock(
+        path: &Path,
+        plan: &crate::payment_runner::Plan,
+        key: Arc<KeyPair>,
+        mode: OpenMode,
+    ) -> Result<Self> {
+        Self::open_mode(
+            path,
+            plan.binding.clone(),
+            plan.tariff.clone(),
+            plan.original_budget_ou,
+            plan.prepaid_bytes.clone(),
+            (key, true),
+            mode,
+        )
+    }
+    fn open_mode(
+        path: &Path,
+        binding: PlanBinding,
+        tariff: Tariff,
+        original_budget_ou: u64,
+        prepaid_bytes: Vec<u64>,
+        (key, stock): (Arc<KeyPair>, bool),
+        mode: OpenMode,
+    ) -> Result<Self> {
         binding.validate()?;
         ensure!(
             tariff.hash_hex()? == binding.manifest_hash,
@@ -256,6 +301,7 @@ impl Journal {
             original_budget_ou,
             prepaid_bytes,
             receipt_key: key.public,
+            stock,
         };
         let mut store = Store::open(path, mode)?;
         let mut state = match mode {
@@ -355,14 +401,16 @@ impl Journal {
             .connection_sequence
             .checked_add(1)
             .context("client connection sequence exhausted")?;
-        let signed = SignedConnect::sign(
-            Connect {
-                binding: next.identity.binding.clone(),
-                sequence: next.connection_sequence,
-                wireguard_key,
-            },
-            &self.key,
-        )?;
+        let request = Connect {
+            binding: next.identity.binding.clone(),
+            sequence: next.connection_sequence,
+            wireguard_key,
+        };
+        let signed = if next.identity.stock {
+            SignedConnect::sign_stock(request, &self.key)?
+        } else {
+            SignedConnect::sign(request, &self.key)?
+        };
         self.commit(next)?;
         Ok(signed)
     }
@@ -500,6 +548,7 @@ impl Journal {
     pub(crate) fn authorized_totals(&self) -> &[u64] {
         &self.state.authorized_bytes
     }
+    #[cfg(test)]
     pub(crate) fn uncertain_totals(&self) -> &[u64] {
         &self.state.uncertain_bytes
     }
@@ -511,9 +560,6 @@ impl Journal {
             .zip(&self.state.local_bytes)
             .map(|(capacity, confirmed)| capacity - confirmed)
             .collect())
-    }
-    pub(crate) fn binding(&self) -> &PlanBinding {
-        &self.state.identity.binding
     }
     pub(crate) fn remaining_ou(&self) -> Result<u64> {
         self.ready()?;

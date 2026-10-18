@@ -16,11 +16,18 @@ def command(args, timeout=120):
     if result.returncode: raise RuntimeError(f'{args[0]} {args[1]} exited {result.returncode}: {result.stderr[-4000:]}')
     return result.stdout.strip()
 def cli(*args):return json.loads(command(['octra',*args]))
+class SnapshotBusy(RuntimeError): pass
 def rpc(method,params,endpoint=RPC):
     request=urllib.request.Request(endpoint,data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params}).encode(),headers={'Content-Type':'application/json'})
     with urllib.request.urlopen(request,timeout=10) as response: raw=response.read(4_500_001)
     if len(raw)>4_500_000:raise ValueError('RPC response byte bound')
     result=json.loads(raw)
+    error=result.get('error')
+    busy={'contract_call':(-32005,'program snapshot unavailable'),'circle_view':(110,'service unavailable')}
+    if (type(result.get('id')) is int and result['id']==1 and 'result' not in result
+        and isinstance(error,dict) and type(error.get('code')) is int
+        and method in busy and (error.get('code'),error.get('message'))==busy[method]):
+        raise SnapshotBusy(f'{method}: {result}')
     if result.get('id')!=1 or 'error' in result or 'result' not in result:raise RuntimeError(f'{method}: {result}')
     return result['result']
 def get(url,host=None):
@@ -67,8 +74,17 @@ def send(label,key,program,method,params,value=0,expected=True):
     result=cli('cast','send',program,method,*[json.dumps(v,separators=(',',':')) for v in params],
         '--key',key,'--rpc-url',RPC,'--fee',FEE,'--value',value)
     return record(label,result,expected)
+def readonly_view(rpc_method,program,method,params=None):
+    # Ten calls at the unchanged 10s socket timeout, plus at most nine 100ms
+    # waits. This is an attempt bound, not an absolute one-second deadline.
+    args=[program,method,params or []]
+    for attempt in range(10):
+        try:return rpc(rpc_method,args)
+        except SnapshotBusy:
+            if not(method.startswith('get_') or method=='can_forward') or attempt==9:raise
+            time.sleep(.1)
 def view(program,method,params=None):
-    result=rpc('contract_call',[program,method,params or []])
+    result=readonly_view('contract_call',program,method,params)
     if not isinstance(result,dict) or 'result' not in result:raise ValueError(f'{method}: invalid view {result}')
     return result['result']
 def start(index):

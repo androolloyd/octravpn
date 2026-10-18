@@ -83,7 +83,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: androolloyd/headscale-rs
-          ref: 64bc54312ff9c4c2946f563f21875cf55e3f8f55
+          ref: 570fa5a60c8ed792b643a301b5e91d3b668ba614
           path: headscale-rs
 
       - name: Install Rust toolchain

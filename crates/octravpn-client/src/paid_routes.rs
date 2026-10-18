@@ -10,7 +10,10 @@
 //! proto 186` and `ip -6 -j route show proto 186`, and confirm every route has
 //! this module's exact prefix/type/device and metric 45678 or 45679. Remove
 //! only those verified routes with matching `ip route del` commands. Never
-//! flush protocol 186 blindly; it is a numeric Linux route tag, not ownership
+//! Composite routes also use table 186 and priority 1 policy rules; inspect
+//! both families with `ip -j rule show` and `ip -j route show table 186`.
+//! Never delete a rule or route without verifying that exact retained lease.
+//! Never flush protocol 186 blindly; it is a numeric Linux route tag, not ownership
 //! proof. The /1 blackholes must remain until the user deliberately recovers.
 
 use std::{
@@ -27,6 +30,69 @@ pub(crate) struct PaidRouteGuard {
     lease: linux::Lease,
     #[cfg(not(target_os = "linux"))]
     unavailable: std::convert::Infallible,
+}
+
+/// One exclusive host lease for a complete nested prepaid route. Management
+/// destinations are explicit IP exceptions, not a per-socket firewall policy.
+pub(crate) struct CompositeRouteGuard {
+    #[cfg(target_os = "linux")]
+    lease: linux::multi::Lease,
+    #[cfg(not(target_os = "linux"))]
+    unavailable: std::convert::Infallible,
+}
+impl CompositeRouteGuard {
+    pub(crate) fn arm(
+        entry: SocketAddrV4,
+        controls: &[SocketAddrV4],
+        peers: &[SocketAddrV4],
+        interfaces: &[String],
+    ) -> Result<Self> {
+        #[cfg(target_os = "linux")]
+        {
+            Ok(Self {
+                lease: linux::multi::Lease::arm(entry, controls, peers, interfaces)?,
+            })
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (entry, controls, peers, interfaces);
+            bail!("composite paid routes require Linux crash-safe route management")
+        }
+    }
+    #[cfg_attr(not(target_os = "linux"), allow(clippy::needless_pass_by_ref_mut))]
+    pub(crate) fn next(&mut self, previous: &crate::Interface, peer: SocketAddrV4) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            self.lease.next(previous, peer)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (previous, peer);
+            match self.unavailable {}
+        }
+    }
+    #[cfg_attr(not(target_os = "linux"), allow(clippy::needless_pass_by_ref_mut))]
+    pub(crate) fn finish(&mut self, exit: &crate::Interface) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            self.lease.finish(exit)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = exit;
+            match self.unavailable {}
+        }
+    }
+    pub(crate) fn disconnect(self) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            self.lease.disconnect()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            match self.unavailable {}
+        }
+    }
 }
 
 impl PaidRouteGuard {
@@ -143,6 +209,7 @@ fn validate_interface(name: &str) -> Result<()> {
 #[cfg(any(target_os = "linux", test))]
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod linux {
+    pub(super) mod multi;
     use std::{fs::File, net::SocketAddrV4, os::unix::fs::MetadataExt, process::Command};
 
     use anyhow::{anyhow, bail, Context, Result};
@@ -429,6 +496,8 @@ mod linux {
                 "-j".into(),
                 "route".into(),
                 "show".into(),
+                "table".into(),
+                "all".into(),
                 "proto".into(),
                 PROTO.into(),
             ])?;

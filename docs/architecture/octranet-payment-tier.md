@@ -1,6 +1,6 @@
 # Octranet onboarding and payment tier
 
-This is the prepaid implementation target revised on 2026-10-17. It supersedes the
+This is the prepaid application specification revised on 2026-10-17. It supersedes the
 assumption that joining a stock Tailscale mesh opens a paid traffic session.
 The existing v5 deployments and their recorded tests remain separate.
 
@@ -113,11 +113,14 @@ The current client accepts finite purchase targets; it does not auto-renew,
 automatically accept future rates or implement a collateral-backed PAYG mode.
 
 Custody logic belongs in the application. The adopted AML runtime already
-offers signature verification and Program `epoch_time`; Circle compilation
-currently refuses `epoch_time`. Use that existing Program capability for the
-timed payment application and Circles for portal and offer assets. Any future
-Circle clock capability needs a separately specified experimental fork; do not
-change the adopted consensus rules to make this application compile.
+offers signature verification and Program `epoch_time`. Ordinary Circle-source
+compilation refuses that expression, but the existing OCTB Circle host already
+supplies the canonical epoch timestamp in milliseconds. The source-derived
+[Circle custody variant](circle-prepaid.md) therefore compiles Program-syntax
+raw OCTB for that unchanged host, with fixed terms and a separate finalized
+initialization call. It adds no clock import, VM instruction or consensus rule.
+Program custody remains the default; each kind has its own deployment pins and
+receipt domain. Portal and offer assets remain Circle resources.
 
 The adopted typed Program flow profile does not accept Ed25519 instructions.
 The local `compile-legacy` tool therefore emits this Program source as raw OCTB
@@ -181,9 +184,11 @@ survive reconnects; resume refuses missing, corrupt or old postpaid state.
 
 The gateway's [portal capability](../operators/unpaid-portal.md) limits unpaid
 reads to explicitly selected passive assets in one Circle. It does not confer
-device enrollment, general DNS/DERP access or paid forwarding. The new native
-payment path still requires combined kernel, recovery and public qualification
-before the application can accept alpha traffic.
+device enrollment, general DNS/DERP access or paid forwarding. The
+[native integration checkpoint](../rust-node/checkpoints/2026-10-17/native-integration.md)
+records the completed local kernel and recovery qualification, including seven
+fresh Linux scenarios. Public paid onboarding and deployment qualification
+remain required before accepting alpha traffic.
 
 ## Trustless delivery boundary
 

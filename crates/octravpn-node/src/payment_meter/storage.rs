@@ -17,7 +17,7 @@ const MAX_BYTES: u64 = 131_072;
 #[cfg(unix)]
 // Version 1 treated redemption as delivered bytes and allowed operator credit.
 // It must never be reinterpreted as a prepaid consumption journal.
-const VERSION: u8 = 2;
+const VERSION: u8 = 3;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -31,8 +31,84 @@ pub(super) struct Record {
     pub pending: Vec<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connect: Option<octravpn_core::payments::SignedConnect>,
+    pub transport: crate::stock::Transport,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub authorizations: Vec<Option<octravpn_core::payments::SignedUsage>>,
+}
+// Version 2 had exactly one framing: session/onion-framed IPv4. Validate
+// its original struct transcript before converting; never infer Stock mode.
+#[cfg(unix)]
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyRecord {
+    binding: Binding,
+    tariff_hash: String,
+    budget_ou: u64,
+    committed: Vec<u64>,
+    purchased: Vec<u64>,
+    uncertain: Vec<u64>,
+    pending: Vec<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    connect: Option<octravpn_core::payments::SignedConnect>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    authorizations: Vec<Option<octravpn_core::payments::SignedUsage>>,
+}
+#[cfg(unix)]
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyEnvelope {
+    version: u8,
+    record: LegacyRecord,
+    sha256: String,
+}
+#[cfg(unix)]
+fn decode(raw: &[u8]) -> Result<Record> {
+    let probe: serde_json::Value = serde_json::from_slice(raw).context("invalid meter journal")?;
+    match probe.get("version").and_then(serde_json::Value::as_u64) {
+        Some(3) => {
+            let envelope: Envelope = serde_json::from_slice(raw)?;
+            ensure!(
+                envelope.version == VERSION
+                    && hex::encode(Sha256::digest(serde_json::to_vec(&envelope.record)?))
+                        == envelope.sha256,
+                "meter journal checksum differs"
+            );
+            Ok(envelope.record)
+        }
+        Some(2) => {
+            let envelope: LegacyEnvelope = serde_json::from_slice(raw)?;
+            ensure!(
+                envelope.version == 2
+                    && hex::encode(Sha256::digest(serde_json::to_vec(&envelope.record)?))
+                        == envelope.sha256,
+                "legacy meter journal checksum differs"
+            );
+            let LegacyRecord {
+                binding,
+                tariff_hash,
+                budget_ou,
+                committed,
+                purchased,
+                uncertain,
+                pending,
+                connect,
+                authorizations,
+            } = envelope.record;
+            Ok(Record {
+                binding,
+                tariff_hash,
+                budget_ou,
+                committed,
+                purchased,
+                uncertain,
+                pending,
+                connect,
+                authorizations,
+                transport: crate::stock::Transport::Framed,
+            })
+        }
+        _ => anyhow::bail!("unsupported meter journal version"),
+    }
 }
 #[cfg(unix)]
 #[derive(Serialize, Deserialize)]
@@ -153,18 +229,7 @@ impl Disk {
                     u64::try_from(raw.len())? <= MAX_BYTES,
                     "meter journal exceeds byte bound"
                 );
-                let envelope: Envelope =
-                    serde_json::from_slice(&raw).context("invalid meter journal")?;
-                ensure!(
-                    envelope.version == VERSION,
-                    "unsupported meter journal version"
-                );
-                ensure!(
-                    hex::encode(Sha256::digest(serde_json::to_vec(&envelope.record)?))
-                        == envelope.sha256,
-                    "meter journal checksum differs"
-                );
-                Some(envelope.record)
+                Some(decode(&raw)?)
             }
             Err(rustix::io::Errno::NOENT) => {
                 ensure!(
@@ -282,4 +347,26 @@ impl Drop for Temporary<'_> {
             );
         }
     }
+}
+
+#[cfg(all(test, unix))]
+pub(super) fn legacy_bytes(record: &Record) -> Vec<u8> {
+    let record = LegacyRecord {
+        binding: record.binding.clone(),
+        tariff_hash: record.tariff_hash.clone(),
+        budget_ou: record.budget_ou,
+        committed: record.committed.clone(),
+        purchased: record.purchased.clone(),
+        uncertain: record.uncertain.clone(),
+        pending: record.pending.clone(),
+        connect: record.connect.clone(),
+        authorizations: record.authorizations.clone(),
+    };
+    let sha256 = hex::encode(Sha256::digest(serde_json::to_vec(&record).unwrap()));
+    serde_json::to_vec(&LegacyEnvelope {
+        version: 2,
+        record,
+        sha256,
+    })
+    .unwrap()
 }

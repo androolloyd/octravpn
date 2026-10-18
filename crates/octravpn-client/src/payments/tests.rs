@@ -612,3 +612,46 @@ fn storage_refuses_symlinks_hardlinks_and_nonprivate_permissions() {
     symlink(&backup, &fixture.path).unwrap();
     assert!(fixture.open(OpenMode::Resume).is_err());
 }
+
+#[test]
+fn control_only_stock_journal_cannot_reinterpret_a_local_tun_journal() {
+    let fixture = Fixture::new(100);
+    let framed = fixture.open(OpenMode::Create).unwrap();
+    drop(framed);
+    let plan = crate::payment_runner::Plan {
+        binding: fixture.binding.clone(),
+        tariff: fixture.tariff.clone(),
+        original_budget_ou: fixture.budget,
+        prepaid_bytes: fixture.prepaid.clone(),
+        control_url: "http://127.0.0.1/".into(),
+        wireguard_endpoint: "127.0.0.1:51820".into(),
+    };
+    assert!(
+        Journal::open_stock(&fixture.path, &plan, fixture.key.clone(), OpenMode::Resume).is_err()
+    );
+    let path = fixture.root.path().join("stock");
+    let mut stock =
+        Journal::open_stock(&path, &plan, fixture.key.clone(), OpenMode::Create).unwrap();
+    let first = stock.connect([21; 32]).unwrap();
+    first.verify_stock().unwrap();
+    assert!(first.verify().is_err());
+    let purchases = stock.purchases().unwrap();
+    assert!(!purchases.is_empty());
+    assert!(stock.totals().iter().all(|bytes| *bytes == 0));
+    drop(stock);
+    assert!(Journal::open(
+        &path,
+        fixture.binding.clone(),
+        fixture.tariff.clone(),
+        fixture.budget,
+        fixture.prepaid.clone(),
+        fixture.key.clone(),
+        OpenMode::Resume
+    )
+    .is_err());
+    let mut stock = Journal::open_stock(&path, &plan, fixture.key, OpenMode::Resume).unwrap();
+    let second = stock.connect([22; 32]).unwrap();
+    assert!(second.request.sequence > first.request.sequence);
+    assert_eq!(stock.purchases().unwrap(), purchases);
+    assert!(stock.totals().iter().all(|bytes| *bytes == 0));
+}

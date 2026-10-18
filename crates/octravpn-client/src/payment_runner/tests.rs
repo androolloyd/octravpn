@@ -773,3 +773,5 @@ async fn delayed_service_start_cannot_renew_an_old_status_observation() {
     .unwrap_err();
     assert!(error.to_string().contains("clock stopped advancing"));
 }
+
+mod retry;

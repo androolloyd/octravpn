@@ -109,6 +109,18 @@ impl crate::published::Handle {
 }
 
 impl Services {
+    pub(crate) fn with_stock_exit(
+        mut self,
+        exit: Option<Arc<octravpn_node::stock::Exit>>,
+    ) -> Result<Self> {
+        if let Some(exit) = exit {
+            self.vpn = match self.vpn {
+                Vpn::Payments(vpn) => Vpn::Payments(vpn.with_stock_exit(exit)?),
+                Vpn::Legacy(_) => anyhow::bail!("stock exit requires canonical prepaid mode"),
+            };
+        }
+        Ok(self)
+    }
     pub(crate) fn with_settlement(
         mut self,
         publisher: Arc<dyn octravpn_node::embedded::ReceiptSettlement>,

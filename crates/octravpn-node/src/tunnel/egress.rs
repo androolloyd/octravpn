@@ -95,8 +95,16 @@ pub(super) struct ReturnPath {
     router: Arc<OnionRouter>,
     payments: Option<Arc<crate::payments::Registry>>,
     local: SocketAddr,
+    stock_peers: Arc<super::stock_peer::Peers>,
+    stock_peer: Option<Arc<super::stock_peer::Identity>>,
 }
 impl ReturnPath {
+    pub(super) fn stock(&self) -> Option<&crate::stock::Registration> {
+        self.binding.stock()
+    }
+    pub(super) fn portal(&self) -> Option<&Arc<crate::stock::Peer>> {
+        self.binding.portal()
+    }
     pub(super) fn paid(&self) -> Option<&Arc<crate::payments::Connection>> {
         self.binding.paid()
     }
@@ -107,19 +115,30 @@ impl ReturnPath {
         self.matches_current(false)
     }
     fn matches_current(&self, require_live: bool) -> bool {
-        super::binding::lookup(&self.allowlist, self.payments.as_deref(), &self.key.client)
-            .is_some_and(|binding| {
-                (if require_live {
-                    binding.live()
-                } else {
-                    binding.retain_peer()
-                }) && binding.same(&self.binding)
-                    && *binding.session() == self.key.session
+        let current = if self.binding.portal().is_some() {
+            self.payments
+                .as_ref()
+                .and_then(|registry| registry.stock_peer(&self.key.client))
+                .map(Binding::StockPortal)
+        } else {
+            super::binding::lookup(&self.allowlist, self.payments.as_deref(), &self.key.client)
+        };
+        current.is_some_and(|binding| {
+            (if require_live {
+                binding.live()
+            } else {
+                binding.retain_peer()
+            }) && binding.same(&self.binding)
+                && *binding.session() == self.key.session
+        }) && if self.stock().is_some() {
+            self.stock_peer.as_ref().is_some_and(|peer| {
+                self.stock_peers.current(peer) && Some(&peer.registration) == self.stock()
             })
-            && self
-                .peers
+        } else {
+            self.peers
                 .get(&self.key.peer)
                 .is_some_and(|peer| peer.client_pubkey == self.key.client)
+        }
     }
 
     pub(super) fn identity(&self) -> (&SessionId, &[u8; 32]) {
@@ -149,10 +168,15 @@ impl ReturnPath {
         if !self.allowed() {
             return Ok(());
         }
-        let frame = octravpn_core::tunnel_frame::encode(&self.key.session, body)?;
-        let Some(peer) = self.peers.get(&self.key.peer) else {
-            return Ok(());
+        let frame = if self.stock().is_some() {
+            octravpn_core::ip_tunnel::decode(body)?.to_vec()
+        } else {
+            octravpn_core::tunnel_frame::encode(&self.key.session, body)?
         };
+        let peer = self.peers.get(&self.key.peer);
+        if self.stock_peer.is_none() && peer.is_none() {
+            return Ok(());
+        }
         let ticket = if let Some(connection) = self.paid() {
             let raw = octravpn_core::ip_tunnel::decode(body)?;
             Some(
@@ -164,9 +188,12 @@ impl ReturnPath {
         } else {
             None
         };
-        let shard = peer.shard_for(self.key.peer, self.local);
         let mut work = vec![0; 65_535];
-        let (result, no_session) = {
+        let (result, no_session) = if let Some(stock) = &self.stock_peer {
+            stock.encapsulate(&frame, &mut work)
+        } else {
+            let peer = peer.expect("legacy peer checked");
+            let shard = peer.shard_for(self.key.peer, self.local);
             let mut noise = peer.tuns[shard].lock();
             encapsulate(&mut noise, &frame, &mut work, self.paid().is_some())
         };
@@ -178,7 +205,7 @@ impl ReturnPath {
                 ticket.cancel().await?;
                 if let TunnResult::WriteToNetwork(bytes) = result {
                     connection.current(&mut || {
-                        self.socket.try_send_to(bytes, self.key.peer)?;
+                        self.try_send(bytes)?;
                         Ok(())
                     })?;
                 }
@@ -190,13 +217,20 @@ impl ReturnPath {
                     "paid transport packet expected"
                 );
                 return connection
-                    .handoff(ticket, bytes.len(), || {
-                        self.socket.try_send_to(bytes, self.key.peer)
-                    })
+                    .handoff(ticket, bytes.len(), || self.try_send(bytes))
                     .await;
             }
             ticket.cancel().await?;
             anyhow::bail!("paid transport could not encapsulate packet");
+        }
+        if let Some(portal) = self.portal() {
+            if let TunnResult::WriteToNetwork(bytes) = result {
+                portal.current(&mut || {
+                    self.try_send(bytes)?;
+                    Ok(())
+                })?;
+            }
+            return Ok(());
         }
         if let TunnResult::WriteToNetwork(bytes) = result {
             // Encapsulation can initiate a rekey and queue the payload. Count
@@ -216,9 +250,32 @@ impl ReturnPath {
         }
         Ok(())
     }
+    pub(super) fn handoff(
+        &self,
+        action: impl FnOnce() -> std::io::Result<usize>,
+    ) -> std::io::Result<usize> {
+        if self.stock().is_some() {
+            let peer = self
+                .stock_peer
+                .as_ref()
+                .ok_or_else(|| std::io::Error::other("stock identity missing"))?;
+            self.stock_peers
+                .with_current(peer, || Ok(action()?))
+                .map_err(std::io::Error::other)
+        } else {
+            action()
+        }
+    }
+    fn try_send(&self, bytes: &[u8]) -> std::io::Result<usize> {
+        if let Some(peer) = &self.stock_peer {
+            peer.send(&self.stock_peers, &self.socket, bytes)
+        } else {
+            self.socket.try_send_to(bytes, self.key.peer)
+        }
+    }
 }
 
-fn encapsulate<'a>(
+pub(super) fn encapsulate<'a>(
     noise: &mut super::Tunn,
     frame: &[u8],
     work: &'a mut [u8],
@@ -334,6 +391,17 @@ impl Server {
         );
     }
 
+    pub(super) fn stock_return_path(
+        &self,
+        session: &SessionId,
+        source: SocketAddr,
+        binding: &Binding,
+        identity: Arc<super::stock_peer::Identity>,
+    ) -> ReturnPath {
+        let mut path = self.return_path(session, source, binding, None);
+        path.stock_peer = Some(identity);
+        path
+    }
     pub(super) fn return_path(
         &self,
         session: &SessionId,
@@ -356,6 +424,10 @@ impl Server {
             payments: self.payments.clone(),
             router: self.router.clone(),
             local: self.local_addr,
+            stock_peers: self.stock_peers.clone(),
+            stock_peer: binding
+                .stock()
+                .and_then(|_| self.stock_peers.key(&binding.key())),
         }
     }
 
@@ -365,6 +437,7 @@ impl Server {
         loop {
             period.tick().await;
             self.peers.sweep();
+            self.stock_timers(&mut work).await;
             if let Some(tunnel) = &self.ip_tunnel {
                 tunnel.sweep();
             }
@@ -372,7 +445,7 @@ impl Server {
                 let binding = self.binding(&peer.client_pubkey);
                 if binding
                     .as_ref()
-                    .is_none_or(|binding| !binding.retain_peer())
+                    .is_none_or(|binding| !binding.retain_peer() || binding.stock().is_some())
                 {
                     self.peers.remove(&source);
                     continue;

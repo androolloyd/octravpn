@@ -803,3 +803,107 @@ async fn legacy_journal_version_cannot_be_reinterpreted_as_prepaid_consumption()
             .is_err()
     );
 }
+
+fn stock_registration(key: [u8; 32]) -> crate::stock::Registration {
+    crate::stock::Registration {
+        node_key: key,
+        machine_key: "01".repeat(32),
+        node_id: 19,
+        ipv4: "100.64.0.9".parse().unwrap(),
+        created: "2026-10-17T00:00:00+00:00".into(),
+        expiry: None,
+    }
+}
+#[tokio::test]
+async fn durable_framing_and_registration_cannot_change_at_a_replayed_sequence() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("meter");
+    let meter = open(&path, 10).await;
+    let first = connect_request(&meter, 1, [43; 32]);
+    meter.connect(first.clone()).await.unwrap();
+    let stock = crate::stock::Transport::Stock(stock_registration([43; 32]));
+    assert!(meter
+        .connect_transport(first.clone(), stock.clone())
+        .await
+        .is_err());
+    assert!(meter.connect_is_current(&first));
+    let second = SignedConnect::sign_stock(
+        connect_request(&meter, 2, [43; 32]).request,
+        &KeyPair::from_secret_bytes(&[31; 32]),
+    )
+    .unwrap();
+    meter
+        .connect_transport(second.clone(), stock.clone())
+        .await
+        .unwrap();
+    meter
+        .reserve_class(0, 9)
+        .await
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    drop(meter);
+    let meter = open(&path, 10).await;
+    assert!(meter.transport_is_current(&second, &stock));
+    assert!(meter.connect(second.clone()).await.is_err());
+    let mut changed = stock_registration([43; 32]);
+    changed.ipv4 = "100.64.0.10".parse().unwrap();
+    assert!(meter
+        .connect_transport(
+            second.clone(),
+            crate::stock::Transport::Stock(changed.clone())
+        )
+        .await
+        .is_err());
+    let third = SignedConnect::sign_stock(
+        connect_request(&meter, 3, [43; 32]).request,
+        &KeyPair::from_secret_bytes(&[31; 32]),
+    )
+    .unwrap();
+    meter
+        .connect_transport(third.clone(), crate::stock::Transport::Stock(changed))
+        .await
+        .unwrap();
+    assert!(!meter.connect_is_current(&second));
+    assert_eq!(meter.snapshot().unwrap().committed_totals, [9, 0]);
+}
+#[tokio::test]
+async fn legacy_framed_journal_migration_keeps_watermark_consumption_and_uncertainty() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("meter");
+    let meter = open(&path, 10).await;
+    let connect = connect_request(&meter, 7, [44; 32]);
+    meter.connect(connect.clone()).await.unwrap();
+    meter
+        .reserve_class(0, 11)
+        .await
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    let held = meter.reserve_class(0, 13).await.unwrap();
+    drop(held);
+    dropped_ticket_finished(&meter).await;
+    let before = meter.snapshot().unwrap();
+    let legacy = storage::legacy_bytes(&meter.writer.lock().record);
+    drop(meter);
+    std::fs::write(path.join("meter.json"), legacy).unwrap();
+    let meter = open(&path, 10).await;
+    assert_eq!(meter.snapshot().unwrap(), before);
+    assert!(meter.transport_is_current(&connect, &crate::stock::Transport::Framed));
+    assert!(meter
+        .connect(connect_request(&meter, 6, [44; 32]))
+        .await
+        .is_err());
+    assert!(meter
+        .connect_transport(
+            connect,
+            crate::stock::Transport::Stock(stock_registration([44; 32]))
+        )
+        .await
+        .is_err());
+    let raw: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path.join("meter.json")).unwrap()).unwrap();
+    assert_eq!(raw["version"], 3);
+}

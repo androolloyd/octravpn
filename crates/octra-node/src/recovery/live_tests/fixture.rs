@@ -41,7 +41,9 @@ use octra_node_runtime::{
     epoch_footer,
     finality::proposal::Policy,
     state_batch::StateBatch,
-    validator_history::{Authority, CanonicalValidators, Environment, ReceiptPolicy},
+    validator_history::{
+        Authority as ValidatorAuthority, CanonicalValidators, Environment, ReceiptPolicy,
+    },
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -236,6 +238,31 @@ impl Tasks {
         self.handles.clear();
     }
 }
+// Counts actual immutable-view construction. A suspended catch-up publication
+// does not construct a view; resume constructs it only after publisher.audit.
+pub(super) struct Authority {
+    inner: ValidatorAuthority,
+    views: Arc<AtomicUsize>,
+}
+#[async_trait::async_trait]
+impl octra_node_runtime::finality::ValidatorHistory for Authority {
+    async fn resolve(
+        &self,
+        parent: &octra_node_runtime::canonical::Head,
+        epoch: u64,
+        relief: octra_node_runtime::canonical::ReliefSource,
+    ) -> Result<octra_node_runtime::finality::EpochRules, String> {
+        octra_node_runtime::finality::ValidatorHistory::resolve(&self.inner, parent, epoch, relief)
+            .await
+    }
+}
+impl crate::Host for Authority {
+    fn check_views(&self, _: &octra_node_runtime::canonical::Head) -> Result<(), String> {
+        self.views.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
 pub(super) struct Fixture {
     pub(super) directory: tempfile::TempDir,
     pub(super) node: Arc<Node<Authority>>,
@@ -254,13 +281,14 @@ pub(super) struct Fixture {
     pub(super) page: String,
     pub(super) vpn: Vpn,
     pub(super) tasks: Tasks,
+    pub(super) view_checks: Arc<AtomicUsize>,
 }
 impl Fixture {
     pub(super) async fn new(voting: bool) -> Self {
         Box::pin(Self::with_health(voting, HealthConfig::default())).await
     }
     pub(super) async fn with_health(voting: bool, health: HealthConfig) -> Self {
-        Box::pin(Self::start(voting, health, false, None, None)).await
+        Box::pin(Self::start(voting, health, false, None, None, None)).await
     }
     pub(super) async fn soft_lag(voting: bool) -> Self {
         Box::pin(Self::start(
@@ -268,6 +296,7 @@ impl Fixture {
             HealthConfig::default(),
             true,
             Some(2),
+            None,
             None,
         ))
         .await
@@ -280,9 +309,21 @@ impl Fixture {
             true,
             None,
             Some(clock.clone()),
+            None,
         ))
         .await;
         (fixture, clock)
+    }
+    pub(super) async fn with_http(join: consensus_join::Client) -> Self {
+        Box::pin(Self::start(
+            false,
+            HealthConfig::default(),
+            false,
+            None,
+            None,
+            Some(join),
+        ))
+        .await
     }
     async fn start(
         voting: bool,
@@ -290,6 +331,7 @@ impl Fixture {
         initial_matching: bool,
         advertised_head: Option<i64>,
         clock: Option<Arc<LivenessClock>>,
+        join: Option<consensus_join::Client>,
     ) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let state = genesis();
@@ -335,15 +377,19 @@ impl Fixture {
         };
         let profile = Profile::from_values(Some(b"devnet_full_v1"), None, None);
         let runtime = circle::runtime();
+        let view_checks = Arc::new(AtomicUsize::new(0));
         let node = Arc::new(
             Node::open(
                 store,
-                Authority::new(
-                    reader.clone(),
-                    environment,
-                    ReceiptPolicy::new(Some(b"0"), &profile, None),
-                    journal.clone(),
-                ),
+                Authority {
+                    inner: ValidatorAuthority::new(
+                        reader.clone(),
+                        environment,
+                        ReceiptPolicy::new(Some(b"0"), &profile, None),
+                        journal.clone(),
+                    ),
+                    views: view_checks.clone(),
+                },
                 runtime.clone(),
                 Arc::new(UnavailableHost),
                 checkpoints.clone(),
@@ -573,6 +619,9 @@ impl Fixture {
         )
         .unwrap();
         authority.attach(initial.clone()).unwrap();
+        // The opt-in real sixteen-epoch HTTP fixture uses one bounded native
+        // HTTP request budget; all pre-existing fixture budgets stay five seconds.
+        let budget = Duration::from_secs(if join.is_some() { 20 } else { 5 });
         let service = Service {
             node: node.clone(),
             submission,
@@ -584,13 +633,13 @@ impl Fixture {
             roots: network.roots.clone(),
             finality: network.finality.clone(),
             membership,
-            join: consensus_join::Client::capture(|_| None).unwrap(),
+            join: join.unwrap_or_else(|| consensus_join::Client::capture(|_| None).unwrap()),
             config,
             timeouts,
             voting,
             minimum_peers: 2,
             health,
-            budget: Duration::from_secs(5),
+            budget,
             duty: None,
         };
         let vpn = Vpn::new();
@@ -631,6 +680,7 @@ impl Fixture {
             page,
             vpn,
             tasks,
+            view_checks,
         }
     }
     pub(super) fn roots(&self, root: Option<[u8; 32]>) {
@@ -648,6 +698,12 @@ impl Fixture {
         }
     }
     pub(super) async fn successor(&self) -> (Vec<u8>, octra_node_runtime::finality::ExecutedEpoch) {
+        self.successor_at(20.).await
+    }
+    pub(super) async fn successor_at(
+        &self,
+        now: f64,
+    ) -> (Vec<u8>, octra_node_runtime::finality::ExecutedEpoch) {
         let draft = self
             .node
             .proposal_draft(
@@ -657,7 +713,7 @@ impl Fixture {
                     genesis_time: Some(0.),
                 },
                 &self.address,
-                20.,
+                now,
             )
             .await
             .unwrap();

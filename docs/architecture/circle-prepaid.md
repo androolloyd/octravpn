@@ -63,8 +63,10 @@ The oracle retains one native store and Ledger across independent admitted epoch
 for exact day/week boundaries, first-request unstake retries, replacement-rate
 activation, rescheduling and cancellation; it grants no QC/finality authority.
 Generate the latter with `scripts/node-port/circle-prepaid-fixtures.py` using the
-exact candidate's build JSON, then run the explicit ignored replay with
-`OCTRA_CIRCLE_PREPAID_ORACLE` set to that artifact. These sources are not results;
+exact candidate's build JSON, then retain the actual result as
+`crates/octra-node-runtime/tests/fixtures/circle-prepaid.json`. Ordinary CI replays
+that source-bound artifact; `OCTRA_CIRCLE_PREPAID_ORACLE` explicitly selects an
+alternative artifact for regeneration checks. These sources are not results;
 public activation, paid stock-client transport and deployment remain separate gates.
 A future atomic Circle constructor would be a distinct experimental capability,
 not a reason to alter the adopted native baseline for this application.

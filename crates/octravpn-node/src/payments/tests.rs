@@ -1174,3 +1174,146 @@ async fn closing_prepaid_connection_rejects_held_new_purchase_but_acknowledges_c
     assert!(control.registry.connections.read().is_empty());
     assert!(!connection.live());
 }
+
+#[tokio::test]
+async fn stock_connection_uses_canonical_prepaid_meter_and_durable_registration_rotation() {
+    use crate::stock::{Config as StockConfig, Exit};
+    use octravpn_mesh::{tailscale_wire::MachineRecord, MachineRegistry};
+    let fixture = Fixture::new(0);
+    let control = fixture.start();
+    let key = [11; 32];
+    let machines = Arc::new(MachineRegistry::new());
+    machines.upsert(
+        hex::encode(key),
+        MachineRecord::new_at(
+            std::time::SystemTime::UNIX_EPOCH.into(),
+            hex::encode(key),
+            "02".repeat(32),
+            "user".into(),
+            "stock-client".into(),
+            "100.64.0.2".parse().unwrap(),
+            false,
+        ),
+    );
+    let guard = fixture.host.0.read().guard.clone();
+    let admission = guard.clone();
+    let exit = Exit::new(
+        StockConfig {
+            operator_ipv4: "100.64.0.1".parse().unwrap(),
+            portal_port: 443,
+            circle_gateway: false,
+            endpoints: vec![],
+        },
+        [42; 32],
+        machines.clone(),
+        Arc::new(move || admission.live()),
+        guard,
+        headscale_core::derp::native::NativeDerpRelay::new(),
+    )
+    .unwrap();
+    control.registry.attach_stock(exit.clone()).unwrap();
+    let framed = fixture.connect(1, key);
+    let request = SignedConnect::sign_stock(framed.request.clone(), &fixture.payer).unwrap();
+    assert_eq!(
+        post(&control, "/payments/connect", &request).await.0,
+        StatusCode::FORBIDDEN,
+        "stock signature must not bind Framed first"
+    );
+    assert_eq!(
+        post(&control, "/payments/stock/connect", &framed).await.0,
+        StatusCode::FORBIDDEN,
+        "Framed signature must not bind Stock first"
+    );
+    let connection = control
+        .registry
+        .connect_mode(request.clone(), true)
+        .await
+        .unwrap();
+    assert!(connection.live());
+    assert!(connection
+        .meter
+        .reserve(&packet(false, false, 1), Direction::Outbound)
+        .await
+        .is_err());
+    let receipt = fixture.usage(0, 1, 64);
+    let meter = control.registry.usage(&receipt).await.unwrap();
+    fixture.settlement.fail.store(true, Ordering::Release);
+    assert!(control.settlement.confirm(receipt.clone()).await.is_err());
+    assert!(connection
+        .meter
+        .reserve(&packet(false, false, 1), Direction::Outbound)
+        .await
+        .is_err());
+    fixture.settlement.fail.store(false, Ordering::Release);
+    control.settlement.confirm(receipt.clone()).await.unwrap();
+    control
+        .registry
+        .confirm_usage(&meter, receipt)
+        .await
+        .unwrap();
+    let raw = crate::stock::packet::translate(
+        &packet(false, false, 1),
+        "100.64.0.2".parse().unwrap(),
+        "1.1.1.1".parse().unwrap(),
+    )
+    .unwrap();
+    let ticket = connection
+        .meter
+        .reserve(&raw, Direction::Outbound)
+        .await
+        .unwrap();
+    let mut sent = 0;
+    connection
+        .handoff(ticket, raw.len(), || {
+            sent += 1;
+            Ok(raw.len())
+        })
+        .await
+        .unwrap();
+    assert_eq!(sent, 1);
+    assert!(control.registry.connect(request.clone()).await.is_err());
+    assert!(
+        connection.live(),
+        "wrong framing replay cannot suspend active paid transport"
+    );
+    let mut record = machines.get(&hex::encode(key)).unwrap();
+    record.ipv4 = Some("100.64.0.3".parse().unwrap());
+    machines.upsert(hex::encode(key), record);
+    assert!(!connection.live());
+    assert!(control.registry.connect_mode(request, true).await.is_err());
+    let next = SignedConnect::sign_stock(fixture.connect(2, key).request, &fixture.payer).unwrap();
+    let rotated = control
+        .registry
+        .connect_mode(next.clone(), true)
+        .await
+        .unwrap();
+    assert!(rotated.live());
+    assert!(!Arc::ptr_eq(&connection, &rotated));
+    assert_eq!(
+        rotated.meter.snapshot().unwrap().committed_totals,
+        [raw.len() as u64, 0]
+    );
+    assert!(
+        rotated
+            .meter
+            .reserve(&packet(true, false, 1), Direction::Outbound)
+            .await
+            .is_err(),
+        "purchase cannot spill into another class"
+    );
+    drop(connection);
+    drop(rotated);
+    drop(meter);
+    drop(control);
+    let control = fixture.start();
+    control.registry.attach_stock(exit).unwrap();
+    let resumed = control.registry.connect_mode(next, true).await.unwrap();
+    assert_eq!(
+        resumed.meter.snapshot().unwrap().committed_totals,
+        [raw.len() as u64, 0]
+    );
+    assert!(
+        resumed.meter.reserve_class(0, 64).await.is_err(),
+        "restart must retain already consumed prepaid bytes"
+    );
+}

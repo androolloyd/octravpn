@@ -16,6 +16,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use octra_node_protocol::{
+    consensus::{reward, reward_attribution::legacy, RewardSource},
     epoch_index,
     native_json::Document,
     transaction::Transaction,
@@ -145,7 +146,18 @@ struct NativeEpoch {
     parent_commit: String,
     start_txid: i64,
     transactions: Vec<NativeTransaction>,
+    #[serde(
+        default,
+        with = "optional_encoded_bytes",
+        skip_serializing_if = "Option::is_none"
+    )]
+    epoch_header: Option<Vec<u8>>,
+    #[serde(skip)]
+    rewards: Option<rewards::Evidence>,
 }
+
+mod rewards;
+pub use rewards::HistoricalRewardAuthority;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -161,11 +173,37 @@ impl NativeHistory {
     /// Parse a bounded export from the trusted local native host. Successful
     /// parsing alone does not authorize delivery; `import` checks all links.
     pub fn parse(bytes: &[u8]) -> Result<Self> {
+        let history = Self::decode(bytes)?;
+        if history.format != "octra-exex-history-v1" {
+            return Err(invalid(
+                "native v2 history requires independent historical reward authority",
+            ));
+        }
+        history.validate()?;
+        Ok(history)
+    }
+
+    /// Read v2 native headers using independently selected historical policy.
+    /// V1 remains importable, with reward metadata explicitly unavailable.
+    /// This local compatibility boundary supplies no peer finality certificate.
+    pub fn parse_with_rewards(
+        bytes: &[u8],
+        authority: &impl HistoricalRewardAuthority,
+    ) -> Result<Self> {
+        let mut history = Self::decode(bytes)?;
+        history.validate_structure()?;
+        for epoch in &mut history.epochs {
+            epoch.rewards = rewards::derive(epoch, authority)?;
+        }
+        history.validate()?;
+        Ok(history)
+    }
+
+    fn decode(bytes: &[u8]) -> Result<Self> {
         if bytes.len() > MAX_BYTES {
             return Err(invalid("native history export exceeds byte limit"));
         }
         let history: Self = serde_json::from_slice(bytes).map_err(invalid)?;
-        history.validate()?;
         Ok(history)
     }
 
@@ -178,8 +216,24 @@ impl NativeHistory {
     }
 
     fn validate(&self) -> Result<()> {
-        if self.format != "octra-exex-history-v1"
-            || self.head_commit_id.is_empty()
+        self.validate_structure()?;
+        for epoch in &self.epochs {
+            match (&epoch.epoch_header, &epoch.rewards) {
+                (None, None) if self.format == "octra-exex-history-v1" => (),
+                (Some(header), Some(evidence)) if self.format == "octra-exex-history-v2" => {
+                    evidence.validate_header(header)?;
+                }
+                _ => return Err(invalid("native reward evidence is missing or unexpected")),
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_structure(&self) -> Result<()> {
+        if !matches!(
+            self.format.as_str(),
+            "octra-exex-history-v1" | "octra-exex-history-v2"
+        ) || self.head_commit_id.is_empty()
             || self.epochs.len() > MAX_EPOCHS
             || self.head.epoch < self.anchor.epoch
         {
@@ -190,6 +244,9 @@ impl NativeHistory {
         let mut previous = &self.anchor;
         let mut total = 0usize;
         for epoch in &self.epochs {
+            if epoch.epoch_header.is_some() != (self.format == "octra-exex-history-v2") {
+                return Err(invalid("native header version differs"));
+            }
             let epoch_number = epoch.boundary.epoch;
             total = total
                 .checked_add(epoch.transactions.len())
@@ -265,6 +322,7 @@ impl NativeEpochSource {
         let source = SqliteEpochSource::open(pool.clone(), chain.clone(), cursor).await?;
         sqlx::query("CREATE TABLE IF NOT EXISTS exex_native_binding (chain_id TEXT NOT NULL, genesis BLOB NOT NULL, anchor TEXT NOT NULL, head TEXT NOT NULL, PRIMARY KEY(chain_id,genesis))")
             .execute(&pool).await.map_err(invalid)?;
+        rewards::initialize(&pool).await?;
         let encoded = serde_json::to_string(&anchor).map_err(invalid)?;
         let mut tx = pool.begin().await.map_err(invalid)?;
         let rows: i64 = sqlx::query_scalar(
@@ -369,6 +427,7 @@ impl NativeEpochSource {
                 events: epoch.transactions.clone(),
             };
             self.source.append(&mut tx, &event).await?;
+            rewards::append(&mut tx, &chain, sequence, latest, epoch).await?;
             latest = &epoch.boundary;
         }
         let result = latest.cursor(sequence)?;
@@ -387,6 +446,17 @@ impl NativeEpochSource {
         }
         tx.commit().await.map_err(invalid)?;
         Ok(result)
+    }
+
+    /// Legacy compatibility attribution, rechecked against the exact imported
+    /// header and fresh independent authority. None means explicit v1 metadata
+    /// unavailability; it is never a fallback for a modern canonical record.
+    pub async fn reward_source(
+        &self,
+        sequence: Sequence,
+        authority: &impl HistoricalRewardAuthority,
+    ) -> Result<Option<RewardSource>> {
+        rewards::load(self, sequence, authority).await
     }
 }
 
