@@ -328,7 +328,7 @@ async fn captured_network_startup_uses_file_gc_and_worker_limits_once() {
             peers: vec![],
             voting: false,
             publisher: false,
-            snapshot_limits: Default::default(),
+            snapshot_limits: crate::snapshot_export::LimitsConfig::default(),
             startup_seconds: 1,
         };
         let path = directory.path().join(if configured {

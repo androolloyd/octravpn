@@ -65,11 +65,29 @@
     "Public paid service and Mainnet remain unqualified.",
     "Prior failures and prior-source successes retain their original scope; no timeout, quorum or consensus waiver."
   ],
-  "current_candidate_startup_tests": {
+  "startup_regression_checkpoint": {
     "passed": 8,
     "failed": 0,
     "source_scope_sha256": "eda80ae3b849112425a53ec252b00ed0d3f5b617bcce0966f6bd7f02a5db8a73",
     "capture_sha256": "76feeb71cbc9b9e5a5fe009bf38b5684fdfec7eb4d5dd6ab6246937be24c719f",
     "scope": "Targeted local startup, configured limits, driver recovery and authenticated checkpoint tests; broader combined qualification remains pending."
+  },
+  "latest_checks": {
+    "strict_workspace": {
+      "source_scope_sha256": "bd81f9aa92c90786c24ecf5a838f90ac10288631f225c69669339a600723c42a",
+      "capture_sha256": "f7462f021e3ec5c88ead425a78d22786e8d90c6b80619c2e49f1623caffad1b9",
+      "exit_code": 0
+    },
+    "private_artifact_regressions": {
+      "source_scope_sha256": "bd81f9aa92c90786c24ecf5a838f90ac10288631f225c69669339a600723c42a",
+      "capture_sha256": "91e632104febe92f131a84d4591b0472d73f3cc9993d4dcd13f2110a6fede056",
+      "exit_code": 0,
+      "passed": 9
+    },
+    "native_fixture_predicates": {
+      "passed": 11,
+      "capture_sha256": "63d6987ef2f635407fbbad6d6533029bc99db01de4ad4850872cb7ff0b220e39",
+      "scope": "Pure cache eligibility controls, not transaction-proof execution or mixed finality qualification."
+    }
   }
 }
