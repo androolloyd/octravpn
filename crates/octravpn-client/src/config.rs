@@ -213,7 +213,7 @@ fn default_refund_margin_epochs() -> u64 {
 }
 
 /// v2-specific config. Sealed-policy passphrase + cache options.
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Clone)]
 pub(crate) struct V2Cfg {
     /// Shared tailnet passphrase used to decrypt sealed circle assets
     /// (`/policy.json`). Comes from the tailnet owner out-of-band.
@@ -230,6 +230,16 @@ pub(crate) struct V2Cfg {
     /// `<config-dir>/state/policies/` when empty.
     #[serde(default)]
     pub cache_dir: String,
+}
+
+impl Default for V2Cfg {
+    fn default() -> Self {
+        Self {
+            sealed_passphrase: None,
+            key_id: default_key_id(),
+            cache_dir: String::new(),
+        }
+    }
 }
 
 fn default_protocol_version() -> String {
@@ -328,6 +338,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sealed_key_default_matches_missing_fields_and_preserves_explicit_values() {
+        let defaults = V2Cfg::default();
+        let empty: V2Cfg = toml::from_str("").unwrap();
+        assert_eq!(defaults.key_id, "default");
+        assert_eq!(empty.key_id, defaults.key_id);
+        assert_eq!(empty.sealed_passphrase, defaults.sealed_passphrase);
+        assert_eq!(empty.cache_dir, defaults.cache_dir);
+        for key in ["custom", ""] {
+            let explicit: V2Cfg = toml::from_str(&format!("key_id = {key:?}")).unwrap();
+            assert_eq!(explicit.key_id, key);
+        }
+    }
+
+    #[test]
     fn refund_margin_defaults_and_clamps() {
         assert_eq!(V3RelayCfg::default().refund_margin_epochs, 3);
         // Clamp to the I3 band [1,5]: a 0 (quiet-zone collapse) becomes 1.
@@ -359,6 +383,7 @@ secret_path = "/tmp/octravpn-client/wallet.key"
 
         cfg.resolve_relay_state_dir().unwrap();
 
+        assert_eq!(cfg.v2.key_id, "default");
         assert_eq!(cfg.v3.relay.state_dir, "/tmp/octravpn-client/settle-state");
     }
 

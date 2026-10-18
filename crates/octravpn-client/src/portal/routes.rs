@@ -904,6 +904,7 @@ mod tests {
     use crate::portal::mime::sniff;
     use axum::http::Request;
     use octravpn_core::rpc::RpcClient;
+    use sha2::Digest;
     use std::net::SocketAddr;
     use tower::ServiceExt;
 
@@ -1106,8 +1107,8 @@ mod tests {
                             "jsonrpc": "2.0",
                             "id": id,
                             "result": {
-                                "ciphertext_b64": b64,
-                                "plaintext_hash": "0".repeat(64),
+                                "bytes_b64": b64,
+                                "plaintext_hash": hex::encode(Sha256::digest(payload)),
                                 "key_id": "default",
                             }
                         }))
@@ -1535,13 +1536,13 @@ mod tests {
                 let payload = payload.clone();
                 async move {
                     let id = req.get("id").cloned().unwrap_or(json!(1));
-                    let b64 = octravpn_core::b64::encode(payload);
+                    let b64 = octravpn_core::b64::encode(&payload);
                     Json(json!({
                         "jsonrpc": "2.0",
                         "id": id,
                         "result": {
-                            "ciphertext_b64": b64,
-                            "plaintext_hash": "0".repeat(64),
+                            "bytes_b64": b64,
+                            "plaintext_hash": hex::encode(Sha256::digest(payload)),
                             "key_id": "default",
                         }
                     }))
@@ -2010,13 +2011,13 @@ mod tests {
                 let payload = payload.clone();
                 async move {
                     let id = req.get("id").cloned().unwrap_or(json!(1));
-                    let b64 = octravpn_core::b64::encode(payload);
+                    let b64 = octravpn_core::b64::encode(&payload);
                     Json(json!({
                         "jsonrpc": "2.0",
                         "id": id,
                         "result": {
-                            "ciphertext_b64": b64,
-                            "plaintext_hash": "0".repeat(64),
+                            "bytes_b64": b64,
+                            "plaintext_hash": hex::encode(Sha256::digest(payload)),
                             "key_id": "default",
                         }
                     }))

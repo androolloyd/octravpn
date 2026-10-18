@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { path: octra }
       - uses: actions/checkout@v4
-        with: { repository: androolloyd/octra-foundry, ref: d5feaad7f14d6a381e2327dfd6738cae8df95b31, path: octra-foundry }
+        with: { repository: androolloyd/octra-foundry, ref: c9011f1f4dfeee3c7c726feb4b4cd337477f866a, path: octra-foundry }
       - uses: actions/checkout@v4
         with: { repository: androolloyd/headscale-rs, ref: 570fa5a60c8ed792b643a301b5e91d3b668ba614, path: headscale-rs }
 

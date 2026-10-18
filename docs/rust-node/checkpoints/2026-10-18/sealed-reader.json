@@ -1,0 +1,127 @@
+{
+  "schema": "octra_sealed_public_reader_checkpoint_v1",
+  "date": "2026-10-18",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "foundry_commit": "c9011f1f4dfeee3c7c726feb4b4cd337477f866a",
+  "source_scope_sha256": "0c93d3a2e091bd414d158b0d91699575bca2b312680269a8653569b070b674c3",
+  "implementation": [
+    "Public native OCRS1 responses may omit sensitive plaintext_hash and key_id. AES-GCM and frame authentication remain mandatory; advertised metadata remains strict.",
+    "CLI, policy discovery and portal share the authenticated Foundry response parser. Sealed portal reads refetch and authenticate instead of entering the public plaintext cache.",
+    "Policy cache reuse requires freshly authenticated plaintext and equality of every policy field. The strict known-hash decrypt API retains its mandatory check.",
+    "Programmatic and omitted-table key defaults agree with the documented default. Explicit custom or empty keys remain unchanged."
+  ],
+  "client": {
+    "capture_sha256": "69f74fb92b8239d0369d3d788ab5c43d44d4de3bc75fe6fb88d7fa4948831063",
+    "source_scope_sha256": "0c93d3a2e091bd414d158b0d91699575bca2b312680269a8653569b070b674c3",
+    "argv": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "--release",
+      "-p",
+      "octravpn-client",
+      "--lib",
+      "--",
+      "--test-threads=4"
+    ],
+    "tests": {
+      "targets": 1,
+      "passed": 335,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "strict_workspace_lint": {
+    "capture_sha256": "7cde2d596a17b7f4b25072c659c8a8d7d4177d8d779326c187de1c5fb204dbac",
+    "source_scope_sha256": "0c93d3a2e091bd414d158b0d91699575bca2b312680269a8653569b070b674c3",
+    "argv": [
+      "cargo",
+      "clippy",
+      "--offline",
+      "--locked",
+      "--workspace",
+      "--all-targets",
+      "--all-features",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "tests": {
+      "targets": 0,
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "owned_rust_format": {
+    "capture_sha256": "0a115ad267ea94b12ee158fac7ef1b5d27db0612829eca4d9d6aa7877cba7cb8",
+    "source_scope_sha256": "0c93d3a2e091bd414d158b0d91699575bca2b312680269a8653569b070b674c3",
+    "argv": [
+      "python3",
+      "out/octra-parity-successor-20261018/check-owned-rust-format-v8.py"
+    ],
+    "tests": {
+      "targets": 0,
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "foundry_workspace": {
+    "capture_sha256": "9d76ab5ad408310209342a1fbf4dd2d0fd323bce470e6f1b3c0f7edfa851ecaf",
+    "source_scope_sha256": "7710a993f7fa50997551b5cc303d8656f4f862250d29e14c2ddb781af234a93d",
+    "argv": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "--release",
+      "--workspace",
+      "--all-features",
+      "--no-fail-fast",
+      "--",
+      "--test-threads=4"
+    ],
+    "tests": {
+      "targets": 44,
+      "passed": 371,
+      "failed": 0,
+      "ignored": 7
+    }
+  },
+  "historical_baseline_workspace": {
+    "source_scope_sha256": "bd81f9aa92c90786c24ecf5a838f90ac10288631f225c69669339a600723c42a",
+    "capture_sha256": "f870e5822df69001f71d0e8d6c1460cbed2d5a8145c0cb4667b1e5c10236be3e",
+    "logical_review_sha256": "3f41fc786682aad1ca94c451600a561dc7541d33ee303dfc29958c01bade14c9",
+    "logical_targets": 241,
+    "passed": 2774,
+    "failed": 0,
+    "ignored": 15,
+    "raw_targets": 244,
+    "raw_passed": 2777,
+    "excluded_nested_journal_child_executions": 3,
+    "scope": "Completed pre-reader baseline; not a test run of this successor. Counts from different invocations are not added."
+  },
+  "remaining_qualification": [
+    "Final combined normal Mac artifact and full successor workspace.",
+    "New Linux production image and all seven paid/stock/nested/Single scenarios.",
+    "Mixed Circle/private workload through all 54 epochs, four-process restart and complete history/receipt/ExEx equality.",
+    "Current operator/controller/snapshot and fresh demonstration artifacts."
+  ],
+  "limits": [
+    "OCRS1 has empty AAD. Envelope authentication does not prove an omitted resource path, chain inclusion, freshness or Internet delivery.",
+    "Live public devnet read-only probe returned HTTP 403; it did not qualify live endpoint behavior.",
+    "Retained public observer is unchanged. Public paid service, onboarding, DNS/TLS and Mainnet remain unqualified."
+  ],
+  "failed_attempts_retained": [
+    "reader-foundry-strict-v1: redundant test import; corrected.",
+    "reader-root-strict-v1/v3: style and test-only borrow lints; corrected.",
+    "reader-client-tests-v1: sandbox socket refusals and two key-default regressions; corrected.",
+    "reader-client-tests-v2: seven plaintext fixture failures; six fixtures now use explicit plaintext fields and actual hashes.",
+    "reader-client-tests-v3: fixture-only generic hash type ambiguity; corrected."
+  ],
+  "full_rust_node_complete": false,
+  "public_deployment_qualified": false,
+  "mainnet_qualified": false
+}

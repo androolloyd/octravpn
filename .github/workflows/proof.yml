@@ -60,7 +60,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: androolloyd/octra-foundry
-          ref: d5feaad7f14d6a381e2327dfd6738cae8df95b31
+          ref: c9011f1f4dfeee3c7c726feb4b4cd337477f866a
           path: octra-foundry
 
       # --- 2. Rust toolchain + cache ----------------------------------------

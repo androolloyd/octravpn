@@ -78,6 +78,11 @@ records the remaining mixed private-proof and nested traffic failures. Captured
 startup settings and failure diagnostics are implemented. Eight startup and
 recovery regressions pass; the broader combined rerun remains pending.
 
+The [public Circle reader fix](docs/rust-node/checkpoints/2026-10-18/sealed-reader.json)
+supports native ciphertext responses that omit sensitive metadata while retaining
+authenticated decryption. Client regressions and the Foundry suite pass; combined
+node, Linux traffic and mixed-validator qualification remain pending.
+
 Retained finality audits can [reuse verified work within one process](docs/rust-node/checkpoints/2026-10-17/audit-reuse.md).
 Every audit still rereads the full prefix and authenticates historical validator
 authority; startup, exported records and new publication retain their complete
@@ -399,7 +404,7 @@ octra/                              # this repo
 mkdir octravpn-workspace && cd $_
 git clone https://github.com/androolloyd/octravpn.git octra
 git clone https://github.com/androolloyd/octra-foundry.git
-git -C octra-foundry checkout d5feaad7f14d6a381e2327dfd6738cae8df95b31
+git -C octra-foundry checkout c9011f1f4dfeee3c7c726feb4b4cd337477f866a
 cd octra && cargo build --locked --workspace
 ```
 

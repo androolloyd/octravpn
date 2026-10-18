@@ -15,8 +15,9 @@
 //!   4. Parse the JSON policy and return a `CirclePolicy` record.
 //!
 //! Caching is keyed on `policy_version`: if the cached copy carries
-//! the same `policy_version` and the same `plaintext_hash`, we skip
-//! the fetch + decrypt entirely. Cache files live under
+//! a currently advertised hash and identical freshly authenticated policy,
+//! we may reuse the matching cached object. Missing hashes always use the
+//! fresh policy; a locally computed hash is bookkeeping only. Cache files live under
 //! `<cache_dir>/<circle_id>.json` (see `cache::PolicyCache`).
 //!
 //! The sealed passphrase comes from one of, in precedence order:
@@ -25,7 +26,7 @@
 //!   * CLI `--secret <…>` (the caller pre-resolves and passes it in)
 
 use anyhow::{bail, Context, Result};
-use octravpn_core::circle::{decrypt_sealed_bytes, resource_key};
+use octravpn_core::circle::{decrypt_sealed_asset_response, resource_key, SealedAssetLocator};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -34,7 +35,7 @@ use crate::{config::V2Cfg, runner::Client, v2_cache::PolicyCache};
 /// Canonical sealed policy stored at `/policy.json` inside an operator
 /// circle. Field order matters when re-encrypting from another tool,
 /// but for decode any subset is accepted.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct CirclePolicy {
     /// WireGuard endpoint URL the client dials, plaintext after decrypt.
     pub endpoint: String,
@@ -47,8 +48,8 @@ pub(crate) struct CirclePolicy {
     /// Per-MB tariff for CLASS_INTERNAL traffic.
     pub price_per_mb_internal: u64,
     /// Monotonic version bumped each time the operator rotates policy.
-    /// Cache key: if the on-chain version is unchanged from the cached
-    /// copy we skip the fetch+decrypt.
+    /// Included in the authenticated policy. Reuse still requires fresh
+    /// envelope verification and equality of every parsed policy field.
     pub policy_version: u64,
     /// Unix-seconds when the operator last attested the policy was live.
     #[serde(default)]
@@ -62,7 +63,8 @@ pub(crate) enum CircleListing {
     Open {
         circle_id: String,
         policy: CirclePolicy,
-        /// `true` when we returned a cached copy without hitting RPC.
+        /// `true` only when a fresh authenticated response advertises the
+        /// same hash and its parsed policy exactly equals the cached policy.
         from_cache: bool,
     },
     /// Sealed envelope fetched but decrypt failed — caller is not a
@@ -208,9 +210,6 @@ pub(crate) async fn fetch_one(
     passphrase: Option<&str>,
     cache: &mut PolicyCache,
 ) -> CircleListing {
-    // 1. Cache short-circuit (best-effort; cache miss is fine).
-    let cache_entry = cache.get(circle_id);
-
     // 2. Fetch the sealed envelope.
     let rkey = resource_key(circle_id, "/policy.json");
     let resp = match client
@@ -239,87 +238,83 @@ pub(crate) async fn fetch_one(
             };
         }
     };
+    decode_policy_response(circle_id, cfg, passphrase, cache, &resp)
+}
+
+/// The native public view may omit commitment metadata. OCRS1 authenticates
+/// ciphertext but has empty AAD: missing path/freshness are not attested.
+fn decode_policy_response(
+    circle_id: &str,
+    cfg: &V2Cfg,
+    passphrase: Option<&str>,
+    cache: &mut PolicyCache,
+    resp: &Value,
+) -> CircleListing {
     if resp.is_null() {
         return CircleListing::Unpublished {
             circle_id: circle_id.to_string(),
         };
     }
-    let Some(obj) = resp.as_object() else {
+    if !resp.is_object() {
         return CircleListing::Error {
             circle_id: circle_id.to_string(),
-            error: format!("unexpected response shape: {resp}"),
+            error: "unexpected policy response shape".into(),
         };
-    };
-    let Some(ciphertext_b64) = obj.get("ciphertext_b64").and_then(Value::as_str) else {
+    }
+    if resp.get("ciphertext_b64").is_none() {
         return CircleListing::Unpublished {
             circle_id: circle_id.to_string(),
         };
-    };
-    let Some(plaintext_hash) = obj.get("plaintext_hash").and_then(Value::as_str) else {
-        return CircleListing::Error {
-            circle_id: circle_id.to_string(),
-            error: "response missing plaintext_hash".into(),
-        };
-    };
-    let key_id_on_chain = obj
-        .get("key_id")
-        .and_then(Value::as_str)
-        .unwrap_or(&cfg.key_id);
-
-    // 3. Cache short-circuit if the plaintext_hash matches.
-    if let Some(prev) = cache_entry.as_ref() {
-        if prev.plaintext_hash.eq_ignore_ascii_case(plaintext_hash) {
-            return CircleListing::Open {
-                circle_id: circle_id.to_string(),
-                policy: prev.policy.clone(),
-                from_cache: true,
-            };
-        }
     }
-
-    // 4. Decrypt.
     let Some(pp) = passphrase else {
         return CircleListing::Opaque {
             circle_id: circle_id.to_string(),
             reason: "no sealed-passphrase available (set OCTRAVPN_SEALED_PASSPHRASE or [v2].sealed_passphrase)".into(),
         };
     };
-    let plaintext = match decrypt_sealed_bytes(
+    let Ok(authenticated) = decrypt_sealed_asset_response(
         circle_id,
-        key_id_on_chain,
+        SealedAssetLocator::Path("/policy.json"),
+        &cfg.key_id,
         pp,
-        ciphertext_b64,
-        plaintext_hash,
-    ) {
-        Ok(b) => b,
-        Err(e) => {
-            return CircleListing::Opaque {
-                circle_id: circle_id.to_string(),
-                reason: format!("policy sealed; you may not be a member of this tailnet ({e})"),
-            };
-        }
+        resp,
+    ) else {
+        return CircleListing::Opaque { circle_id: circle_id.to_string(), reason: "policy authentication failed (metadata, passphrase, key id, envelope, or hash mismatch)".into() };
     };
-
+    // The shared parser has authenticated bytes and all provided metadata.
+    // Hashless public views always use the fresh policy; a cached hash is
+    // bookkeeping and cannot manufacture an advertised chain commitment.
+    let cache_entry = cache.get(circle_id);
     // 5. Parse JSON.
-    let policy: CirclePolicy = match serde_json::from_slice(&plaintext) {
+    let policy: CirclePolicy = match serde_json::from_slice(&authenticated.plaintext) {
         Ok(p) => p,
-        Err(e) => {
+        Err(_) => {
             return CircleListing::Error {
                 circle_id: circle_id.to_string(),
-                error: format!("decode policy JSON: {e}"),
+                error: "decode policy JSON".into(),
             };
         }
     };
 
+    let cached = cache_entry.filter(|entry| {
+        resp.get("plaintext_hash").is_some()
+            && entry
+                .plaintext_hash
+                .eq_ignore_ascii_case(&authenticated.plaintext_hash)
+            && entry.policy == policy
+    });
+    let from_cache = cached.is_some();
+    let policy = cached.map_or(policy, |entry| entry.policy);
+
     // 6. Persist to cache (best-effort).
-    if let Err(e) = cache.put(circle_id, plaintext_hash, &policy) {
+    if let Err(e) = cache.put(circle_id, &authenticated.plaintext_hash, &policy) {
         tracing::debug!(circle = circle_id, error = %e, "cache write failed");
     }
 
     CircleListing::Open {
         circle_id: circle_id.to_string(),
         policy,
-        from_cache: false,
+        from_cache,
     }
 }
 
@@ -455,5 +450,212 @@ mod tests {
         .to_string();
         let p: CirclePolicy = serde_json::from_str(&s).unwrap();
         assert_eq!(p.attestation_ts, 0);
+    }
+    fn sealed_policy_fixture(key_id: &str) -> (Value, String) {
+        let policy = json!({
+            "endpoint":"vpn.example:51820", "wg_pubkey_b64":"a", "region":"fresh",
+            "price_per_mb_shared":1, "price_per_mb_internal":0, "policy_version":3
+        });
+        let bytes = serde_json::to_vec(&policy).unwrap();
+        let (ciphertext, hash) = octravpn_core::circle::encrypt_sealed_bytes(
+            "circMETA",
+            key_id,
+            "member-secret",
+            &bytes,
+            octravpn_core::circle::PaddingClass::None,
+        )
+        .unwrap();
+        (json!({"ciphertext_b64":ciphertext}), hash)
+    }
+
+    #[test]
+    fn public_policy_without_hash_ignores_cached_hash_and_authenticates_each_response() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cache = PolicyCache::open(dir.path()).unwrap();
+        let cfg = V2Cfg {
+            key_id: "configured".into(),
+            ..V2Cfg::default()
+        };
+        let (response, hash) = sealed_policy_fixture("configured");
+        let poison = CirclePolicy {
+            endpoint: "untrusted:1".into(),
+            wg_pubkey_b64: "bad".into(),
+            region: "bad".into(),
+            price_per_mb_shared: 0,
+            price_per_mb_internal: 0,
+            policy_version: 3,
+            attestation_ts: 0,
+        };
+        cache.put("circMETA", &hash, &poison).unwrap();
+        let result = decode_policy_response(
+            "circMETA",
+            &cfg,
+            Some("member-secret"),
+            &mut cache,
+            &response,
+        );
+        assert!(
+            matches!(result, CircleListing::Open { policy, from_cache:false, .. } if policy.endpoint == "vpn.example:51820")
+        );
+        let mut damaged = response;
+        let mut bytes =
+            octravpn_core::b64::decode(damaged["ciphertext_b64"].as_str().unwrap()).unwrap();
+        *bytes.last_mut().unwrap() ^= 1;
+        damaged["ciphertext_b64"] = json!(octravpn_core::b64::encode(&bytes));
+        assert!(matches!(
+            decode_policy_response(
+                "circMETA",
+                &cfg,
+                Some("member-secret"),
+                &mut cache,
+                &damaged
+            ),
+            CircleListing::Opaque { .. }
+        ));
+        assert!(matches!(
+            decode_policy_response(
+                "circMETA",
+                &cfg,
+                Some("wrong"),
+                &mut cache,
+                &sealed_policy_fixture("configured").0
+            ),
+            CircleListing::Opaque { .. }
+        ));
+        assert_eq!(cache.get("circMETA").unwrap().plaintext_hash, hash);
+    }
+
+    #[test]
+    fn public_policy_present_metadata_and_locator_never_downgrade_to_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cache = PolicyCache::open(dir.path()).unwrap();
+        let cfg = V2Cfg::default();
+        let (response, hash) = sealed_policy_fixture(&cfg.key_id);
+        for (field, value) in [
+            ("plaintext_hash", Value::Null),
+            ("plaintext_hash", json!(7)),
+            ("plaintext_hash", json!("bad")),
+            ("blob_hash", json!("00".repeat(32))),
+            ("size_bytes", json!("0")),
+            ("key_id", Value::Null),
+            ("key_id", json!("")),
+            ("circle_id", json!("different")),
+            ("resource_key", json!("different")),
+            ("path_key", json!("different")),
+            ("canonical_path", json!("/other")),
+            ("path", Value::Null),
+        ] {
+            let mut invalid = response.clone();
+            invalid[field] = value;
+            assert!(matches!(
+                decode_policy_response(
+                    "circMETA",
+                    &cfg,
+                    Some("member-secret"),
+                    &mut cache,
+                    &invalid
+                ),
+                CircleListing::Opaque { .. }
+            ));
+        }
+        let mut wrong_hash = response.clone();
+        wrong_hash["plaintext_hash"] = json!("00".repeat(32));
+        assert!(matches!(
+            decode_policy_response(
+                "circMETA",
+                &cfg,
+                Some("member-secret"),
+                &mut cache,
+                &wrong_hash
+            ),
+            CircleListing::Opaque { .. }
+        ));
+        let mut strict = response;
+        strict["plaintext_hash"] = json!(hash);
+        strict["key_id"] = json!(cfg.key_id.clone());
+        assert!(matches!(
+            decode_policy_response("circMETA", &cfg, Some("member-secret"), &mut cache, &strict),
+            CircleListing::Open {
+                from_cache: false,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn public_policy_plaintext_masquerading_as_ciphertext_is_not_authenticated() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cache = PolicyCache::open(dir.path()).unwrap();
+        let response =
+            json!({"ciphertext_b64":octravpn_core::b64::encode(b"{\"endpoint\":\"bad\"}")});
+        let result = decode_policy_response(
+            "circMETA",
+            &V2Cfg::default(),
+            Some("member-secret"),
+            &mut cache,
+            &response,
+        );
+        assert!(matches!(result, CircleListing::Opaque { .. }));
+        assert!(cache.get("circMETA").is_none());
+    }
+    #[test]
+    fn advertised_policy_cache_requires_authenticated_content_equality() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cache = PolicyCache::open(dir.path()).unwrap();
+        let cfg = V2Cfg::default();
+        let (mut response, hash) = sealed_policy_fixture(&cfg.key_id);
+        response["plaintext_hash"] = json!(hash.clone());
+        let poison = CirclePolicy {
+            endpoint: "untrusted:1".into(),
+            wg_pubkey_b64: "bad".into(),
+            region: "bad".into(),
+            price_per_mb_shared: 999,
+            price_per_mb_internal: 999,
+            policy_version: 3,
+            attestation_ts: 0,
+        };
+        cache.put("circMETA", &hash, &poison).unwrap();
+        let fresh = decode_policy_response(
+            "circMETA",
+            &cfg,
+            Some("member-secret"),
+            &mut cache,
+            &response,
+        );
+        assert!(
+            matches!(fresh, CircleListing::Open { policy, from_cache:false, .. } if policy.endpoint == "vpn.example:51820" && policy.price_per_mb_shared == 1)
+        );
+        let matching = decode_policy_response(
+            "circMETA",
+            &cfg,
+            Some("member-secret"),
+            &mut cache,
+            &response,
+        );
+        assert!(matches!(
+            matching,
+            CircleListing::Open {
+                from_cache: true,
+                ..
+            }
+        ));
+        assert!(matches!(
+            decode_policy_response("circMETA", &cfg, Some("wrong"), &mut cache, &response),
+            CircleListing::Opaque { .. }
+        ));
+        let mut damaged =
+            octravpn_core::b64::decode(response["ciphertext_b64"].as_str().unwrap()).unwrap();
+        *damaged.last_mut().unwrap() ^= 1;
+        response["ciphertext_b64"] = json!(octravpn_core::b64::encode(damaged));
+        assert!(matches!(
+            decode_policy_response(
+                "circMETA",
+                &cfg,
+                Some("member-secret"),
+                &mut cache,
+                &response
+            ),
+            CircleListing::Opaque { .. }
+        ));
     }
 }

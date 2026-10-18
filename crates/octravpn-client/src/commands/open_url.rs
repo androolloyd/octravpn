@@ -268,6 +268,7 @@ fn browser_target(bind: SocketAddr, oct_url: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::{Digest, Sha256};
 
     // ── existing parse_oct_url surface (kept stable) ─────────────────
 
@@ -414,8 +415,8 @@ mod tests {
                         "jsonrpc": "2.0",
                         "id": id,
                         "result": {
-                            "ciphertext_b64": b64,
-                            "plaintext_hash": "0".repeat(64),
+                            "bytes_b64": b64,
+                            "plaintext_hash": hex::encode(Sha256::digest(payload)),
                             "key_id": "default",
                         }
                     }))

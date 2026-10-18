@@ -355,15 +355,12 @@ pub(super) mod tests_common {
         PortalChain::from_rpc(rpc, "octPROG".into(), 0).with_asset_cache(cache)
     }
 
-    /// Wrap raw `plaintext` bytes into the canonical RPC payload shape
-    /// (`{ciphertext_b64, plaintext_hash, key_id}`). Most cache tests
-    /// don't care about the hash — they exercise the plaintext-passthrough
-    /// branch — so this defaults to a 64-zero hash.
+    /// Explicit plaintext-view fixture; ciphertext views always require AEAD.
     pub(crate) fn plaintext_payload(plaintext: &[u8]) -> Value {
+        use sha2::{Digest, Sha256};
         json!({
-            "ciphertext_b64": octravpn_core::b64::encode(plaintext),
-            "plaintext_hash": "0".repeat(64),
-            "key_id": "default",
+            "bytes_b64": octravpn_core::b64::encode(plaintext),
+            "plaintext_hash": hex::encode(Sha256::digest(plaintext)),
         })
     }
 

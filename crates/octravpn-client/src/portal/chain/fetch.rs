@@ -13,7 +13,7 @@
 //! always bypasses the cache.
 
 use octravpn_core::{
-    circle::{decrypt_sealed_bytes, resource_key},
+    circle::{decrypt_sealed_asset_response, resource_key, SealedAssetLocator},
     rpc::RpcClient,
 };
 use serde_json::{json, Value};
@@ -33,9 +33,53 @@ use crate::{
     },
 };
 
+struct FetchedAsset {
+    bytes: Vec<u8>,
+    cacheable: bool,
+}
+
+/// Metadata for the distinct explicit plaintext view. Sealed responses use
+/// the shared core parser rather than this plaintext-only validator.
+fn optional_text<'a>(
+    obj: &'a serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<Option<&'a str>, &'static str> {
+    obj.get(field)
+        .map(|value| value.as_str().ok_or("malformed asset metadata"))
+        .transpose()
+}
+
+fn asset_metadata<'a>(
+    obj: &'a serde_json::Map<String, Value>,
+    circle: &str,
+    path: &str,
+    rkey: &str,
+) -> Result<Option<&'a str>, &'static str> {
+    let expected_path_key =
+        octravpn_core::circle::h256_hex("octra:asset_path:v1", &[path.as_bytes()]);
+    for (field, expected) in [
+        ("circle_id", circle),
+        ("resource_key", rkey),
+        ("path_key", expected_path_key.as_str()),
+        ("canonical_path", path),
+        ("path", path),
+    ] {
+        if optional_text(obj, field)?.is_some_and(|value| value != expected) {
+            return Err("asset locator mismatch");
+        }
+    }
+    let hash = optional_text(obj, "plaintext_hash")?;
+    if hash.is_some_and(|value| {
+        value.trim().len() != 64 || !value.trim().bytes().all(|b| b.is_ascii_hexdigit())
+    }) {
+        return Err("malformed plaintext_hash");
+    }
+    Ok(hash.map(str::trim))
+}
+
 impl PortalChain {
     /// Cache wrapper around [`Self::fetch_inner`]. On hit, returns the
-    /// stored plaintext + sniffed MIME without touching the chain RPC
+    /// stored public plaintext + sniffed MIME without touching the chain RPC
     /// or running a KDF. On miss, performs the fetch + decrypt, sniffs
     /// the result once, and inserts a [`CachedAsset`] for subsequent
     /// callers. Errors are never cached — every error path re-attempts
@@ -54,10 +98,10 @@ impl PortalChain {
         if let Some(hit) = self.asset_cache.get(&key) {
             return Ok(hit);
         }
-        let bytes = self.fetch_inner(circle_id, path, pick_passphrase).await?;
-        let mime = sniff(&bytes);
+        let fetched = self.fetch_asset(circle_id, path, pick_passphrase).await?;
+        let mime = sniff(&fetched.bytes);
         let entry = CachedAsset {
-            bytes: Arc::new(bytes),
+            bytes: Arc::new(fetched.bytes),
             mime,
             fetched_at: Instant::now(),
         };
@@ -66,7 +110,9 @@ impl PortalChain {
         // the second insert wins and replaces the first, which is fine
         // (same plaintext modulo a chain anchor change inside the
         // race window).
-        self.asset_cache.insert(key, entry.clone());
+        if fetched.cacheable {
+            self.asset_cache.insert(key, entry.clone());
+        }
         Ok(entry)
     }
 
@@ -82,6 +128,21 @@ impl PortalChain {
         path: &str,
         pick_passphrase: F,
     ) -> Result<Vec<u8>, FetchAssetError>
+    where
+        F: Fn(&str) -> Option<Arc<Zeroizing<String>>>,
+    {
+        Ok(self
+            .fetch_asset(circle_id, path, pick_passphrase)
+            .await?
+            .bytes)
+    }
+
+    async fn fetch_asset<F>(
+        &self,
+        circle_id: &str,
+        path: &str,
+        pick_passphrase: F,
+    ) -> Result<FetchedAsset, FetchAssetError>
     where
         F: Fn(&str) -> Option<Arc<Zeroizing<String>>>,
     {
@@ -109,7 +170,10 @@ impl PortalChain {
                     || msg.contains("no such")
                 {
                     if let Some(public) = self.fetch_public_asset(circle_id, &path, &rkey).await {
-                        return public;
+                        return public.map(|bytes| FetchedAsset {
+                            bytes,
+                            cacheable: true,
+                        });
                     }
                     return Err(FetchAssetError::NotPublished {
                         circle_id: circle_id.to_string(),
@@ -128,7 +192,10 @@ impl PortalChain {
 
         if resp.is_null() {
             if let Some(public) = self.fetch_public_asset(circle_id, &path, &rkey).await {
-                return public;
+                return public.map(|bytes| FetchedAsset {
+                    bytes,
+                    cacheable: true,
+                });
             }
             return Err(FetchAssetError::NotPublished {
                 circle_id: circle_id.to_string(),
@@ -140,23 +207,23 @@ impl PortalChain {
         let obj = resp.as_object().ok_or_else(|| FetchAssetError::Rpc {
             circle_id: circle_id.to_string(),
             path: path.clone(),
-            source: anyhow::anyhow!("unexpected RPC shape: {resp}"),
+            source: anyhow::anyhow!("unexpected asset RPC shape"),
         })?;
 
-        // Pick the best-available field. Prefer `bytes_b64` (a future
-        // plaintext view) over `ciphertext_b64` (today's sealed view)
-        // so a deploy-day plaintext-RPC swap requires no code change.
-        let b64 = if let Some(s) = obj.get("bytes_b64").and_then(Value::as_str) {
-            s
-        } else if let Some(s) = obj.get("ciphertext_b64").and_then(Value::as_str) {
-            s
-        } else {
-            return Err(FetchAssetError::Rpc {
-                circle_id: circle_id.to_string(),
-                path: path.clone(),
-                source: anyhow::anyhow!("response missing bytes_b64/ciphertext_b64"),
-            });
+        let invalid = |reason: &'static str| FetchAssetError::Rpc {
+            circle_id: circle_id.to_string(),
+            path: path.clone(),
+            source: anyhow::anyhow!(reason),
         };
+        let plaintext_b64 = optional_text(obj, "bytes_b64").map_err(invalid)?;
+        let ciphertext_b64 = optional_text(obj, "ciphertext_b64").map_err(invalid)?;
+        if plaintext_b64.is_some() && ciphertext_b64.is_some() {
+            return Err(invalid("ambiguous plaintext and ciphertext asset fields"));
+        }
+        let explicit_plaintext = plaintext_b64.is_some();
+        let b64 = plaintext_b64
+            .or(ciphertext_b64)
+            .ok_or_else(|| invalid("response missing bytes_b64/ciphertext_b64"))?;
 
         let bytes =
             octravpn_core::b64::decode(b64.as_bytes()).map_err(|e| FetchAssetError::Rpc {
@@ -170,11 +237,28 @@ impl PortalChain {
         // could in principle still ship a pre-sealed asset, and we'd
         // rather decrypt than render ciphertext. (Cost: 5-byte cmp.)
         if !looks_sealed(&bytes) {
-            return Ok(bytes);
+            // The ciphertext view must never become an unauthenticated plaintext
+            // transport. Only the explicit plaintext field retains passthrough.
+            if !explicit_plaintext {
+                return Err(FetchAssetError::DecryptFailed {
+                    circle_id: circle_id.to_string(),
+                    path,
+                });
+            }
+            let expected_hash = asset_metadata(obj, circle_id, &path, &rkey).map_err(invalid)?;
+            if expected_hash.is_some_and(|expected| {
+                !hex::encode(Sha256::digest(&bytes)).eq_ignore_ascii_case(expected)
+            }) {
+                return Err(invalid("plaintext hash mismatch"));
+            }
+            return Ok(FetchedAsset {
+                bytes,
+                cacheable: true,
+            });
         }
 
-        // From here on, bytes are a sealed envelope. We need a
-        // passphrase + the plaintext_hash the chain published.
+        // A sealed envelope always needs a passphrase. The public native RPC
+        // intentionally omits plaintext_hash and key_id.
         let Some(pp) = pick_passphrase(circle_id) else {
             return Err(FetchAssetError::MissingPassphrase {
                 circle_id: circle_id.to_string(),
@@ -182,26 +266,33 @@ impl PortalChain {
             });
         };
 
-        let plaintext_hash = obj
-            .get("plaintext_hash")
-            .and_then(Value::as_str)
-            .ok_or_else(|| FetchAssetError::Rpc {
-                circle_id: circle_id.to_string(),
-                path: path.clone(),
-                source: anyhow::anyhow!("sealed asset response missing plaintext_hash"),
-            })?;
-        let key_id = obj
-            .get("key_id")
-            .and_then(Value::as_str)
-            .unwrap_or(&self.key_id);
-
-        // One decrypt attempt. We deliberately drop the inner error
-        // string — exposing it through Display could leak fragments of
-        // the ciphertext envelope or, in some future codepath, the
-        // passphrase. The route layer turns this into a "passphrase
-        // mismatch" page; the operator can re-check their config.
-        match decrypt_sealed_bytes(circle_id, key_id, pp.as_str(), b64, plaintext_hash) {
-            Ok(plain) => Ok(plain),
+        // OCRS1 authenticates the envelope (empty AAD). It does not prove an
+        // omitted locator or freshness; the shared parser validates provided locators.
+        // Sealed reads are not inserted into the public plaintext TTL cache, so
+        // absent-hash responses always refetch and authenticate before use.
+        // A presealed payload in the explicit plaintext field is normalized
+        // only as a wire alias; the same shared AEAD/metadata checks still run.
+        let normalized;
+        let sealed_response = if explicit_plaintext {
+            let mut object = obj.clone();
+            object.remove("bytes_b64");
+            object.insert("ciphertext_b64".into(), Value::String(b64.to_string()));
+            normalized = Value::Object(object);
+            &normalized
+        } else {
+            &resp
+        };
+        match decrypt_sealed_asset_response(
+            circle_id,
+            SealedAssetLocator::Path(&path),
+            &self.key_id,
+            pp.as_str(),
+            sealed_response,
+        ) {
+            Ok(envelope) => Ok(FetchedAsset {
+                bytes: envelope.plaintext,
+                cacheable: false,
+            }),
             Err(_) => Err(FetchAssetError::DecryptFailed {
                 circle_id: circle_id.to_string(),
                 path,
@@ -691,26 +782,134 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sealed_asset_missing_plaintext_hash_maps_to_rpc() {
-        // Sealed envelope but the response is missing plaintext_hash.
-        let plaintext = b"x";
-        let (ct_b64, _ph) = build_sealed_fixture("circNOPH", "default", "pp", plaintext);
-        let addr = spawn_mock_rpc(json!({
-            "ciphertext_b64": ct_b64,
-            "key_id": "default",
-        }))
-        .await;
-        let rpc = RpcClient::new(format!("http://{addr}/"));
-        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0).with_passphrase("pp");
-        let err = chain
-            .fetch_circle_asset_bytes("circNOPH", "/x.json")
-            .await
-            .expect_err("missing plaintext_hash must map to Rpc");
-        match err {
-            FetchAssetError::Rpc { source, .. } => {
-                assert!(source.to_string().contains("plaintext_hash"));
-            }
-            other => panic!("expected Rpc, got {other:?}"),
+    async fn sealed_asset_without_metadata_authenticates_with_configured_key() {
+        let (ct, _) = build_sealed_fixture("circNOPH", "configured", "pp", b"private bytes");
+        let addr = spawn_mock_rpc(json!({"ciphertext_b64": ct})).await;
+        let chain = PortalChain::from_rpc(
+            RpcClient::new(format!("http://{addr}/")),
+            "octPROG".into(),
+            0,
+        )
+        .with_key_id("configured")
+        .with_passphrase("pp");
+        assert_eq!(
+            chain
+                .fetch_circle_asset_bytes("circNOPH", "/x.json")
+                .await
+                .unwrap(),
+            b"private bytes"
+        );
+    }
+    #[tokio::test]
+    async fn public_sealed_reads_refetch_and_reauthenticate_without_metadata_cache() {
+        use crate::portal::chain::cache::AssetCache;
+        use crate::portal::chain::tests_common::{chain_with_cache, spawn_counting_rpc};
+        use octravpn_core::bounded::BoundedMap;
+        use std::time::Duration;
+        let (ciphertext, _) = build_sealed_fixture("circNOCACHE", "default", "pp", b"secret");
+        let (addr, count) = spawn_counting_rpc(json!({"ciphertext_b64":ciphertext})).await;
+        let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(8, Duration::from_secs(60)));
+        let chain = chain_with_cache(addr, Arc::clone(&cache)).with_passphrase("pp");
+        for _ in 0..2 {
+            assert_eq!(
+                chain
+                    .fetch_circle_asset_bytes("circNOCACHE", "/a")
+                    .await
+                    .unwrap(),
+                b"secret"
+            );
         }
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        assert_eq!(cache.len(), 0);
+        let wrong = chain.clone().with_passphrase("wrong");
+        assert!(matches!(
+            wrong.fetch_circle_asset_bytes("circNOCACHE", "/a").await,
+            Err(FetchAssetError::DecryptFailed { .. })
+        ));
+        assert_eq!(count.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn public_sealed_metadata_tampering_and_plaintext_never_bypass_authentication() {
+        let (ciphertext, _) = build_sealed_fixture("circCHECK", "default", "pp", b"secret");
+        let mut damaged = octravpn_core::b64::decode(ciphertext.as_bytes()).unwrap();
+        *damaged.last_mut().unwrap() ^= 1;
+        for response in [
+            json!({"ciphertext_b64":octravpn_core::b64::encode(&damaged)}),
+            json!({"ciphertext_b64":octravpn_core::b64::encode(b"unauthenticated plaintext")}),
+            json!({"ciphertext_b64":ciphertext,"plaintext_hash":"00".repeat(32)}),
+            json!({"ciphertext_b64":ciphertext,"key_id":"wrong"}),
+        ] {
+            let addr = spawn_mock_rpc(response).await;
+            let chain = PortalChain::from_rpc(
+                RpcClient::new(format!("http://{addr}/")),
+                "octPROG".into(),
+                0,
+            )
+            .with_passphrase("pp");
+            let err = chain
+                .fetch_circle_asset_bytes("circCHECK", "/a")
+                .await
+                .unwrap_err();
+            assert!(matches!(err, FetchAssetError::DecryptFailed { .. }));
+            assert!(!err.to_string().contains(&ciphertext));
+            assert!(!err.to_string().contains("secret"));
+        }
+    }
+
+    #[tokio::test]
+    async fn provided_asset_metadata_is_strict_and_omitted_path_is_not_claimed_authenticated() {
+        let (ciphertext, _) = build_sealed_fixture("circLOC", "default", "pp", b"secret");
+        for (field, value) in [
+            ("circle_id", json!("other")),
+            ("resource_key", json!("other")),
+            ("path_key", json!("other")),
+            ("canonical_path", json!("/other")),
+            ("path", Value::Null),
+            ("plaintext_hash", Value::Null),
+            ("plaintext_hash", json!("bad")),
+            ("blob_hash", json!("00".repeat(32))),
+            ("size_bytes", json!("0")),
+            ("bytes_b64", json!(7)),
+            ("key_id", json!(9)),
+            ("key_id", json!("")),
+        ] {
+            let mut response = json!({"ciphertext_b64":ciphertext});
+            response[field] = value;
+            let addr = spawn_mock_rpc(response).await;
+            let chain = PortalChain::from_rpc(
+                RpcClient::new(format!("http://{addr}/")),
+                "octPROG".into(),
+                0,
+            )
+            .with_passphrase("pp");
+            assert!(chain
+                .fetch_circle_asset_bytes("circLOC", "/a")
+                .await
+                .is_err());
+        }
+        let addr = spawn_mock_rpc(json!({"ciphertext_b64":ciphertext})).await;
+        let chain = PortalChain::from_rpc(
+            RpcClient::new(format!("http://{addr}/")),
+            "octPROG".into(),
+            0,
+        )
+        .with_passphrase("pp");
+        // OCRS1 has no path AAD. Both responses authenticate bytes under the
+        // circle/key only; accepting them asserts neither path nor freshness.
+        assert_eq!(
+            chain
+                .fetch_circle_asset_bytes("circLOC", "/a")
+                .await
+                .unwrap(),
+            b"secret"
+        );
+        assert_eq!(
+            chain
+                .fetch_circle_asset_bytes("circLOC", "/b")
+                .await
+                .unwrap(),
+            b"secret"
+        );
     }
 }

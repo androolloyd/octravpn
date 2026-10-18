@@ -34,6 +34,23 @@ remains pending. The [candidate checkpoint](checkpoints/2026-10-18/interface-can
 records the preceding passing suite and the unresolved mixed Stealth and nested
 UDP failures separately. The retained public observer has not adopted this candidate.
 
+The [public Circle reader checkpoint](checkpoints/2026-10-18/sealed-reader.json)
+records 335 passing client tests and 371 passing Foundry tests with seven explicit
+Foundry exclusions. Public responses no longer need sensitive plaintext hashes;
+sealed reads still authenticate every envelope and validate all provided metadata.
+Policy cache reuse requires fresh authentication and full policy equality. Key
+defaults now agree for programmatic and omitted-table configuration. Strict
+workspace lint and formatting pass. The preceding baseline workspace separately
+passed 2,774 tests across 241 logical targets with 15 exclusions; those historical
+counts are not added to the successor results.
+
+The latest mixed workload reached 34 matching epochs, including its eight
+pre-restart transactions. Its fixture then refused Rust's receipt-storage JSON
+shape before restart. Independent audits found matching receipt bytes and roots;
+the corrected fixture still needs its full 54-epoch run and restart qualification.
+The combined normal artifact, Linux traffic scenarios and operator tooling remain
+pending, and the retained public observer is unchanged.
+
 ## Recorded local evidence
 
 - The [native integration observer adoption](checkpoints/2026-10-18/native-integration-public-adoption.md)
