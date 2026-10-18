@@ -52,7 +52,6 @@
     ]
   },
   "pending": [
-    "Execute newly authored startup and recovery regressions",
     "Fresh combined source-bound normal build, workspace and native differential tests",
     "Mixed private-proof finality, receipts, roots, ExEx and restart qualification",
     "Nested traffic, exhaustion, revocation and recovery qualification on both hops",
@@ -65,5 +64,12 @@
     "Private-genesis authority does not establish public entitlement.",
     "Public paid service and Mainnet remain unqualified.",
     "Prior failures and prior-source successes retain their original scope; no timeout, quorum or consensus waiver."
-  ]
+  ],
+  "current_candidate_startup_tests": {
+    "passed": 8,
+    "failed": 0,
+    "source_scope_sha256": "eda80ae3b849112425a53ec252b00ed0d3f5b617bcce0966f6bd7f02a5db8a73",
+    "capture_sha256": "76feeb71cbc9b9e5a5fe009bf38b5684fdfec7eb4d5dd6ab6246937be24c719f",
+    "scope": "Targeted local startup, configured limits, driver recovery and authenticated checkpoint tests; broader combined qualification remains pending."
+  }
 }

@@ -288,8 +288,9 @@ impl Fixture {
         Box::pin(Self::with_health(voting, HealthConfig::default())).await
     }
     pub(super) async fn with_grace(proposal_grace: GraceConfig) -> Self {
+        // Observers intentionally serve without recreating a BFT actor.
         Box::pin(Self::start_with_grace(
-            false,
+            true,
             HealthConfig::default(),
             false,
             None,

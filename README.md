@@ -75,8 +75,8 @@ pending. Native physical stores use an explicitly pinned compatibility backend;
 private-genesis fixtures do not establish public entitlement or universal parity.
 The [current qualification status](docs/rust-node/checkpoints/2026-10-18/interface-candidate.json)
 records the remaining mixed private-proof and nested traffic failures. Captured
-startup settings and failure diagnostics are implemented; their combined rerun
-is pending.
+startup settings and failure diagnostics are implemented. Eight startup and
+recovery regressions pass; the broader combined rerun remains pending.
 
 Retained finality audits can [reuse verified work within one process](docs/rust-node/checkpoints/2026-10-17/audit-reuse.md).
 Every audit still rereads the full prefix and authenticates historical validator

@@ -29,7 +29,8 @@ Public-network startup now captures proposal grace, epoch-tag retention and CLI
 proof-worker limits from the same configured profile. Recovery keeps the captured
 grace; supplied library runtimes retain their caller-owned limits. These changes
 and the cancellation-safe nested traffic diagnostics have source review, with
-their final execution tests pending. The [candidate checkpoint](checkpoints/2026-10-18/interface-candidate.json)
+eight targeted startup/recovery regressions passing. Broader combined execution
+remains pending. The [candidate checkpoint](checkpoints/2026-10-18/interface-candidate.json)
 records the preceding passing suite and the unresolved mixed Stealth and nested
 UDP failures separately. The retained public observer has not adopted this candidate.
 
