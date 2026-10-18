@@ -16,8 +16,11 @@ For the current integrated Rust node and prepaid Octranet service, start with
 [nested exits](architecture/nested-paid-exits.md); the
 [Circle custody variant](architecture/circle-prepaid.md) has its own deployment
 binding. The [native integration checkpoint](rust-node/checkpoints/2026-10-17/native-integration.md)
-records the completed local tests and their exact limits. The older deployment
-guides below retain their version-specific scope.
+records the completed local tests and their exact limits. The separate
+[public observer adoption](rust-node/checkpoints/2026-10-18/native-integration-public-adoption.md)
+records the retained-state upgrade, verified forward progress and remaining
+public-service gates. The older deployment guides below retain their
+version-specific scope.
 
 ---
 

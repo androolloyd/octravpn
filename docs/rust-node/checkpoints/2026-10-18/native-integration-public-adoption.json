@@ -1,0 +1,489 @@
+{
+  "schema": "octra_public_observer_adoption_record_v1",
+  "draft_only": false,
+  "published": true,
+  "postlaunch_record_complete": true,
+  "prepared_at": "2026-10-18T03:10:45.403688+00:00",
+  "scope": "Actual clean retained-state cutover records plus later bounded process/status and prefix observations. Clean launch is not sustained availability, public paid deployment or tip-sync qualification.",
+  "input_bindings": {
+    "release_manifest": {
+      "path": "out/octra-parity-public-20261017-v14/release/manifest.json",
+      "sha256": "35cd027786a4965fe5364613bd5c4c1eb4d0e6b9523bfeda94ee27c942a6860b"
+    },
+    "clean_stop": {
+      "path": "out/octra-parity-public-20261017-v14/public-adoption/stop.json",
+      "sha256": "2da031fd7ed97f86629b549fa90583a864d06834558db975261b18098d8fa9ce"
+    },
+    "launch": {
+      "path": "out/octra-parity-public-20261017-v14/public-adoption/launch.json",
+      "sha256": "b4886b235dc570914836f07a3d8515344cb388eaef66400da44993d5b56547d5"
+    },
+    "clean_stop_prefix": {
+      "path": "out/octra-parity-public-20261017-v14/public-adoption/stopped.json",
+      "sha256": "81ad9df19c27976e3456df9782ed4ab3a45559c07c249f7793309ffd4d3fb405"
+    },
+    "observer_inspection": {
+      "path": "out/octra-parity-public-20261017-v14/inspect-final.json",
+      "sha256": "8ae0e793525f3ba406d7d550e51b97d711af23b91fe39b10f41d02dbe233ac14"
+    },
+    "observation_jsonl_snapshot": {
+      "path": "out/octra-parity-final-20261017/public-adoption-checkpoint-final-v1/observations-final.jsonl",
+      "sha256": "263c0010cf4a66ae64004e947372b3b818543a8bebcc129e2475d339c0777fcb"
+    },
+    "prefix_audit_results": [
+      {
+        "path": "out/octra-parity-public-20261017-v14/public-adoption/forward-prefix-v1.json",
+        "sha256": "b393d46a6a9c44d760676e1c4dbd3fe9d01650a0d89abcd6dfcb07b2246401e8"
+      },
+      {
+        "path": "out/octra-parity-public-20261017-v14/public-adoption/forward-prefix-v2.json",
+        "sha256": "a5fec857cac4a44fa0ddff32e2e2a3c98e483b61b99591da74034b51d6dfa6c1"
+      }
+    ],
+    "prefix_audit_invocations": [
+      {
+        "path": "out/octra-parity-public-20261017-v14/public-adoption/forward-prefix-v1-invocation.json",
+        "sha256": "d53ddf86d2a91550daed0c57710637d7556c98ddc6d6c9cb4d87632e82e76434"
+      },
+      {
+        "path": "out/octra-parity-public-20261017-v14/public-adoption/forward-prefix-v2-invocation.json",
+        "sha256": "581ffcd0cdbb1504e9528187418d25ea4ff4617467bba9e48e2a091a47f8343c"
+      }
+    ],
+    "headlag_samples": [
+      {
+        "path": "out/octra-parity-public-20261017-v14/head-samples/sample-1.json",
+        "sha256": "cb72a992fdd22083700dc8d0f632110195299e8eaf944676841191a40d32be0a"
+      },
+      {
+        "path": "out/octra-parity-public-20261017-v14/head-samples/sample-2.json",
+        "sha256": "dfb89b6680131c56f261c31c2984040e29c6f62654eb7435dc7cfc0dadfe49a8"
+      },
+      {
+        "path": "out/octra-parity-public-20261017-v14/head-samples/sample-3.json",
+        "sha256": "782df573d369e82975e4771237776090a79ca22a382428fbbd9f24251da55e37"
+      }
+    ],
+    "startup_readiness": {
+      "path": "out/octra-parity-public-20261017-v14/startup-readiness.jsonl",
+      "sha256": "d31d6705b0830a503bf7fbb036cab8ae4f35755ea87c87781d0735116fa82d31"
+    },
+    "local_qualification_checkpoint": {
+      "path": "docs/rust-node/checkpoints/2026-10-17/native-integration.json",
+      "sha256": "3c9cf856eea0fa2cc27dfa1af852fdd290cc1940ffccbedb62dd98989568f16c"
+    },
+    "candidate_release_role_checkpoint": {
+      "path": "docs/rust-node/checkpoints/2026-10-17/native-integration-release-gates.json",
+      "sha256": "3060bde73de072528df5c6edc3d16ce52e422e9f54e3ab34e11d8fbfcde25b04"
+    },
+    "github_checks": {
+      "path": "out/octra-parity-final-20261017/github-ci-final-snapshot-v2/snapshot.json",
+      "sha256": "6e39705ba24b58cfea25192d7d04ac5677e911a2d1cc2a6237052e44b25dd138"
+    }
+  },
+  "implementation": {
+    "source_commit": "fbe1684ef09ac04ce8a5620eab8e03ebbed2b35d",
+    "normal_binary_sha256": "a4d46e4679efc1c9294d1f8e67d7c0b5378eb5d2f82bce801b9ae7f203a55e8e",
+    "native_reference": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "implementation_sources_sha256": "7ef76d9b4d0e3823a7d84216b2966c9c732719ec440b929f5e65cc02c6fd4b8f",
+    "prepack_sources_sha256": "1d7406970ed0fc75442355237bce02481b051c7c22675c5bc603c9f595e3e41f",
+    "published_sources_sha256": "0664277bb2c6ba10d870172e823762d3b92ea4b47ba10e2eb1b0eb52c471903e",
+    "normal_test_helpers": false,
+    "consensus_changes": false
+  },
+  "recorded_cutover": {
+    "old_pid": 96735,
+    "old_clean_exit_at": "2026-10-18T03:08:35.313726+00:00",
+    "old_exit_code": 0,
+    "signal": "SIGTERM",
+    "forced": false,
+    "state_reset": false,
+    "new_launch_at": "2026-10-18T03:08:46.209395+00:00",
+    "new_pid": 74187,
+    "supervisor_pid": 74174,
+    "retained_sequence": 13851,
+    "retained_epoch": 1711611,
+    "stopped_prefix_audit_sha256": "81ad9df19c27976e3456df9782ed4ab3a45559c07c249f7793309ffd4d3fb405",
+    "voting": false,
+    "payments_enabled": false,
+    "funds_spent_by_launch": 0,
+    "meaning": "These are recorded stop/launch facts, not a current liveness or Serving observation."
+  },
+  "retained_prefix_and_forward_progress": {
+    "actual_postlaunch_audit_at": "2026-10-18T03:27:31.567766+00:00",
+    "baseline_sequence": 13851,
+    "baseline_epoch": 1711611,
+    "current_sequence": 13917,
+    "current_epoch": 1711677,
+    "canonical_sequence_delta": 66,
+    "epoch_delta": 66,
+    "immutable_retained_prefix_preserved": true,
+    "canonical_outbox_checkpoint_archive_consistency": true,
+    "exex_cursors": [
+      {
+        "extension": "devnet-archive",
+        "namespace": "9ebcbe2009256807e94a63b2b4d11865fbe684a7acfcdea1fa96a25111a53981",
+        "before_sequence": 13851,
+        "before_epoch": 1711611,
+        "after_sequence": 13917,
+        "after_epoch": 1711677,
+        "sequence_delta": 66,
+        "epoch_delta": 66,
+        "state_root": "b39cfd82e857264d5566acbf83c8129c1dd3716298279dab093081ce3dcffbc5"
+      }
+    ],
+    "new_transaction_event_counts": {
+      "unique_canonical_sequences": 66,
+      "events": 491,
+      "deduplicated_across_extensions": true
+    },
+    "scope": "Populate only from the actual baseline-bound read-only continuity audit. Its storage consistency is not a new independent QC proof.",
+    "first_postlaunch_audit_records_unchanged_in_final_audit": true
+  },
+  "bounded_observations": {
+    "sample_count": 3,
+    "first_at": "2026-10-18T03:25:10.009437+00:00",
+    "last_at": "2026-10-18T03:27:46.798551+00:00",
+    "process_identity_observed_valid": true,
+    "process_environment_digest_observed_matching": true,
+    "exit_evidence_observed": false,
+    "rpc_http_outcomes": [
+      {
+        "at": "2026-10-18T03:25:10.009437+00:00",
+        "operator_status": 200,
+        "operator_peers": 200,
+        "public_status": 503,
+        "epoch": 1711644,
+        "serving": false,
+        "suspension_reason": "publishing canonical epoch",
+        "connected_peers": 0
+      },
+      {
+        "at": "2026-10-18T03:26:24.317653+00:00",
+        "operator_status": 200,
+        "operator_peers": 200,
+        "public_status": 503,
+        "epoch": 1711662,
+        "serving": false,
+        "suspension_reason": "publishing canonical epoch",
+        "connected_peers": 0
+      },
+      {
+        "at": "2026-10-18T03:27:46.798551+00:00",
+        "operator_status": 200,
+        "operator_peers": 200,
+        "public_status": 503,
+        "epoch": 1711685,
+        "serving": false,
+        "suspension_reason": "publishing canonical epoch",
+        "connected_peers": 0
+      }
+    ],
+    "latest_observed_chain_id": "octra-devnet-9871-cluster",
+    "latest_observed_epoch": 1711685,
+    "latest_observed_state_root": "ca9fd6dd77c21299da7ae2b566d73b0977c7596c36fff682dcf27b6c7fdcbd3d",
+    "latest_observed_peers": 0,
+    "latest_observed_serving": false,
+    "latest_suspension_reason": "publishing canonical epoch",
+    "paid_unconfigured_observed": true,
+    "scope": "Only whitelisted values from actual observation rows. Preserve errors, cold-load/unavailable samples and suspended samples; do not turn unknown values into false or zero."
+  },
+  "head_lag_observations": [
+    {
+      "sample": 1,
+      "remote_source": "official_node_status",
+      "endpoint": "https://devnet.octrascan.io/rpc",
+      "remote_sample_at": "2026-10-18T03:21:10.335941+00:00",
+      "field": "epoch",
+      "remote_epoch_hint": 1711814,
+      "local_sample_at": "2026-10-18T03:21:10.335446+00:00",
+      "local_epoch": null,
+      "lag_hint": null,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 1,
+      "remote_source": "official_node_status",
+      "endpoint": "https://devnet.octrascan.io/rpc",
+      "remote_sample_at": "2026-10-18T03:21:10.335941+00:00",
+      "field": "current_epoch",
+      "remote_epoch_hint": 1711814,
+      "local_sample_at": "2026-10-18T03:21:10.335446+00:00",
+      "local_epoch": null,
+      "lag_hint": null,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 1,
+      "remote_source": "official_node_status",
+      "endpoint": "https://devnet.octrascan.io/rpc",
+      "remote_sample_at": "2026-10-18T03:21:10.335941+00:00",
+      "field": "head_epoch",
+      "remote_epoch_hint": 1711813,
+      "local_sample_at": "2026-10-18T03:21:10.335446+00:00",
+      "local_epoch": null,
+      "lag_hint": null,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 1,
+      "remote_source": "official_primary_head",
+      "endpoint": "https://devnet.octrascan.io/state-sync/primary/state-sync/head",
+      "remote_sample_at": "2026-10-18T03:21:10.336034+00:00",
+      "field": "current_epoch",
+      "remote_epoch_hint": 1706811,
+      "local_sample_at": "2026-10-18T03:21:10.335446+00:00",
+      "local_epoch": null,
+      "lag_hint": null,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 1,
+      "remote_source": "official_primary_head",
+      "endpoint": "https://devnet.octrascan.io/state-sync/primary/state-sync/head",
+      "remote_sample_at": "2026-10-18T03:21:10.336034+00:00",
+      "field": "head_epoch",
+      "remote_epoch_hint": 1706810,
+      "local_sample_at": "2026-10-18T03:21:10.335446+00:00",
+      "local_epoch": null,
+      "lag_hint": null,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 1,
+      "remote_source": "official_secondary_head",
+      "endpoint": "https://devnet.octrascan.io/state-sync/secondary/state-sync/head",
+      "remote_sample_at": "2026-10-18T03:21:10.336143+00:00",
+      "field": "current_epoch",
+      "remote_epoch_hint": 1711815,
+      "local_sample_at": "2026-10-18T03:21:10.335446+00:00",
+      "local_epoch": null,
+      "lag_hint": null,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 1,
+      "remote_source": "official_secondary_head",
+      "endpoint": "https://devnet.octrascan.io/state-sync/secondary/state-sync/head",
+      "remote_sample_at": "2026-10-18T03:21:10.336143+00:00",
+      "field": "head_epoch",
+      "remote_epoch_hint": 1711814,
+      "local_sample_at": "2026-10-18T03:21:10.335446+00:00",
+      "local_epoch": null,
+      "lag_hint": null,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 2,
+      "remote_source": "official_node_status",
+      "endpoint": "https://devnet.octrascan.io/rpc",
+      "remote_sample_at": "2026-10-18T03:25:11.088064+00:00",
+      "field": "epoch",
+      "remote_epoch_hint": 1711832,
+      "local_sample_at": "2026-10-18T03:25:11.087633+00:00",
+      "local_epoch": 1711644,
+      "lag_hint": 188,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 2,
+      "remote_source": "official_node_status",
+      "endpoint": "https://devnet.octrascan.io/rpc",
+      "remote_sample_at": "2026-10-18T03:25:11.088064+00:00",
+      "field": "current_epoch",
+      "remote_epoch_hint": 1711832,
+      "local_sample_at": "2026-10-18T03:25:11.087633+00:00",
+      "local_epoch": 1711644,
+      "lag_hint": 188,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 2,
+      "remote_source": "official_node_status",
+      "endpoint": "https://devnet.octrascan.io/rpc",
+      "remote_sample_at": "2026-10-18T03:25:11.088064+00:00",
+      "field": "head_epoch",
+      "remote_epoch_hint": 1711831,
+      "local_sample_at": "2026-10-18T03:25:11.087633+00:00",
+      "local_epoch": 1711644,
+      "lag_hint": 187,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 2,
+      "remote_source": "official_primary_head",
+      "endpoint": "https://devnet.octrascan.io/state-sync/primary/state-sync/head",
+      "remote_sample_at": "2026-10-18T03:25:11.088162+00:00",
+      "field": "current_epoch",
+      "remote_epoch_hint": 1706811,
+      "local_sample_at": "2026-10-18T03:25:11.087633+00:00",
+      "local_epoch": 1711644,
+      "lag_hint": -4833,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 2,
+      "remote_source": "official_primary_head",
+      "endpoint": "https://devnet.octrascan.io/state-sync/primary/state-sync/head",
+      "remote_sample_at": "2026-10-18T03:25:11.088162+00:00",
+      "field": "head_epoch",
+      "remote_epoch_hint": 1706810,
+      "local_sample_at": "2026-10-18T03:25:11.087633+00:00",
+      "local_epoch": 1711644,
+      "lag_hint": -4834,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 2,
+      "remote_source": "official_secondary_head",
+      "endpoint": "https://devnet.octrascan.io/state-sync/secondary/state-sync/head",
+      "remote_sample_at": "2026-10-18T03:25:11.088297+00:00",
+      "field": "current_epoch",
+      "remote_epoch_hint": 1711832,
+      "local_sample_at": "2026-10-18T03:25:11.087633+00:00",
+      "local_epoch": 1711644,
+      "lag_hint": 188,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 2,
+      "remote_source": "official_secondary_head",
+      "endpoint": "https://devnet.octrascan.io/state-sync/secondary/state-sync/head",
+      "remote_sample_at": "2026-10-18T03:25:11.088297+00:00",
+      "field": "head_epoch",
+      "remote_epoch_hint": 1711831,
+      "local_sample_at": "2026-10-18T03:25:11.087633+00:00",
+      "local_epoch": 1711644,
+      "lag_hint": 187,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 3,
+      "remote_source": "official_node_status",
+      "endpoint": "https://devnet.octrascan.io/rpc",
+      "remote_sample_at": "2026-10-18T03:27:25.091769+00:00",
+      "field": "epoch",
+      "remote_epoch_hint": 1711838,
+      "local_sample_at": "2026-10-18T03:27:25.091251+00:00",
+      "local_epoch": 1711678,
+      "lag_hint": 160,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 3,
+      "remote_source": "official_node_status",
+      "endpoint": "https://devnet.octrascan.io/rpc",
+      "remote_sample_at": "2026-10-18T03:27:25.091769+00:00",
+      "field": "current_epoch",
+      "remote_epoch_hint": 1711838,
+      "local_sample_at": "2026-10-18T03:27:25.091251+00:00",
+      "local_epoch": 1711678,
+      "lag_hint": 160,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 3,
+      "remote_source": "official_node_status",
+      "endpoint": "https://devnet.octrascan.io/rpc",
+      "remote_sample_at": "2026-10-18T03:27:25.091769+00:00",
+      "field": "head_epoch",
+      "remote_epoch_hint": 1711837,
+      "local_sample_at": "2026-10-18T03:27:25.091251+00:00",
+      "local_epoch": 1711678,
+      "lag_hint": 159,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 3,
+      "remote_source": "official_primary_head",
+      "endpoint": "https://devnet.octrascan.io/state-sync/primary/state-sync/head",
+      "remote_sample_at": "2026-10-18T03:27:25.091909+00:00",
+      "field": "current_epoch",
+      "remote_epoch_hint": 1706811,
+      "local_sample_at": "2026-10-18T03:27:25.091251+00:00",
+      "local_epoch": 1711678,
+      "lag_hint": -4867,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 3,
+      "remote_source": "official_primary_head",
+      "endpoint": "https://devnet.octrascan.io/state-sync/primary/state-sync/head",
+      "remote_sample_at": "2026-10-18T03:27:25.091909+00:00",
+      "field": "head_epoch",
+      "remote_epoch_hint": 1706810,
+      "local_sample_at": "2026-10-18T03:27:25.091251+00:00",
+      "local_epoch": 1711678,
+      "lag_hint": -4868,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 3,
+      "remote_source": "official_secondary_head",
+      "endpoint": "https://devnet.octrascan.io/state-sync/secondary/state-sync/head",
+      "remote_sample_at": "2026-10-18T03:27:25.092040+00:00",
+      "field": "current_epoch",
+      "remote_epoch_hint": 1711839,
+      "local_sample_at": "2026-10-18T03:27:25.091251+00:00",
+      "local_epoch": 1711678,
+      "lag_hint": 161,
+      "http": 200,
+      "authenticated_finality_authority": false
+    },
+    {
+      "sample": 3,
+      "remote_source": "official_secondary_head",
+      "endpoint": "https://devnet.octrascan.io/state-sync/secondary/state-sync/head",
+      "remote_sample_at": "2026-10-18T03:27:25.092040+00:00",
+      "field": "head_epoch",
+      "remote_epoch_hint": 1711838,
+      "local_sample_at": "2026-10-18T03:27:25.091251+00:00",
+      "local_epoch": 1711678,
+      "lag_hint": 160,
+      "http": 200,
+      "authenticated_finality_authority": false
+    }
+  ],
+  "tip_synchronized_qualified": false,
+  "sustained_public_availability_qualified": false,
+  "public_paid_deployment_qualified": false,
+  "mainnet_qualified": false,
+  "universal_native_parity_qualified": false,
+  "limitations": [
+    "Finite local qualification is not universal native behavioral equivalence; mixed Circle/private-proof and every native profile remain unqualified.",
+    "Three guarded postlaunch samples observed Serving false, zero connected peers and public /status HTTP503 while publishing canonical epochs. Catch-up is advancing; sustained public availability and P2P retention remain unqualified.",
+    "Head endpoints are sampled nonatomically and are hints, not finality authority. The primary endpoint remains substantially stale; RPC and secondary differ by up to one epoch in the last sample.",
+    "The final storage audit verifies the unchanged retained prefix and66new canonical/ExEx/archive epochs with491events; a later guarded RPC sample reports a newer head separately.",
+    "Paid service remains unconfigured; no public paid onboarding, portal funding, public DNS/TLS or Mainnet deployment was performed.",
+    "GitHub Headscale parity and WG smoke passed; CI, Proof and Coverage were still running at the saved snapshot.",
+    "The storage audit is not a new independent QC proof. Production finality verification remains responsible for authenticated imports."
+  ],
+  "recorded_at": "2026-10-18T03:28:52.191773+00:00",
+  "startup": {
+    "sample_count": 29,
+    "unavailable_samples": 28,
+    "first_rpc_observed_at": "2026-10-18T03:24:12.479585+00:00",
+    "first_rpc_observed_epoch": 1711628,
+    "first_rpc_observed_seconds_after_launch": 926.27,
+    "scope": "First successful sampled RPC time, not the exact instant RPC opened; earlier unavailable samples are preserved."
+  }
+}

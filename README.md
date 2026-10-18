@@ -74,15 +74,16 @@ authority; startup, exported records and new publication retain their complete
 verification gates. Demo jobs publish only fresh, complete recording groups
 bound to their GitHub run and source commit.
 
-The [qualified core build is running on public devnet](docs/rust-node/checkpoints/2026-10-17/core-parity-public-adoption.json).
-Its retained-state restart preserved the key, configuration, relay and immutable
-canonical/ExEx/archive prefix at epoch 1,709,272. It then advanced 78 epochs, with
-matching ExEx progress, and was observed serving with authenticated peers. This
-records build `44458a5`; subsequent working-tree changes require fresh combined
-qualification. Public paid service remains unconfigured. Sustained availability,
-stock Tailscale payment/onboarding, portal funding, DNS/TLS and Mainnet remain
-open qualification gates. This prepaid candidate is **not deployed to Mainnet**. Local build
-artifacts and tests do not establish public deployment readiness.
+The [tested native integration build is syncing on public devnet](docs/rust-node/checkpoints/2026-10-18/native-integration-public-adoption.md).
+Its clean retained-state upgrade preserved the identity, configuration, relay
+and canonical history at epoch 1,711,611. Read-only audits verified **66 new
+epochs and 491 transaction events** with matching ExEx. A later guarded sample
+reached epoch 1,711,685; catch-up was active, serving suspended and connected
+peers zero. Sustained public availability and P2P retention remain unqualified.
+Public paid service is unconfigured; onboarding, portal funding, public DNS/TLS
+and Mainnet remain open gates. The prepaid candidate is **not deployed to Mainnet**.
+The [earlier core adoption](docs/rust-node/checkpoints/2026-10-17/core-parity-public-adoption.json)
+retains its own historical scope.
 
 The separate [v5 application](docs/private-administration.md) retains private
 admin credentials and cooperative two-transaction settlement. Its existing

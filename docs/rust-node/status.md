@@ -9,6 +9,15 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [native integration observer adoption](checkpoints/2026-10-18/native-integration-public-adoption.md)
+  installed normal release `fbe1684` after a clean exit on retained epoch
+  1,711,611. Two read-only audits preserve the existing canonical/ExEx/archive
+  prefix and verify 66 new epochs with 491 transaction events. The later
+  guarded RPC sample reached 1,711,685 with exact process/environment identity.
+  Catch-up was active, serving suspended and connected peers zero. Paid service
+  remains unconfigured; public P2P retention, sustained serving, onboarding,
+  DNS/TLS and Mainnet remain unqualified. The saved GitHub snapshot has Headscale
+  parity and kernel WG smoke passed, with CI, Proof and Coverage still running.
 - The [native integration checkpoint](checkpoints/2026-10-17/native-integration.json)
   records 35 passing scoped gates, 3,516 distinct passing Rust test identities
   across 280 logical targets and nine explicit exclusions. Twenty-one Python
