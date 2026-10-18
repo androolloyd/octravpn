@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """Actual multi-payments CLI, kernel probes and explicit owned-route recovery."""
 import json
+import hashlib
+import os
 import pathlib
 import signal
 import socket
+import stat
 import struct
 import subprocess
+import sys
+import time
 import traceback
+import urllib.error
+import urllib.request
 
 import payments_qualify as p
 import qualify as g
@@ -14,6 +21,84 @@ from stock_operator import atomic
 
 A_IP = '93.184.216.11'; B_IP = '93.184.216.21'
 NAMES = ['route-entry', 'route-exit']
+
+
+def diagnostic_snapshot(role, process=None):
+    """Failure-only reads of this isolated fixture; never start a client."""
+    assert role in ['A', 'B', 'C']
+    value = {'role': role, 'wall_ns': time.time_ns(), 'monotonic_ns': time.monotonic_ns(),
+             'process_alive': None if process is None else process.poll() is None, 'observations': {}}
+    observations = value['observations']
+
+    def capture(name, read):
+        row = {'began_wall_ns': time.time_ns(), 'began_monotonic_ns': time.monotonic_ns()}
+        try: row['ok'] = read()
+        except Exception as error: row.update({'error': type(error).__name__, 'message': str(error)[:1000]})
+        row.update({'completed_wall_ns': time.time_ns(), 'completed_monotonic_ns': time.monotonic_ns()})
+        observations[name] = row
+
+    def document(path):
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, 'rb') as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > 262144:
+                raise ValueError('diagnostic document must be a bounded regular file')
+            raw = stream.read(262145)
+        if len(raw) > 262144: raise ValueError('diagnostic document exceeds byte bound')
+        return json.loads(raw)
+
+    def selected(path, fields, envelope=None):
+        body = document(path)
+        if envelope is not None: body = body[envelope]
+        return {name: body[name] for name in fields if name in body}
+
+    def command(argv):
+        completed = subprocess.run(argv, capture_output=True, timeout=1)
+        return {'exit_code': completed.returncode, 'stdout': completed.stdout[:65536].decode('utf-8', 'replace'),
+                'stderr': completed.stderr[:2000].decode('utf-8', 'replace'),
+                'truncated': len(completed.stdout) > 65536 or len(completed.stderr) > 2000}
+
+    for family in ['-4', '-6']:
+        for kind, args in [('routes', ['route', 'show', 'table', 'all']), ('rules', ['rule', 'show'])]:
+            capture(f'{family}_{kind}', lambda family=family, args=args: command(['ip', family, '-j', *args]))
+    capture('addresses', lambda: command(['ip', '-j', 'address', 'show']))
+    capture('target', lambda: document('/evidence/target.json'))
+    if role == 'C':
+        root = pathlib.Path('/state/client')
+        for index, path in enumerate(sorted(root.glob('hop-*-*/state.json'))[:16]):
+            capture(f'journal_{index}', lambda path=path: {
+                'name': path.parent.name, **selected(path, ['local_bytes', 'authorized_bytes', 'connection_sequence',
+                    'usage_sequence', 'handoff_sequence', 'pending', 'uncertain_bytes'], 'payload')})
+    else:
+        index = 0 if role == 'A' else 1
+        root = pathlib.Path(f'/state/native-vpn/chain/node-{index}')
+        capture('canonical_head', lambda: selected(root / 'HEAD.json',
+            ['generation', 'epoch_id', 'state_root', 'ledger_state_root', 'txid_hi', 'ts', 'commit_id']))
+        for number, path in enumerate(sorted((root / 'octranet-payments/transport').glob('*/meter.json'))[:16]):
+            capture(f'meter_{number}', lambda path=path: selected(path,
+                ['committed', 'pending', 'uncertain', 'purchased', 'budget_ou', 'transport'], 'record'))
+
+        def status():
+            # Fixed loopback GET, no proxy, credentials, writes or retries.
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            url = f'http://127.0.0.1:{19871 + index * 10}/operator/status'
+            try: response = opener.open(url, timeout=1)
+            except urllib.error.HTTPError as error: response = error
+            with response:
+                raw = response.read(65537)
+                if len(raw) > 65536: raise ValueError('diagnostic status exceeds byte bound')
+                try: body = json.loads(raw)
+                except ValueError: body = None
+                fields = ['serving', 'epoch', 'state_root', 'suspension_reason', 'chain_id',
+                          'peers', 'pending', 'vpn_settlement', 'vpn_program']
+                return {'http_status': response.status, 'body_sha256': hashlib.sha256(raw).hexdigest(),
+                        'body': {name: body[name] for name in fields if name in body} if isinstance(body, dict) else None,
+                        'text': raw[:4096].decode('utf-8', 'replace') if body is None else None}
+
+        capture('operator_status', status)
+        capture('nat_counters', lambda: command(['iptables', '-t', 'nat', '-L', '-v', '-n', '-x']))
+        capture('forward_counters', lambda: command(['iptables', '-L', 'FORWARD', '-v', '-n', '-x']))
+    return value
 
 
 def ip(*args): return g.command(['ip', *args])
@@ -25,6 +110,7 @@ class Client:
     def __init__(self):
         g.ROOT = pathlib.Path('/state/client'); g.ROOT.mkdir()
         self.process = None; self.stream = None; self.round = 0; self.launches = 0
+        self.udp_calls = 0; self.udp_events = 0; self.udp_log_errors = []; self.last_udp_event = None
         mapping = [{'listen': ['127.0.0.1', port], 'target': [A_IP, 10000 + port]} for port in [19879, 19889]]
         # Underlay listeners are20879/20889, not the native loopback ports.
         for row, port in zip(mapping, [20879, 20889], strict=True): row['target'][1] = port
@@ -78,8 +164,29 @@ class Client:
             result['journals'].append(json.loads(path.read_text())['payload'] if path.exists() else None)
         return result
 
+    def record_udp(self, event, call, index, body, **details):
+        row = {'event': event, 'call': call, 'index': index, 'payload_bytes': len(body),
+               'payload_sha256': hashlib.sha256(body).hexdigest(),
+               'wall_ns': time.time_ns(), 'monotonic_ns': time.monotonic_ns(), **details}
+        self.last_udp_event = row
+        try:
+            if self.udp_events >= 4096: raise ValueError('UDP diagnostic event count bound')
+            path = g.EVIDENCE / 'multi-udp-events.jsonl'
+            descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+            try:
+                info = os.fstat(descriptor)
+                raw = (json.dumps(row, sort_keys=True) + '\n').encode()
+                if not stat.S_ISREG(info.st_mode) or info.st_size + len(raw) > 4 * 1024 * 1024:
+                    raise ValueError('UDP diagnostic file type/byte bound')
+                if os.write(descriptor, raw) != len(raw): raise OSError('short UDP diagnostic write')
+                self.udp_events += 1
+            finally: os.close(descriptor)
+        except Exception as error:
+            if len(self.udp_log_errors) < 8: self.udp_log_errors.append(type(error).__name__)
+
     def udp(self, count, length=900, expect=True):
         assert 0 < count <= 64 and 32 <= length <= 1400
+        self.udp_calls += 1; call = self.udp_calls
         received = 0
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as connection:
             connection.bind((self.interface(1), 0)); connection.settimeout(2)
@@ -90,10 +197,13 @@ class Client:
                 body = struct.pack('!Q', index) + b'nested-paid:' + bytes(length - 20)
                 assert len(body) == length
                 assert connection.sendto(body, (g.PUBLIC, 20001)) == length
+                self.record_udp('sent', call, index, body, expected_reply=expect)
                 try: data, peer = connection.recvfrom(2048)
                 except socket.timeout:
+                    self.record_udp('timeout', call, index, body, expected_reply=expect)
                     if expect: raise
                     continue
+                self.record_udp('received', call, index, data, peer=list(peer), expected_reply=expect)
                 assert expect, 'exhausted/oversized/revoked nested packet delivered'
                 assert data == body and peer == (g.PUBLIC, 20001); received += len(data)
         return {'received_payload_bytes': received, 'payload_length': length}
@@ -202,10 +312,23 @@ def main():
             path = directory / f'{index}.json'; g.until(path.exists, 300, 'multi client command')
             request = json.loads(path.read_text())
             try: atomic(directory / f'{index}.result.json', {'ok': client.command(request)})
-            except BaseException: atomic(directory / f'{index}.result.json', {'error': traceback.format_exc()})
+            except Exception:
+                original = traceback.format_exc()
+                try:
+                    action = request.get('action') if isinstance(request, dict) else None
+                    if action != 'exhaust_probe':
+                        observed = diagnostic_snapshot('C', client.process)
+                        observed.update({'action': action, 'last_udp_event': client.last_udp_event,
+                                         'udp_log_errors': client.udp_log_errors})
+                        atomic(g.EVIDENCE / f'multi-client-failure-{index}.json', observed)
+                except Exception: pass
+                atomic(directory / f'{index}.result.json', {'error': original})
             index += 1
             if request['action'] == 'stop': break
     finally: client.close()
 
 
-if __name__ == '__main__': main()
+if __name__ == '__main__':
+    if len(sys.argv) == 3 and sys.argv[1] == '--diagnostic-snapshot':
+        print(json.dumps(diagnostic_snapshot(sys.argv[2]), sort_keys=True))
+    else: main()

@@ -11,6 +11,11 @@ pub(crate) fn publish(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| anyhow::anyhow!("record has no parent"))?;
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
     fs::create_dir_all(parent)?;
     let staging = parent.join(format!(
         ".{}.{}.staged",

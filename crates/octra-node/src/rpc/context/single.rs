@@ -53,6 +53,9 @@ impl Context {
 }
 #[async_trait]
 impl ReadNode for Facade {
+    fn visibility(&self) -> crate::epoch_visibility::Visibility {
+        self.published().shared.visibility()
+    }
     fn snapshot(&self) -> Result<Committed> {
         self.snapshot()
     }

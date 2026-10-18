@@ -2,7 +2,8 @@
 //! create synthetic transactions or replay events preceding its checkpoint.
 use super::{
     connect, error, hex_hash, irmin, reader, Arc, CanonicalStore, ChainIdentity, Cursor, EpochId,
-    Head, HeadCache, Path, Result, Row, Sequence, Snapshot, SqliteEpochSource, StateRoot,
+    EpochTagRetention, Head, HeadCache, Path, Result, Row, Sequence, Snapshot, SqliteEpochSource,
+    StateRoot,
 };
 use octra_node_protocol::{
     consensus::ParentCommit,
@@ -96,6 +97,31 @@ impl CanonicalStore {
         trust: &Trust<'_>,
         now: i64,
     ) -> Result<Self> {
+        Self::create_from_checkpoint_with_retention(
+            path,
+            chain,
+            state,
+            raw_certificate,
+            root_window,
+            trust,
+            now,
+            EpochTagRetention::capture()?,
+        )
+        .await
+    }
+
+    /// The caller supplies retention captured with the rest of startup inputs.
+    #[allow(clippy::too_many_arguments)] // Original authenticated import inputs plus local retention.
+    pub async fn create_from_checkpoint_with_retention(
+        path: &Path,
+        chain: ChainIdentity,
+        state: Snapshot,
+        raw_certificate: &[u8],
+        root_window: &[u8],
+        trust: &Trust<'_>,
+        now: i64,
+        retention: EpochTagRetention,
+    ) -> Result<Self> {
         let certificate = trust.verify(raw_certificate, now).map_err(error)?;
         if chain.chain_id.as_bytes() != trust.chain_id {
             return Err(error("bootstrap chain identity differs"));
@@ -106,7 +132,7 @@ impl CanonicalStore {
             return Err(error("snapshot differs from authenticated checkpoint"));
         }
         let bootstrap = Bootstrap::new(raw_certificate, root_window, certificate)?;
-        Self::initialize(path, chain, state, head, Some(bootstrap)).await
+        Self::initialize(path, chain, state, head, Some(bootstrap), retention).await
     }
 
     /// Reauthenticate a snapshot floor before restoring its canonical suffix.
@@ -117,7 +143,23 @@ impl CanonicalStore {
         expected_chain: &ChainIdentity,
         trust: &Trust<'_>,
     ) -> Result<Self> {
-        let epoch_tag_keep = super::epoch_tags::capture_keep()?;
+        Self::open_from_checkpoint_with_retention(
+            path,
+            expected_chain,
+            trust,
+            EpochTagRetention::capture()?,
+        )
+        .await
+    }
+
+    /// Reauthenticate the same floor with an explicit local retention setting.
+    pub async fn open_from_checkpoint_with_retention(
+        path: &Path,
+        expected_chain: &ChainIdentity,
+        trust: &Trust<'_>,
+        retention: EpochTagRetention,
+    ) -> Result<Self> {
+        let epoch_tag_keep = retention.keep_epochs();
         expected_chain.validate().map_err(error)?;
         if expected_chain.chain_id.as_bytes() != trust.chain_id {
             return Err(error("bootstrap chain identity differs"));

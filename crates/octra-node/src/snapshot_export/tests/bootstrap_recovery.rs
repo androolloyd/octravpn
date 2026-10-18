@@ -191,3 +191,165 @@ async fn refused(path: &Path, authority: &bootstrap::Authority) {
         "{error}"
     );
 }
+
+/// Run in a child so hostile ambient settings cannot leak into parallel tests.
+/// The child consumes the parent's genuine finalized epoch65 checkpoint.
+#[tokio::test]
+async fn captured_network_startup_uses_file_gc_and_worker_limits_once() {
+    use octra_node_runtime::{
+        canonical::EpochTagRetention,
+        crypto_worker::{Limits, Pool},
+    };
+    const CHILD: &str = "OCTRA_STARTUP_CAPTURE_TEST_CONFIG";
+    if let Some(path) = std::env::var_os(CHILD) {
+        let config = crate::network::read(Path::new(&path)).unwrap();
+        let raw = fs::read(&config.environment).unwrap();
+        let values = crate::network_profile::parse_env(&raw).unwrap();
+        let settings =
+            octra_node_protocol::consensus::profile::Settings::from_values(values).unwrap();
+        let retention =
+            EpochTagRetention::from_value(settings.get("OCTRA_GC_KEEP_EPOCHS")).unwrap();
+        let configured = settings.get("OCTRA_GC_KEEP_EPOCHS").is_some();
+        let expected_keep = if configured { 4096 } else { 8192 };
+        let authority = bootstrap::Authority::new(config.network.clone()).unwrap();
+        // Both configured opening and authenticated checkpoint creation must
+        // ignore this child's deliberately invalid ambient GC value.
+        assert_eq!(std::env::var("OCTRA_GC_KEEP_EPOCHS").unwrap(), "invalid");
+        let (store, migration) = authority
+            .reopen_with_migration_with_retention(&config.data, retention)
+            .await
+            .unwrap();
+        assert!(migration.is_none());
+        assert_eq!(
+            store.reader().epoch_tag_stats().await.unwrap().keep_epochs,
+            expected_keep
+        );
+        let head = store.head().await.unwrap();
+        let state = store.snapshot().await.unwrap().1.snapshot();
+        let certificate = store.checkpoint_certificate().await.unwrap().unwrap();
+        let window = store.checkpoint_window().unwrap().to_vec();
+        store.close().await;
+        let copy = config.data.join(if configured {
+            "configured.sqlite"
+        } else {
+            "defaults.sqlite"
+        });
+        let store = CanonicalStore::create_from_checkpoint_with_retention(
+            &copy,
+            config.network.identity.clone(),
+            state,
+            &certificate,
+            &window,
+            &authority.trust(),
+            now().unwrap(),
+            retention,
+        )
+        .await
+        .unwrap();
+        assert_eq!(store.head().await.unwrap(), head);
+        assert_eq!(
+            store.reader().epoch_tag_stats().await.unwrap().keep_epochs,
+            expected_keep
+        );
+        store.close().await;
+        let (stop, shutdown) = tokio::sync::watch::channel(true);
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let environment = config.environment.clone();
+        crate::network::run_with_runtime_factory(
+            config,
+            |captured| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let limits = Limits::from_values(|name| captured.get(name).map(<[u8]>::to_vec));
+                let pool = Pool::open(&std::env::current_exe().unwrap(), limits).unwrap();
+                let actual = pool.worker().limits();
+                assert_eq!(actual.capacity, if configured { 2 } else { 1 });
+                assert_eq!(
+                    actual.timeout_seconds.to_bits(),
+                    (if configured { 1_f64 } else { 600_f64 }).to_bits()
+                );
+                assert_eq!(actual.rss_mb, if configured { 64 } else { 9216 });
+                // A second file read after the runtime factory would now fail.
+                // No worker or service process is started by this already-stopped launch.
+                fs::write(&environment, b"not an environment assignment").unwrap();
+                Ok(CircleRuntime::isolated(pool))
+            },
+            shutdown,
+        )
+        .await
+        .unwrap();
+        drop(stop);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let source_dir = directory.path().join("source");
+    fs::create_dir(&source_dir).unwrap();
+    let (source, config, exporter) = Box::pin(fixture(&source_dir, 66)).await;
+    let data = directory.path().join("imported");
+    fs::create_dir(&data).unwrap();
+    let (_, _, _, floor) =
+        checkpoint(&data.join("canonical.sqlite"), &source, &config, &exporter).await;
+    assert_eq!(floor.cursor.epoch.0, 65);
+    for configured in [true, false] {
+        let environment = directory.path().join(if configured {
+            "configured.env"
+        } else {
+            "absent.env"
+        });
+        let mut values = format!(
+            "OCTRA_CHAIN_ID={}\nOCTRA_CONSENSUS_CONFIG_HASH={}\nOCTRA_VALIDATORS={}\nOCTRA_STATE_SYNC_EXPORTERS={}\n",
+            config.network.identity.chain_id, config.network.config_hash,
+            config.network.validators.join(","), config.network.exporters.join(","),
+        );
+        if configured {
+            values.push_str("OCTRA_GC_KEEP_EPOCHS=4096\nOCTRA_PVAC_VERIFY_WORKERS=2\nOCTRA_PVAC_VERIFY_TIMEOUT_SEC=1\nOCTRA_PVAC_VERIFY_MAX_RSS_MB=64\n");
+        }
+        fs::write(&environment, values).unwrap();
+        let socket = "127.0.0.1:0".parse().unwrap();
+        let network = crate::network::Config {
+            network: config.network.clone(),
+            environment,
+            data: data.clone(),
+            key: directory.path().join("unused-node.key"),
+            p2p: socket,
+            p2p_proxy: None,
+            advertised: "127.0.0.1:19000".into(),
+            rpc: socket,
+            browser: socket,
+            control: socket,
+            tunnel: socket,
+            gateway: None,
+            stock_portal: None,
+            stock_circle_gateway: None,
+            mesh: None,
+            compute_provider: false,
+            vpn: None,
+            payments: None,
+            peers: vec![],
+            voting: false,
+            publisher: false,
+            snapshot_limits: Default::default(),
+            startup_seconds: 1,
+        };
+        let path = directory.path().join(if configured {
+            "configured.json"
+        } else {
+            "absent.json"
+        });
+        fs::write(&path, serde_json::to_vec(&network).unwrap()).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "snapshot_export::tests::bootstrap_recovery::captured_network_startup_uses_file_gc_and_worker_limits_once", "--nocapture"])
+            .env(CHILD, &path).env("OCTRA_GC_KEEP_EPOCHS", "invalid")
+            .env("OCTRA_PVAC_VERIFY_WORKERS", if configured { "1" } else { "2" })
+            .env("OCTRA_PVAC_VERIFY_TIMEOUT_SEC", "1200")
+            .env("OCTRA_PVAC_VERIFY_MAX_RSS_MB", "16384")
+            .output().unwrap();
+        assert!(
+            output.status.success(),
+            "child failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"));
+    }
+}

@@ -7,12 +7,23 @@ use num_bigint::BigInt;
 use octra_hfhe::scalar::ScalarRule;
 use octra_node_protocol::{
     native_json::{Document, Value},
-    state::Ledger,
+    state::{Account, Ledger},
     transaction::{OpType, RuleMode, Transaction},
 };
 
 pub(crate) use crate::private_error::{check, failure};
 pub use crate::private_error::{Error, Failure};
+/// Immutable account lookup for private proof preparation. This capability has
+/// no balances aggregate, iteration, mutation or execution authority. Applying a
+/// verified plan still requires the complete mutable native Ledger.
+pub trait AccountView {
+    fn account(&self, address: &[u8]) -> Option<&Account>;
+}
+impl AccountView for Ledger {
+    fn account(&self, address: &[u8]) -> Option<&Account> {
+        Self::account(self, address)
+    }
+}
 #[derive(Clone, Copy, Debug)]
 pub struct Profile {
     pub fields: RuleMode,
@@ -120,10 +131,13 @@ fn payload(tx: &Transaction, operation: Operation, mode: RuleMode) -> Result<Pay
         )
     })
 }
-fn current<'a>(ledger: &'a Ledger, tx: &Transaction, op: Operation) -> Result<&'a [u8], Error> {
+fn current<'a>(
+    ledger: &'a impl AccountView,
+    tx: &Transaction,
+    op: Operation,
+) -> Result<&'a [u8], Error> {
     ledger
-        .accounts()
-        .get(&tx.from)
+        .account(&tx.from)
         .map(|a| a.encrypted_balance.as_deref().unwrap_or(b"0"))
         .ok_or_else(|| failure(op.tag(), "account not found", None))
 }
@@ -136,6 +150,11 @@ pub struct Verified {
     next: Vec<u8>,
 }
 impl Verified {
+    pub(crate) fn retained_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            .saturating_add(self.current.capacity())
+            .saturating_add(self.next.capacity())
+    }
     pub fn current_cipher(&self) -> &[u8] {
         &self.current
     }
@@ -198,7 +217,7 @@ impl Verified {
     }
 }
 pub fn verify(
-    ledger: &Ledger,
+    ledger: &impl AccountView,
     tx: &Transaction,
     pubkey: Option<&[u8]>,
     profile: Profile,
@@ -208,7 +227,7 @@ pub fn verify(
 /// Load a bound key only after native payload checks. This always verifies
 /// proofs; a caller-supplied receipt cannot select the certified replay path.
 pub fn verify_with_key<B: AsRef<[u8]>>(
-    ledger: &Ledger,
+    ledger: &impl AccountView,
     tx: &Transaction,
     profile: Profile,
     pubkey: impl FnOnce() -> Result<Option<B>, Error>,
@@ -223,7 +242,7 @@ pub(crate) enum Evidence<'a> {
     Certified(&'a [u8]),
 }
 pub(crate) fn resolve<B: AsRef<[u8]>>(
-    ledger: &Ledger,
+    ledger: &impl AccountView,
     tx: &Transaction,
     profile: Profile,
     evidence: Evidence<'_>,

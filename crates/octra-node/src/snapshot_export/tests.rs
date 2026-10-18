@@ -698,3 +698,7 @@ async fn corrupted_same_head_package_is_replaced_atomically_and_foreign_pointer_
     );
     node.shutdown().await.unwrap();
 }
+
+#[cfg(unix)]
+#[path = "../bootstrap/export/offline_tests.rs"]
+mod offline_commands;

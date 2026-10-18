@@ -6,7 +6,7 @@ pub(crate) mod classify;
 mod migration;
 mod payload;
 use crate::{
-    private_balance::{Evidence, Profile},
+    private_balance::{AccountView, Evidence, Profile},
     private_crypto::isolated as crypto,
     private_error::{check, failure, Error},
     state_batch::StateBatch,
@@ -38,7 +38,7 @@ fn digest(raw: &[u8]) -> Vec<u8> {
 fn short_hash(raw: Option<&[u8]>) -> Vec<u8> {
     raw.map_or_else(|| b"none".to_vec(), |raw| digest(raw)[..16].to_vec())
 }
-fn current<'a>(ledger: &'a Ledger, tx: &Transaction) -> Result<&'a [u8]> {
+fn current<'a>(ledger: &'a impl AccountView, tx: &Transaction) -> Result<&'a [u8]> {
     ledger
         .account(&tx.from)
         .map(|a| a.encrypted_balance.as_deref().unwrap_or(b"0"))
@@ -78,6 +78,16 @@ pub struct Verified {
     new_cipher: Option<Vec<u8>>,
 }
 impl Verified {
+    pub(crate) fn retained_bytes(&self) -> usize {
+        [
+            self.source.capacity(),
+            self.old.as_ref().map_or(0, Vec::capacity),
+            self.new_key.capacity(),
+            self.new_cipher.as_ref().map_or(0, Vec::capacity),
+        ]
+        .into_iter()
+        .fold(std::mem::size_of::<Self>(), usize::saturating_add)
+    }
     pub fn current_cipher(&self) -> &[u8] {
         &self.source
     }
@@ -150,7 +160,7 @@ impl Verified {
     }
 }
 pub fn verify<B: AsRef<[u8]>>(
-    ledger: &Ledger,
+    ledger: &impl AccountView,
     tx: &Transaction,
     policy: Policy,
     epoch: i64,
@@ -160,7 +170,7 @@ pub fn verify<B: AsRef<[u8]>>(
     resolve(ledger, tx, policy, epoch, admission, Evidence::Proof, key)
 }
 pub(crate) fn resolve<B: AsRef<[u8]>>(
-    ledger: &Ledger,
+    ledger: &impl AccountView,
     tx: &Transaction,
     policy: Policy,
     epoch: i64,

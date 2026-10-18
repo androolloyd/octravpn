@@ -14,6 +14,7 @@ use octra_node_protocol::{
 mod chain;
 mod epochs;
 mod private_account;
+pub(crate) mod read_methods;
 mod receipts;
 mod records;
 mod registration;
@@ -23,7 +24,7 @@ mod tokens;
 mod views;
 
 /// gRPC shares method authority; its protobuf transport applies its own budget.
-pub(super) async fn invoke(
+pub(crate) async fn invoke(
     host: &Arc<Context>,
     method: &[u8],
     params: &[u8],
@@ -45,6 +46,27 @@ pub(super) async fn invoke(
 }
 
 async fn dispatch(
+    host: Arc<Context>,
+    doc: Arc<Document>,
+    request: &Request,
+) -> std::result::Result<Vec<u8>, Fault> {
+    if read_methods::contains(&request.method) {
+        host.node
+            .visibility()
+            .read(|| dispatch_once(host.clone(), doc.clone(), request))
+            .await
+            .unwrap_or_else(|| {
+                Err(Fault::new(
+                    -32012,
+                    b"committed state changed during read; retry",
+                ))
+            })
+    } else {
+        dispatch_once(host, doc, request).await
+    }
+}
+
+async fn dispatch_once(
     host: Arc<Context>,
     doc: Arc<Document>,
     request: &Request,

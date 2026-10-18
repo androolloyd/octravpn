@@ -58,7 +58,7 @@ fn draft_value(value: &manifest::Draft) -> Result<Value> {
         "manifest_hash":string(&value.manifest_hash)?}),
     )
 }
-pub(super) fn draft(value: &manifest::Draft) -> Result<Vec<u8>> {
+pub(crate) fn draft(value: &manifest::Draft) -> Result<Vec<u8>> {
     let raw = serde_json::to_vec_pretty(&draft_value(value)?)?;
     ensure!(
         parse_draft(&raw)? == *value,
@@ -66,7 +66,7 @@ pub(super) fn draft(value: &manifest::Draft) -> Result<Vec<u8>> {
     );
     Ok(raw)
 }
-pub(super) fn parse_draft(raw: &[u8]) -> Result<manifest::Draft> {
+pub(crate) fn parse_draft(raw: &[u8]) -> Result<manifest::Draft> {
     ensure!(
         raw.len() <= manifest::MANIFEST_LIMIT,
         "draft exceeds size limit"
@@ -77,10 +77,14 @@ pub(super) fn parse_draft(raw: &[u8]) -> Result<manifest::Draft> {
     value.manifest.validate_reference()?;
     Ok(value)
 }
-pub(super) fn signatures(raw: &[u8]) -> Result<Vec<checkpoint::Signature>> {
+pub(crate) fn signatures(raw: &[u8]) -> Result<Vec<checkpoint::Signature>> {
     let document = Document::parse(raw)?;
-    let octra_node_protocol::native_json::Value::List(values) = document.root() else {
-        anyhow::bail!("signature file must contain a native signature array")
+    let values = match document.root() {
+        octra_node_protocol::native_json::Value::List(values) => values,
+        value @ octra_node_protocol::native_json::Value::Object(_) => {
+            return Ok(vec![checkpoint::Signature::parse(&document, value)?]);
+        }
+        _ => anyhow::bail!("signature file must contain a native signature object or array"),
     };
     ensure!(values.len() <= 1024, "signature count exceeds limit");
     values
@@ -111,6 +115,32 @@ pub(super) fn certificate(
     ensure!(
         decoded.draft == *draft && decoded.exporters == signatures,
         "native certificate JSON round trip differs"
+    );
+    Ok(raw)
+}
+
+/// Native legacy quorum certificate is an offline interchange, never a substitute
+/// for finalized authority in the existing bootstrap/automatic publisher.
+pub(super) fn quorum_certificate(
+    draft: &manifest::Draft,
+    signatures: &[checkpoint::Signature],
+    exporter: &checkpoint::Signature,
+) -> Result<Vec<u8>> {
+    let mut value = draft_value(draft)?;
+    let object = value.as_object_mut().expect("draft is object");
+    let signature = |value: &checkpoint::Signature| -> Result<Value> {
+        Ok(json!({"signer":string(&value.signer)?,"signature":string(&value.signature)?}))
+    };
+    object.insert(
+        "checkpoint_signatures".into(),
+        Value::Array(signatures.iter().map(signature).collect::<Result<_>>()?),
+    );
+    object.insert("exporter_signature".into(), signature(exporter)?);
+    let raw = serde_json::to_vec_pretty(&value)?;
+    let decoded = manifest::Certificate::parse(&raw)?;
+    ensure!(
+        decoded.draft == *draft && decoded.exporters == [exporter.clone()],
+        "quorum certificate JSON differs"
     );
     Ok(raw)
 }

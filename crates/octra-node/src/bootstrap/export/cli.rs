@@ -5,6 +5,20 @@ use std::{net::SocketAddr, path::PathBuf};
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// Seal a verified portable snapshot or explicitly owned native store.
+    Seal(super::offline::Options),
+    /// Build a fresh native draft from a sealed snapshot.
+    Build(super::offline::Options),
+    /// Sign a checkpoint after local stable-head/history and role checks.
+    SignCheckpoint(super::offline::Options),
+    /// Sign the exact manifest only after complete source verification.
+    SignManifest(super::offline::Options),
+    /// Verify certificate authority/freshness and optionally all source bytes.
+    Verify(super::offline::Options),
+    /// Assemble the native legacy quorum interchange; never enables bootstrap.
+    AssembleQuorum(super::offline::Options),
+    /// Assemble native finalized authority with detached exporter signatures.
+    AssembleFinalized(super::offline::Options),
     /// Create an unsigned immutable native package from one retained finalized head.
     Prepare {
         #[arg(long)]
@@ -50,6 +64,23 @@ pub enum Commands {
 impl Commands {
     pub async fn run(self, shutdown: tokio::sync::watch::Receiver<bool>) -> Result<()> {
         match self {
+            Self::Seal(options) => options.run(super::offline::Action::Seal).await?,
+            Self::Build(options) => options.run(super::offline::Action::Build).await?,
+            Self::SignCheckpoint(options) => {
+                options.run(super::offline::Action::SignCheckpoint).await?;
+            }
+            Self::SignManifest(options) => {
+                options.run(super::offline::Action::SignManifest).await?;
+            }
+            Self::Verify(options) => options.run(super::offline::Action::Verify).await?,
+            Self::AssembleQuorum(options) => {
+                options.run(super::offline::Action::AssembleQuorum).await?;
+            }
+            Self::AssembleFinalized(options) => {
+                options
+                    .run(super::offline::Action::AssembleFinalized)
+                    .await?;
+            }
             Self::Prepare {
                 config,
                 directory,

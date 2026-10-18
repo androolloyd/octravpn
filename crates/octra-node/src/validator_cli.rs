@@ -1,5 +1,7 @@
-//! Local authenticated duty pause controls. These commands never submit a
-//! transaction and never change validator membership or move stake.
+//! Local authenticated duty pause controls. [`Options`] never submits a
+//! transaction or changes validator membership or stake. The separate
+//! [`transaction`] command prepares and submits native operator transactions.
+pub mod transaction;
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use clap::{Args, Subcommand};

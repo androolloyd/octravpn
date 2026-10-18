@@ -57,6 +57,17 @@ impl Pool {
     pub fn scope(self: &Arc<Self>, view: bool, cancelled: Arc<AtomicBool>) -> Scope {
         Scope::enter(self.clone(), view, cancelled)
     }
+    /// Admission warmups may use spare proof capacity, never the required lane.
+    /// Nested proof scopes inherit this restriction and parent cancellation.
+    pub fn speculative_scope(self: &Arc<Self>, cancelled: Arc<AtomicBool>) -> Scope {
+        let scope = self.scope(false, cancelled);
+        CURRENT.with(|cell| {
+            if let Some(context) = cell.borrow_mut().as_mut() {
+                context.speculative = true;
+            }
+        });
+        scope
+    }
     pub fn scope_until(
         self: &Arc<Self>,
         view: bool,
@@ -119,7 +130,11 @@ impl Pool {
             ));
         }
         use private::admission::{self, Kind};
-        let result = match admission::kind(&request) {
+        let kind = match admission::kind(&request) {
+            Kind::Required if context.speculative => Kind::Speculative,
+            kind => kind,
+        };
+        let result = match kind {
             Kind::Required => self
                 .worker
                 .proofs()
@@ -356,6 +371,7 @@ struct Context {
     active: Arc<AtomicBool>,
     ancestors: Vec<Arc<AtomicBool>>,
     view: bool,
+    speculative: bool,
 }
 impl Context {
     fn is_cancelled(&self) -> bool {
@@ -389,6 +405,7 @@ impl Scope {
             active: active.clone(),
             ancestors: vec![],
             view,
+            speculative: false,
         };
         let previous = CURRENT.with(|cell| {
             let previous = cell.borrow_mut().take();
@@ -398,6 +415,7 @@ impl Scope {
                     (inner, outer) => inner.or(outer),
                 };
                 context.view |= outer.view;
+                context.speculative |= outer.speculative;
                 // Preserve both parent cancellation and the inner view clock.
                 // Neither invocation can detach work owned by the other.
                 context.ancestors.clone_from(&outer.ancestors);

@@ -1062,13 +1062,15 @@ async fn peer_import_drives_browser_wireguard_exex_and_restart() {
             .unwrap(),
     );
     let fail_views = Arc::new(AtomicBool::new(false));
-    let node = open(
-        &path,
-        checkpoints.clone(),
-        chain.clone(),
-        fail_views.clone(),
-    )
-    .await;
+    let node = Arc::new(
+        open(
+            &path,
+            checkpoints.clone(),
+            chain.clone(),
+            fail_views.clone(),
+        )
+        .await,
+    );
     let seen = Arc::new(Mutex::new(vec![]));
     node.register(Recorder(seen.clone())).await.unwrap();
     let (request, settlement) = announce();
@@ -1252,6 +1254,36 @@ async fn peer_import_drives_browser_wireguard_exex_and_restart() {
         assert_eq!(node.head().await.unwrap(), *old.head());
         assert!(seen.lock().unwrap().is_empty());
     }
+    // The live adapter must retain the execution cause while suspending its
+    // services, without committing state or delivering an ExEx event.
+    let failing = ImportExecutor::new(&authority, &node);
+    failing.fail.store(true, Ordering::SeqCst);
+    let publication =
+        octra_node::consensus::Canonical::new(node.clone(), reader.bundles.clone(), failing, 3.)
+            .await
+            .unwrap();
+    let finalized = Finalize::decode(&certificate).unwrap();
+    let error = octra_node_runtime::consensus_driver::Publication::finalized(
+        &publication,
+        &authority.validators(old.head(), 1).unwrap(),
+        &finalized,
+    )
+    .await
+    .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("execute finalized bundle: fixture execution unavailable"));
+    drop(publication);
+    assert_eq!(node.head().await.unwrap(), *old.head());
+    assert!(seen.lock().unwrap().is_empty());
+    assert!(matches!(node.status(), Status::Suspended(_)));
+    assert!(!permit.live());
+    assert!(node.resume().await.unwrap());
+    let permit = admission
+        .authorize(&request, domain)
+        .await
+        .unwrap()
+        .unwrap();
     let published = node
         .import_finalized(&certificate, &reader.bundles, &executor, 3.)
         .await

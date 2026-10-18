@@ -1,6 +1,7 @@
 //! Full recovery supervisor with the real native host and signed TCP root peers.
 //! Funding and peer claims are local fixtures; no public-chain qualification.
 mod fixture;
+mod grace;
 mod http_prefix;
 mod liveness;
 mod vpn;

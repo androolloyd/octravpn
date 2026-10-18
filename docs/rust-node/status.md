@@ -7,6 +7,32 @@ Circle browsing and a paid VPN service. The adopted reference is lite_node
 are substantially beyond the earlier implementation-pass records; complete
 upstream behavioral parity and public-network deployment remain unqualified.
 
+## Successor implementation awaiting qualification
+
+The [native interface successor](native-interfaces.md) and
+[compact source map](interface-scope.json) describe the current visibility,
+BFT intake/warmup and operator-tool repairs. Canonical snapshot signing requires
+an independently authenticated finalized Anchor; local storage consistency alone
+cannot grant signing authority. Native physical maintenance remains explicit
+unchanged-backend reuse. Profile API comparisons, trusted legacy private-genesis
+workloads and public entitlement are separate scopes. The final combined source,
+normal artifact and native/workload results are still pending; no historical
+count or `full_rust_node_complete` flag is upgraded by these implementation edits.
+
+Private proof reuse now retains opaque local artifacts across unrelated heads.
+Required work may promote or join owned jobs, then rebind current source/policy
+and create fresh receipts; ordered execution retains nonce, debit, claim and
+limit checks. This implementation remains subject to the final combined
+qualification and does not change the recorded deployment or parity boundaries.
+
+Public-network startup now captures proposal grace, epoch-tag retention and CLI
+proof-worker limits from the same configured profile. Recovery keeps the captured
+grace; supplied library runtimes retain their caller-owned limits. These changes
+and the cancellation-safe nested traffic diagnostics have source review, with
+their final execution tests pending. The [candidate checkpoint](checkpoints/2026-10-18/interface-candidate.json)
+records the preceding passing suite and the unresolved mixed Stealth and nested
+UDP failures separately. The retained public observer has not adopted this candidate.
+
 ## Recorded local evidence
 
 - The [native integration observer adoption](checkpoints/2026-10-18/native-integration-public-adoption.md)

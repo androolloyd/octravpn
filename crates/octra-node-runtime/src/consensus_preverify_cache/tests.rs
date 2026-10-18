@@ -324,3 +324,206 @@ fn startup_capacity_matches_native_int63_bounds() {
 }
 
 mod parity;
+
+#[test]
+fn remember_reuses_only_completed_ready_and_invalid_for_the_exact_item() {
+    let cache = Cache::new(16, usize::MAX);
+    let scope = cache.select(b"root", ()).unwrap();
+    assert!(cache
+        .remember(&scope, 7, Purpose::Build, &tx(1), ready())
+        .unwrap());
+    assert!(matches!(
+        cache
+            .run(&scope, 7, Purpose::Build, &tx(1), || panic!(
+                "completed warmup not reused"
+            ))
+            .unwrap(),
+        Checked::Ready(None)
+    ));
+    for (epoch, purpose, transaction) in [
+        (8, Purpose::Build, tx(1)),
+        (7, Purpose::Validate, tx(1)),
+        (7, Purpose::Build, tx(2)),
+    ] {
+        let mut calls = 0;
+        let result = cache
+            .run(&scope, epoch, purpose, &transaction, || {
+                calls += 1;
+                Ok(skipped(Kind::Invalid))
+            })
+            .unwrap();
+        assert_eq!(calls, 1, "warmup crossed an item binding");
+        assert!(matches!(
+            result,
+            Checked::Skip {
+                kind: Kind::Invalid,
+                ..
+            }
+        ));
+    }
+    assert!(cache
+        .remember(&scope, 7, Purpose::Build, &tx(3), skipped(Kind::Invalid))
+        .unwrap());
+    assert!(matches!(
+        cache
+            .run(&scope, 7, Purpose::Build, &tx(3), || panic!(
+                "completed rejection not reused"
+            ))
+            .unwrap(),
+        Checked::Skip {
+            kind: Kind::Invalid,
+            ..
+        }
+    ));
+    for kind in [Kind::Unavailable, Kind::Deferred] {
+        assert!(!cache
+            .remember(&scope, 7, Purpose::Build, &tx(4), skipped(kind))
+            .unwrap());
+    }
+    assert!(cache
+        .run(&scope, 7, Purpose::Build, &tx(4), || Ok(ready()))
+        .is_ok());
+    assert!(!cache
+        .remember(&scope, 7, Purpose::Build, &tx(1), skipped(Kind::Invalid))
+        .unwrap());
+    assert!(matches!(
+        cache
+            .run(&scope, 7, Purpose::Build, &tx(1), || panic!(
+                "late seed replaced completion"
+            ))
+            .unwrap(),
+        Checked::Ready(None)
+    ));
+}
+
+#[test]
+fn remember_rejects_old_scope_even_when_the_same_root_returns() {
+    let cache = Cache::new(8, usize::MAX);
+    let old = cache.select(b"root", 1).unwrap();
+    cache.select(b"other", 1).unwrap();
+    let current = cache.select(b"root", 1).unwrap();
+    assert!(!cache
+        .remember(&old, 1, Purpose::Build, &tx(1), ready())
+        .unwrap());
+    assert_eq!(stats(&cache), (0, 0, 0));
+    assert!(cache
+        .remember(&current, 1, Purpose::Build, &tx(1), skipped(Kind::Invalid))
+        .unwrap());
+    assert!(!cache
+        .remember(&old, 1, Purpose::Build, &tx(1), ready())
+        .unwrap());
+    assert!(matches!(
+        cache
+            .run(&current, 1, Purpose::Build, &tx(1), || panic!(
+                "stale seed replaced current scope"
+            ))
+            .unwrap(),
+        Checked::Skip {
+            kind: Kind::Invalid,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn remember_neither_waits_for_nor_replaces_an_active_required_ticket() {
+    let cache = Cache::new(8, usize::MAX);
+    let scope = cache.select(b"root", ()).unwrap();
+    let (started, begun) = mpsc::channel();
+    let (release, finish) = mpsc::channel();
+    let owner = {
+        let cache = cache.clone();
+        let scope = scope.clone();
+        thread::spawn(move || {
+            cache.run(&scope, 1, Purpose::Build, &tx(1), || {
+                started.send(()).unwrap();
+                finish.recv_timeout(Duration::from_secs(5)).unwrap();
+                Ok(ready())
+            })
+        })
+    };
+    begun.recv_timeout(Duration::from_secs(3)).unwrap();
+    let key = item_key(
+        1,
+        Purpose::Build,
+        b"root",
+        hex::encode(tx(1).hash().unwrap()).as_bytes(),
+    );
+    let original = cache
+        .0
+        .state
+        .lock()
+        .unwrap()
+        .entries
+        .get(&key)
+        .unwrap()
+        .job
+        .clone();
+    assert!(original.pending());
+    let (seeded, seed) = mpsc::channel();
+    let seeder = {
+        let cache = cache.clone();
+        let scope = scope.clone();
+        thread::spawn(move || {
+            let result = cache.remember(&scope, 1, Purpose::Build, &tx(1), skipped(Kind::Invalid));
+            seeded.send(result).unwrap();
+        })
+    };
+    // Capture the observation before releasing the real owner, but always
+    // release/join before asserting so a failed regression leaves no waiter.
+    let early = seed.recv_timeout(Duration::from_secs(3));
+    let unchanged = cache.0.state.try_lock().is_ok_and(|state| {
+        state
+            .entries
+            .get(&key)
+            .is_some_and(|entry| Arc::ptr_eq(&entry.job, &original))
+    });
+    let still_pending = original
+        .result
+        .try_lock()
+        .is_ok_and(|result| result.is_none());
+    release.send(()).unwrap();
+    seeder.join().unwrap();
+    let result = owner.join().unwrap().unwrap();
+    assert!(
+        !early.unwrap().unwrap(),
+        "seed waited or replaced required work"
+    );
+    assert!(unchanged && still_pending);
+    assert!(matches!(result, Checked::Ready(None)));
+    assert!(matches!(
+        cache
+            .run(&scope, 1, Purpose::Build, &tx(1), || panic!(
+                "required result was lost"
+            ))
+            .unwrap(),
+        Checked::Ready(None)
+    ));
+}
+
+#[test]
+fn remember_obeys_existing_fifo_count_and_byte_limits() {
+    let bytes = checked_bytes(&tx(1), &ready()).unwrap();
+    let cache = Cache::new(2, bytes * 2);
+    let scope = cache.select(b"root", ()).unwrap();
+    for nonce in 1..=3 {
+        assert!(cache
+            .remember(&scope, 1, Purpose::Build, &tx(nonce), ready())
+            .unwrap());
+        assert!(stats(&cache).0 <= 2 && stats(&cache).2 <= bytes * 2);
+    }
+    let mut calls = 0;
+    cache
+        .run(&scope, 1, Purpose::Build, &tx(1), || {
+            calls += 1;
+            Ok(ready())
+        })
+        .unwrap();
+    assert_eq!(calls, 1, "oldest seeded result was not evicted");
+    let tiny = Cache::new(8, bytes - 1);
+    let scope = tiny.select(b"root", ()).unwrap();
+    tiny.remember(&scope, 1, Purpose::Build, &tx(1), ready())
+        .unwrap();
+    assert_eq!(stats(&tiny).0, 0);
+    assert_eq!(stats(&tiny).2, 0);
+}

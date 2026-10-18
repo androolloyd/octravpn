@@ -218,6 +218,54 @@ impl<B: PartialEq> Cache<B> {
         state.bytes = 0;
         Ok(Scope(scope))
     }
+    /// Seed an already-computed speculative result without installing a pending
+    /// ticket or waiting for required work. Neither a stale scope nor an
+    /// existing authoritative ticket may be replaced by a late warmup.
+    pub fn remember(
+        &self,
+        scope: &Scope<B>,
+        epoch: i64,
+        purpose: Purpose,
+        tx: &Transaction,
+        checked: Checked,
+    ) -> Result<bool> {
+        if !cacheable(&checked) {
+            return Ok(false);
+        }
+        let hash = tx.hash().map_err(|error| Error(error.to_string()))?;
+        let key = item_key(epoch, purpose, &scope.0.root, hex::encode(hash).as_bytes());
+        let bytes = checked_bytes(tx, &checked)?;
+        let mut state = self
+            .0
+            .state
+            .lock()
+            .map_err(|_| Error("consensus preverify cache poisoned".into()))?;
+        if !state
+            .scope
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, &scope.0))
+            || state.entries.contains_key(&key)
+        {
+            return Ok(false);
+        }
+        let total = state
+            .bytes
+            .checked_add(bytes)
+            .ok_or_else(|| Error("consensus preverify cache size overflow".into()))?;
+        let job = Arc::new(Job::new());
+        job.finish(Ok(checked));
+        state.entries.insert(
+            key,
+            Entry {
+                job: job.clone(),
+                bytes,
+            },
+        );
+        state.fifo.push_back((key, Arc::downgrade(&job)));
+        state.bytes = total;
+        self.evict(&mut state);
+        Ok(true)
+    }
     /// The proof factory runs without any cache lock. A dropped async caller
     /// does not cancel the blocking owner; a panic wakes joined callers and
     /// forgets only its own ticket. Late old-root completion cannot repopulate.

@@ -161,7 +161,7 @@ async fn reply(
         Ok(())
     }
 }
-async fn invoke(
+pub(crate) async fn invoke(
     host: &Arc<Context>,
     path: &str,
     payload: &[u8],

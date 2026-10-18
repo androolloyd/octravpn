@@ -21,7 +21,7 @@ use octra_node_protocol::{
 };
 use octra_node_runtime::{
     bundle_queries::Bundles,
-    consensus_driver::{Driver, DutyHandler, Host as _},
+    consensus_driver::{Driver, DutyHandler, GraceConfig, Host as _},
     epoch_roots::{self, EpochRoots, WaitFor},
     finality_queries::Finality,
     validator_history::CanonicalValidators,
@@ -81,6 +81,7 @@ pub(crate) struct Service<A: Host> {
     pub join: consensus_join::Client,
     pub config: driver::Config,
     pub timeouts: TimeoutConfig,
+    pub proposal_grace: GraceConfig,
     pub voting: bool,
     pub minimum_peers: usize,
     pub health: octra_node_protocol::consensus::health::Config,
@@ -195,13 +196,14 @@ impl<A: Host> Service<A> {
         )
         .await?
         .with_pending(self.pending.clone());
-        let (handle, mut driver) = Driver::new(
+        let (handle, mut driver) = Driver::new_with_grace(
             engine,
             self.config.journal.clone(),
             self.swarm.clone(),
             validator,
             publication,
             Ok(vec![]),
+            self.proposal_grace,
         )?;
         if let Some(duty) = &self.duty {
             driver = driver.with_duty_handler(duty.clone());

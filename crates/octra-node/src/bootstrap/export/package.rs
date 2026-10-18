@@ -435,7 +435,7 @@ pub(crate) fn verify(
         files,
     })
 }
-fn verify_files(
+pub(super) fn verify_files(
     authority: &Authority,
     root: &Path,
     draft: &manifest::Draft,
@@ -553,7 +553,11 @@ fn read_pinned(
     ensure!(bytes.len() <= limit, "snapshot artifact grew past limit");
     Ok(bytes)
 }
-fn verify_migration(raw: &[u8], network: &super::super::Network, floor: i64) -> Result<()> {
+pub(super) fn verify_migration(
+    raw: &[u8],
+    network: &super::super::Network,
+    floor: i64,
+) -> Result<()> {
     use octra_node_protocol::{native_base64, state_sync::migration};
     let expected = network
         .migration_root
@@ -653,7 +657,7 @@ pub(crate) fn open(root: &Path, name: &str) -> Result<fs::File> {
         anyhow::bail!("safe snapshot file access requires Unix")
     }
 }
-fn read(root: &Path, name: &str, limit: usize) -> Result<Vec<u8>> {
+pub(super) fn read(root: &Path, name: &str, limit: usize) -> Result<Vec<u8>> {
     let file = open(root, name)?;
     ensure!(
         file.metadata()?.len() <= limit as u64,
@@ -664,7 +668,7 @@ fn read(root: &Path, name: &str, limit: usize) -> Result<Vec<u8>> {
     ensure!(raw.len() <= limit, "snapshot artifact grew past limit");
     Ok(raw)
 }
-fn file_manifest(root: &Path, name: &str, chunk_size: u64) -> Result<manifest::File> {
+pub(super) fn file_manifest(root: &Path, name: &str, chunk_size: u64) -> Result<manifest::File> {
     hash_file(&mut open(root, name)?, name, chunk_size)
 }
 fn hash_file(file: &mut fs::File, name: &str, chunk_size: u64) -> Result<manifest::File> {
@@ -723,12 +727,12 @@ fn report(directory: &Path, draft: &manifest::Draft, signed: bool) -> Result<Pac
 /// A retained immutable capture. The live node owns its store; exporting never
 /// reopens its writer or consults downloaded configuration for trust.
 pub(crate) struct Capture {
-    head: Head,
-    checkpoint: checkpoint::Body,
-    finality: Vec<u8>,
-    window: Vec<u8>,
-    state: Snapshot,
-    migration: Option<Vec<u8>>,
+    pub(super) head: Head,
+    pub(super) checkpoint: checkpoint::Body,
+    pub(super) finality: Vec<u8>,
+    pub(super) window: Vec<u8>,
+    pub(super) state: Snapshot,
+    pub(super) migration: Option<Vec<u8>>,
 }
 impl Capture {
     pub(crate) fn snapshot_id(&self) -> Result<String> {
@@ -822,6 +826,27 @@ pub(crate) async fn capture(
         state,
         migration,
     })
+}
+
+/// Publish a stopped-store capture through the same immutable image writer.
+pub(super) fn publish_capture(
+    source: &Path,
+    target: &Path,
+    captured: Capture,
+    chunk_size: u64,
+    limits: Limits,
+) -> Result<PackageReport> {
+    prepare_files(
+        source,
+        target,
+        Image { chunk_size, limits },
+        &captured.head,
+        captured.checkpoint,
+        &captured.finality,
+        &captured.window,
+        &captured.state,
+        captured.migration.as_deref(),
+    )
 }
 
 pub(crate) fn prepare_capture(

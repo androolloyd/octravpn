@@ -1,0 +1,69 @@
+{
+  "schema": "octra_native_interface_candidate_status_v1",
+  "updated": "2026-10-18",
+  "native_pin": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "status": "implementation_candidate_final_combined_qualification_pending",
+  "full_rust_node_complete": false,
+  "universal_behavioral_equivalence_proven": false,
+  "public_mainnet_qualified": false,
+  "public_observer_adopted_candidate": false,
+  "current_changes": [
+    "Publication-stable reads and authenticated bounded private/KeySwitch proof warmup",
+    "Opaque locally verified artifacts rebind current state and produce fresh receipts",
+    "Native-format validator, snapshot and stopped-store operator tools",
+    "Captured proposal grace, epoch-tag retention and CLI proof-worker limits",
+    "Cancellation-safe failure-only nested traffic diagnostics"
+  ],
+  "previous_source_results": {
+    "source_scope_sha256": "cf71c8b92209b882a3bbd228a419263442a04abe1a1d5f8d619902d58a0261fe",
+    "current_candidate_qualified_by_these_results": false,
+    "workspace": {
+      "logical_targets": 241,
+      "passed": 2766,
+      "ignored": 15,
+      "failed": 0,
+      "capture_sha256": "453b5f700bdd72db97c629938d797205c7c5c89e8bc05491d661723228463825",
+      "counting": "Three nested journal child summaries excluded from logical totals."
+    },
+    "normal_default_worker": {
+      "passed": 15,
+      "helper_features": false
+    },
+    "default_node": {
+      "passed": 267,
+      "ignored": 1
+    },
+    "linux_workloads_passed": [
+      "framed paid VPN",
+      "stock Program custody",
+      "stock Circle custody"
+    ],
+    "failed_workloads": [
+      {
+        "name": "mixed Rust/native private-proof validators V12",
+        "failure": "Stealth at epoch31 did not finalize within the original240-second gate",
+        "capture_sha256": "a514623ab047efd7a540238adf2566d6b253157a6853ee69966328f9f9fe4f9b"
+      },
+      {
+        "name": "nested prepaid traffic hop0",
+        "failure": "Initial UDP return timed out at the original2-second socket deadline; root cause remains unproven",
+        "capture_sha256": "d6052d656a9b6913b02e4869830cf52c46524a5f0faf5e562840b4a6dac6f1ed"
+      }
+    ]
+  },
+  "pending": [
+    "Execute newly authored startup and recovery regressions",
+    "Fresh combined source-bound normal build, workspace and native differential tests",
+    "Mixed private-proof finality, receipts, roots, ExEx and restart qualification",
+    "Nested traffic, exhaustion, revocation and recovery qualification on both hops",
+    "Remaining Single/Triple combined workload gates",
+    "Guarded public observer adoption after successful qualification"
+  ],
+  "boundaries": [
+    "Finite comparisons and source inventory do not prove universal parity.",
+    "Native physical storage and HFHE compatibility explicitly reuse pinned native components.",
+    "Private-genesis authority does not establish public entitlement.",
+    "Public paid service and Mainnet remain unqualified.",
+    "Prior failures and prior-source successes retain their original scope; no timeout, quorum or consensus waiver."
+  ]
+}

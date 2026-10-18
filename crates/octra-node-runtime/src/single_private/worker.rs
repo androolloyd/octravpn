@@ -40,6 +40,10 @@ impl Limits {
     pub fn capture() -> Self {
         Self::of_getenv(|name| std::env::var(name).ok())
     }
+    /// Capture a configured environment without falling back to process values.
+    pub fn from_values(get: impl Fn(&str) -> Option<Vec<u8>>) -> Self {
+        Self::of_getenv(|name| get(name).and_then(|raw| String::from_utf8(raw).ok()))
+    }
     fn of_getenv(get: impl Fn(&str) -> Option<String>) -> Self {
         fn int(
             get: &impl Fn(&str) -> Option<String>,
@@ -889,6 +893,24 @@ mod tests {
                 case["expected"]["timeout_bits"].as_str().unwrap(),
                 "{case}"
             );
+        }
+    }
+    #[test]
+    fn configured_values_keep_absence_and_native_worker_bounds_authoritative() {
+        let limits = Limits::from_values(|name| match name {
+            "OCTRA_PVAC_VERIFY_WORKERS" => Some(b"0x2".to_vec()),
+            "OCTRA_PVAC_VERIFY_TIMEOUT_SEC" => Some(b"0x1p0".to_vec()),
+            "OCTRA_PVAC_VERIFY_MAX_RSS_MB" => Some(b"64".to_vec()),
+            _ => None,
+        });
+        assert_eq!(limits.capacity, 2);
+        assert_eq!(limits.timeout_seconds.to_bits(), 1_f64.to_bits());
+        assert_eq!(limits.rss_mb, 64);
+        for values in [None, Some(b"invalid".to_vec()), Some(vec![0xff])] {
+            let limits = Limits::from_values(|_| values.clone());
+            assert_eq!(limits.capacity, 1);
+            assert_eq!(limits.timeout_seconds.to_bits(), 600_f64.to_bits());
+            assert_eq!(limits.rss_mb, 9216);
         }
     }
 }

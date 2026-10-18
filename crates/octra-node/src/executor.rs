@@ -2,6 +2,7 @@
 //! owns finality, canonical commits and ExEx; this host owns no canonical writer.
 mod account_summary;
 mod admission;
+mod artifact_pool;
 mod build;
 mod compiler;
 mod pending;
@@ -13,6 +14,7 @@ mod registration;
 mod stage;
 mod verification;
 mod views;
+mod warmup;
 use crate::import::{Execution, Executor};
 pub use admission::Limits;
 use anyhow::{ensure, Context, Result};
@@ -81,6 +83,8 @@ pub struct Native {
     operator_wallet: Arc<tokio::sync::Mutex<()>>,
     migration_status: octra_node_runtime::pvac_status_actor::Service,
     proof_cache: octra_node_runtime::consensus_preverify_cache::Cache<proofs::ProofBinding>,
+    // A proof job receives a host clone without this owner, avoiding a cycle.
+    warmups: Option<Arc<warmup::Warmups>>,
     account_summary: Arc<octra_node_runtime::account_summary::Cache>,
 }
 impl Native {
@@ -125,6 +129,9 @@ impl Native {
             octra_node_runtime::pvac_status_actor::Service::default,
             |pool| octra_node_runtime::pvac_status_actor::Service::isolated(pool.clone()),
         );
+        let proof_capacity = runtime
+            .crypto_pool()
+            .map_or(1, |pool| pool.worker().limits().capacity);
         Ok(Self {
             config: Arc::new(config),
             observer_submissions: false,
@@ -141,6 +148,7 @@ impl Native {
             operator_wallet: Arc::new(tokio::sync::Mutex::new(())),
             migration_status,
             proof_cache: proof_cache(bundle_cache_cap),
+            warmups: Some(Arc::new(warmup::Warmups::new(proof_capacity))),
             account_summary: Arc::default(),
         })
     }

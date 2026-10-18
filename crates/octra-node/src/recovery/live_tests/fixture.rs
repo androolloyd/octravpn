@@ -37,7 +37,7 @@ use octra_node_protocol::{
 };
 use octra_node_runtime::{
     canonical::CanonicalStore,
-    consensus_driver::{Driver, Handle},
+    consensus_driver::{Driver, GraceConfig, Handle},
     epoch_footer,
     finality::proposal::Policy,
     state_batch::StateBatch,
@@ -287,6 +287,18 @@ impl Fixture {
     pub(super) async fn new(voting: bool) -> Self {
         Box::pin(Self::with_health(voting, HealthConfig::default())).await
     }
+    pub(super) async fn with_grace(proposal_grace: GraceConfig) -> Self {
+        Box::pin(Self::start_with_grace(
+            false,
+            HealthConfig::default(),
+            false,
+            None,
+            None,
+            None,
+            proposal_grace,
+        ))
+        .await
+    }
     pub(super) async fn with_health(voting: bool, health: HealthConfig) -> Self {
         Box::pin(Self::start(voting, health, false, None, None, None)).await
     }
@@ -332,6 +344,26 @@ impl Fixture {
         advertised_head: Option<i64>,
         clock: Option<Arc<LivenessClock>>,
         join: Option<consensus_join::Client>,
+    ) -> Self {
+        Box::pin(Self::start_with_grace(
+            voting,
+            health,
+            initial_matching,
+            advertised_head,
+            clock,
+            join,
+            GraceConfig::from_env(),
+        ))
+        .await
+    }
+    async fn start_with_grace(
+        voting: bool,
+        health: HealthConfig,
+        initial_matching: bool,
+        advertised_head: Option<i64>,
+        clock: Option<Arc<LivenessClock>>,
+        join: Option<consensus_join::Client>,
+        proposal_grace: GraceConfig,
     ) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let state = genesis();
@@ -609,13 +641,14 @@ impl Fixture {
                 .await
                 .unwrap()
                 .with_pending(pending.clone());
-        let (initial, driver) = Driver::new(
+        let (initial, driver) = Driver::new_with_grace(
             engine,
             journal.clone(),
             swarm.clone(),
             validator,
             publication,
             Ok(vec![]),
+            proposal_grace,
         )
         .unwrap();
         authority.attach(initial.clone()).unwrap();
@@ -636,6 +669,7 @@ impl Fixture {
             join: join.unwrap_or_else(|| consensus_join::Client::capture(|_| None).unwrap()),
             config,
             timeouts,
+            proposal_grace,
             voting,
             minimum_peers: 2,
             health,

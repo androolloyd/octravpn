@@ -32,12 +32,29 @@ fn keep_of(raw: Option<&[u8]>) -> Result<i64> {
         .ok_or_else(|| error("OCTRA_GC_KEEP_EPOCHS must be in 4096..65536"))
 }
 
-pub(super) fn capture_keep() -> Result<i64> {
-    keep_of(
-        std::env::var_os("OCTRA_GC_KEEP_EPOCHS")
-            .as_deref()
-            .map(std::ffi::OsStr::as_encoded_bytes),
-    )
+/// Captured native tag retention. Explicit absence selects the native default,
+/// independently of the embedding process environment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EpochTagRetention(i64);
+impl EpochTagRetention {
+    pub fn from_value(raw: Option<&[u8]>) -> Result<Self> {
+        keep_of(raw).map(Self)
+    }
+    pub fn capture() -> Result<Self> {
+        Self::from_value(
+            std::env::var_os("OCTRA_GC_KEEP_EPOCHS")
+                .as_deref()
+                .map(std::ffi::OsStr::as_encoded_bytes),
+        )
+    }
+    pub const fn keep_epochs(self) -> i64 {
+        self.0
+    }
+}
+impl Default for EpochTagRetention {
+    fn default() -> Self {
+        Self(DEFAULT_KEEP)
+    }
 }
 
 fn initial_label(empty: bool, raw: Option<&[u8]>) -> Result<Option<i64>> {

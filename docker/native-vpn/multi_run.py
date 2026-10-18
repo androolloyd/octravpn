@@ -12,6 +12,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import time
 import uuid
 
 from json_snapshot import read_object, read_array
@@ -67,6 +68,28 @@ def main():
             assert used(after, index, 1) > used(before, index, 1), 'one operator did not meter the actual UDP path'
         assert after['target']['udp_payload_bytes'] > before['target'].get('udp_payload_bytes', 0)
         return value
+    def failure_snapshots():
+        # Failure-only, fixed read-only helper. Never repeat traffic or change
+        # a route, purchase, control hold or validator. Original teardown follows.
+        observed = {'wall_ns': time.time_ns(), 'monotonic_ns': time.monotonic_ns(),
+                    'scope': 'best-effort postfailure observations, not acceptance evidence', 'roles': {}}
+        for role in ['A', 'B', 'C']:
+            name = identifier + '-' + role
+            if name not in containers: continue
+            try:
+                completed = subprocess.run(['docker', 'exec', name, 'python3', '-B',
+                    '/usr/local/bin/multi_client.py', '--diagnostic-snapshot', role],
+                    capture_output=True, timeout=12)
+                if len(completed.stdout) > 2 * 1024 * 1024:
+                    raise ValueError('failure snapshot exceeds byte bound')
+                observed['roles'][role] = {'exit_code': completed.returncode,
+                    'snapshot': json.loads(completed.stdout) if completed.returncode == 0 else None,
+                    'stderr': completed.stderr[-2000:].decode('utf-8', 'replace')}
+            except Exception as error:
+                observed['roles'][role] = {'error': type(error).__name__, 'message': str(error)[:1000]}
+        try: observed['target'] = read_object(evidence / 'target.json')
+        except Exception as error: observed['target'] = {'error': type(error).__name__, 'message': str(error)[:1000]}
+        atomic(output / 'failure-observations.json', observed)
     try:
         source = json.loads(command(['docker', 'run', '--rm', '--network', 'none', '--entrypoint', 'cat', args.node_image,
                                      '/usr/local/share/native-source.json']))
@@ -169,6 +192,10 @@ def main():
         report['final'] = {'state': final, 'claims': claims, 'target': target_state, 'tcp_mss': mss}
         step('selected hop canonical withdrawal blocks live nested traffic and four exact ExEx sinks agree', hop=selected, claims=claims)
         call('C', 'stop'); call('B', 'stop'); call('A', 'stop'); report['qualified'] = True; save()
+    except Exception:
+        try: failure_snapshots()
+        except Exception: pass  # Cancellation bypasses diagnostics and reaches teardown.
+        raise
     finally:
         for name in reversed(containers):
             log = subprocess.run(['docker', 'logs', name], capture_output=True, text=True)

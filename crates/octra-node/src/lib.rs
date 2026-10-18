@@ -11,6 +11,7 @@ pub mod consensus_join;
 pub mod devnet;
 pub mod driver;
 mod duty;
+mod epoch_visibility;
 pub mod executor;
 pub mod gateway;
 pub mod identity;
@@ -19,8 +20,10 @@ mod launch;
 mod legacy;
 pub mod legacy_repair;
 mod mesh;
+pub mod native_tools;
 pub mod network;
 pub mod network_profile;
+pub mod offline_cli;
 pub mod peers;
 pub mod proposal;
 mod published;
@@ -409,6 +412,7 @@ impl<A: Host> Node<A> {
             .map(|record| record.transaction.clone())
             .collect::<Vec<_>>();
         let mut prepared = self.publisher.prepare(base, certificate, executed).await?;
+        let visibility = self.shared.visibility().begin()?;
         let candidate = prepared.candidate().clone();
         let legacy_digest = {
             let mut legacy = self
@@ -452,7 +456,7 @@ impl<A: Host> Node<A> {
                         let _writer_lease = writer;
                         let head = prepared.commit().await?;
                         observation.committed(&head);
-                        Ok::<_, anyhow::Error>((head, operation))
+                        Ok::<_, anyhow::Error>((head, operation, visibility))
                     })
                 })();
                 let _ = completed.send(outcome);
@@ -465,7 +469,7 @@ impl<A: Host> Node<A> {
             .await
             .context("canonical commit worker stopped; resume before serving")
             .and_then(|completed| completed.context("canonical commit; resume before serving"));
-        let (head, _operation) = match outcome {
+        let (head, _operation, _visibility) = match outcome {
             Ok(completed) => completed,
             Err(error) => {
                 self.shared.fail(&ticket, error.to_string());

@@ -5,6 +5,9 @@
 use crate::{
     epoch_execution::{Effect, Refusal},
     execution::Error,
+    private_artifact::{
+        Artifact, Binding as ArtifactBinding, Bound, KeyArtifact, KeyBinding, KeyBound,
+    },
     private_balance::{self as balance, Evidence},
     private_key, private_transfer,
     state_batch::StateBatch,
@@ -16,7 +19,7 @@ use octra_node_protocol::{
     transaction::{OpType, RuleMode, Transaction},
 };
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn refusal(tag: &'static str, reason: impl AsRef<[u8]>) -> Effect {
     Effect::Rejected(Refusal {
@@ -41,6 +44,8 @@ enum Plan {
     Balance(balance::Verified),
     Transfer(private_transfer::Verified),
     Key(private_key::Verified),
+    Local(Bound),
+    LocalKey(KeyBound),
 }
 impl Plan {
     fn transition_hash(&self) -> String {
@@ -48,6 +53,8 @@ impl Plan {
             Self::Balance(plan) => plan.transition_hash(),
             Self::Transfer(plan) => plan.transition_hash(),
             Self::Key(plan) => plan.transition_hash(),
+            Self::Local(plan) => plan.transition_hash(),
+            Self::LocalKey(plan) => plan.transition_hash(),
         }
     }
     fn apply(
@@ -62,6 +69,8 @@ impl Plan {
             Self::Balance(plan) => plan.apply(ledger, tx),
             Self::Transfer(plan) => plan.apply(ledger, state, tx, epoch),
             Self::Key(plan) => plan.apply(ledger, state, tx, persist),
+            Self::Local(plan) => plan.apply(ledger, state, tx, epoch),
+            Self::LocalKey(plan) => plan.apply(ledger, state, tx, persist),
         }
     }
 }
@@ -74,6 +83,8 @@ pub struct Epoch<'a> {
     stealth: usize,
     debits: BTreeSet<Vec<u8>>,
     gate: Option<&'a Gate>,
+    artifacts: BTreeMap<[u8; 32], Artifact>,
+    keys: BTreeMap<[u8; 32], KeyArtifact>,
 }
 impl<'a> Epoch<'a> {
     pub fn new(
@@ -92,7 +103,25 @@ impl<'a> Epoch<'a> {
             stealth: 0,
             debits: BTreeSet::new(),
             gate,
+            artifacts: BTreeMap::new(),
+            keys: BTreeMap::new(),
         }
+    }
+    /// Only genuine locally verified artifacts can enter this path. Every plan
+    /// is freshly source/policy-bound again at its ordered ledger position.
+    pub fn with_artifacts(mut self, artifacts: impl IntoIterator<Item = Artifact>) -> Self {
+        self.artifacts = artifacts
+            .into_iter()
+            .map(|a| (a.transaction_hash(), a))
+            .collect();
+        self
+    }
+    pub fn with_keys(mut self, keys: impl IntoIterator<Item = KeyArtifact>) -> Self {
+        self.keys = keys
+            .into_iter()
+            .map(|a| (a.transaction_hash(), a))
+            .collect();
+        self
     }
     /// The key source resolves content-addressed public blobs outside the
     /// consensus tree. Missing/corrupt blobs abort; they are not peer-invalid.
@@ -219,7 +248,50 @@ impl<'a> Epoch<'a> {
             }
             Ok(Some(blob))
         };
-        let plan = match if matches!(tx.op_type, OpType::Stealth | OpType::Claim) {
+        // Historical/certified replay is deliberately unchanged. Strict local
+        // reuse requires an opaque proof artifact as well as the normal gate.
+        let hash = tx.hash().map_err(|error| Error(error.to_string()))?;
+        let (artifact, key_artifact) = if profile.strict && self.gate.is_some() {
+            (self.artifacts.get(&hash), self.keys.get(&hash))
+        } else {
+            (None, None)
+        };
+        let mut key_source = Some(key);
+        let mut captured_key = None;
+        let mut local = None;
+        if artifact.is_some() || key_artifact.is_some() {
+            let public = key_source.take().expect("single key source")();
+            if let Ok(public) = &public {
+                let binding = if let Some(artifact) = artifact {
+                    artifact
+                        .bind(ledger, state, tx, profile, || Ok(public.clone()))
+                        .map(|binding| match binding {
+                            ArtifactBinding::Ready(plan) => Some(Plan::Local(plan)),
+                            ArtifactBinding::SourceChanged | ArtifactBinding::Invalid(_) => None,
+                        })
+                } else if let Some(artifact) = key_artifact {
+                    artifact
+                        .bind(ledger, tx, self.policy, || Ok(public.clone()))
+                        .map(|binding| match binding {
+                            KeyBinding::Ready(plan) => Some(Plan::LocalKey(plan)),
+                            KeyBinding::SourceChanged | KeyBinding::Invalid(_) => None,
+                        })
+                } else {
+                    unreachable!("artifact selected")
+                };
+                // A failed optimization never replaces the original verifier's
+                // payload-before-key error order or creates proof authority.
+                local = binding.ok().flatten();
+            }
+            captured_key = Some(public);
+        }
+        let key = || match captured_key {
+            Some(public) => public,
+            None => key_source.take().expect("unconsumed key source")(),
+        };
+        let plan = match if let Some(plan) = local {
+            Ok(plan)
+        } else if matches!(tx.op_type, OpType::Stealth | OpType::Claim) {
             private_transfer::resolve(ledger, state, tx, profile, evidence, key).map(Plan::Transfer)
         } else if tx.op_type == OpType::KeySwitch {
             private_key::resolve(

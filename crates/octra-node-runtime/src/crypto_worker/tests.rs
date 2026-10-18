@@ -77,3 +77,103 @@ fn expired_pending_entries_do_not_consume_native_queue_or_view_capacity() {
     drop(queue);
     drop(admission);
 }
+
+#[test]
+fn speculative_scope_inherits_nested_deadline_cancellation_and_restores_required_context() {
+    let pool = pool();
+    let normal = pool.scope(false, Arc::new(AtomicBool::new(false)));
+    assert!(!CURRENT.with(|cell| cell.borrow().as_ref().unwrap().speculative));
+    let cancel = Arc::new(AtomicBool::new(false));
+    let speculative = pool.speculative_scope(cancel.clone());
+    let inner_cancel = Arc::new(AtomicBool::new(false));
+    let until = Instant::now() + Duration::from_secs(1);
+    let inner = pool.scope_until(false, inner_cancel.clone(), until);
+    let context = CURRENT.with(|cell| cell.borrow().clone().unwrap());
+    assert!(context.speculative);
+    assert_eq!(context.deadline, Some(until));
+    assert!(!context.is_cancelled());
+    cancel.store(true, Ordering::Release);
+    assert!(context.is_cancelled());
+    cancel.store(false, Ordering::Release);
+    inner_cancel.store(true, Ordering::Release);
+    assert!(context.is_cancelled());
+    drop(inner);
+    drop(speculative);
+    assert!(!CURRENT.with(|cell| cell.borrow().as_ref().unwrap().speculative));
+    assert!(!CURRENT.with(|cell| cell.borrow().as_ref().unwrap().is_cancelled()));
+    drop(normal);
+    assert!(!has_scope());
+}
+
+fn amount() -> Request {
+    Request::Private(private::Request::Amount {
+        public: private::Key {
+            raw: vec![],
+            alias: false,
+        },
+        amount: "1".into(),
+        cipher: vec![],
+        proof: vec![],
+        commitment: vec![],
+        blinding: vec![],
+        strict: true,
+        math: true,
+    })
+}
+
+#[test]
+fn nested_warmup_request_uses_speculative_busy_instead_of_waiting_for_required_capacity() {
+    use crate::compute::Priority;
+    use std::{sync::mpsc, thread};
+    let pool = pool();
+    let occupied = pool
+        .worker
+        .proofs()
+        .acquire_sync(Priority::Required, true)
+        .unwrap();
+    assert_eq!(pool.worker.proofs().stats().active, 1);
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let (send, receive) = mpsc::channel();
+    let job = {
+        let pool = pool.clone();
+        let cancelled = cancelled.clone();
+        thread::spawn(move || {
+            let _speculative = pool.speculative_scope(cancelled);
+            // This is the normal nested scope installed by Native::prove.
+            let _proof = pool.scope(false, Arc::new(AtomicBool::new(false)));
+            let context = CURRENT.with(|cell| cell.borrow().clone().unwrap());
+            send.send(pool.call(amount(), &context)).unwrap();
+        })
+    };
+    let early = receive.recv_timeout(Duration::from_secs(3));
+    let waiting = pool.worker.proofs().stats().required_waiting;
+    // If the classification regresses, cancel before releasing the permit so
+    // even that failing path cannot execute this unit-test image as a helper.
+    cancelled.store(true, Ordering::Release);
+    drop(occupied);
+    job.join().unwrap();
+    assert_eq!(waiting, 0);
+    assert!(
+        matches!(early.unwrap(), Err(Error::Unavailable(reason)) if reason == "proof worker busy")
+    );
+    assert_eq!(pool.worker.proofs().stats().active, 0);
+}
+
+#[test]
+fn cancelled_speculative_parent_refuses_before_admission_and_cannot_be_detached() {
+    let pool = pool();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let outer = pool.speculative_scope(cancelled.clone());
+    let inner = pool.scope(false, Arc::new(AtomicBool::new(false)));
+    let context = CURRENT.with(|cell| cell.borrow().clone().unwrap());
+    cancelled.store(true, Ordering::Release);
+    assert!(
+        matches!(pool.call(amount(), &context), Err(Error::Unavailable(reason)) if reason == "crypto invocation cancelled or expired")
+    );
+    assert_eq!(pool.worker.proofs().stats().active, 0);
+    assert_eq!(pool.worker.proofs().stats().required_waiting, 0);
+    drop(outer);
+    assert!(CURRENT.with(|cell| cell.borrow().as_ref().unwrap().is_cancelled()));
+    drop(inner);
+    assert!(!has_scope());
+}

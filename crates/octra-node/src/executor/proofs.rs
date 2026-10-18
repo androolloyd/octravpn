@@ -18,6 +18,29 @@ use octra_node_runtime::{
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Only opaque artifacts returned by local native proof execution inhabit this
+/// pool. A receipt, even a valid remote certificate, cannot construct one.
+pub(super) enum Artifact {
+    Private(octra_node_runtime::private_artifact::Artifact),
+    Key(octra_node_runtime::private_artifact::KeyArtifact),
+}
+
+pub(super) fn artifact_lane(
+    tx: &Transaction,
+    policy: octra_node_runtime::private_key::Policy,
+) -> Option<super::warmup::Lane> {
+    use super::warmup::Lane;
+    match tx.op_type {
+        OpType::Encrypt | OpType::Decrypt | OpType::Stealth | OpType::Claim => Some(Lane::Private),
+        OpType::KeySwitch
+            if octra_node_runtime::private_artifact::KeyArtifact::eligible(tx, &policy) =>
+        {
+            Some(Lane::Key)
+        }
+        _ => None,
+    }
+}
+
 /// A cache belongs to one immutable Native configuration. Also bind the full
 /// freshly selected epoch authority and every policy consumed by prove().
 /// Proposal contexts carry that authority separately from their uncertified Bound.
@@ -37,7 +60,7 @@ pub(super) struct ProofBinding {
     cipher: octra_node_protocol::transaction::RuleMode,
 }
 impl ProofBinding {
-    fn new(
+    pub(super) fn new(
         authority: &octra_node_runtime::finality::EpochRules,
         policy: octra_node_runtime::private_key::Policy,
         rules: &octra_node_runtime::consensus_bundle::Rules,
@@ -220,10 +243,6 @@ impl Native {
         policy: octra_node_runtime::private_key::Policy,
         minimum: &BigInt,
     ) -> Checked {
-        let _crypto = self.runtime.crypto_scope(
-            false,
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        );
         if !preverify_commit::managed(tx) {
             return Checked::Ready(None);
         }
@@ -236,13 +255,246 @@ impl Native {
             tx.op_type,
             OpType::CircleBalanceCellPut | OpType::CircleRegisterCellPut
         ) {
+            let _crypto = self.runtime.crypto_scope(
+                false,
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            );
             return self.prove_cell(tx, ledger, state, root, epoch, policy.balance, minimum);
         }
+        self.prove_private(tx, ledger, state, root, epoch, policy, minimum)
+    }
+
+    fn proof_key(
+        &self,
+        state: &Snapshot,
+        sender: &[u8],
+    ) -> Result<Option<Vec<u8>>, private_balance::Error> {
+        let Some(hash) = state
+            .get(&[b"pvac_hashes", sender])
+            .filter(|h| *h != b"none")
+        else {
+            return Ok(None);
+        };
+        let blob = self
+            .key_blob(hash)
+            .map_err(|error| private_balance::Error::Unavailable(error.0))?
+            .ok_or_else(|| private_balance::Error::Unavailable("pvac blob unavailable".into()))?;
+        if hex::encode(Sha256::digest(&blob)).as_bytes() != hash {
+            return Err(private_balance::Error::Unavailable(
+                "pvac blob hash mismatch".into(),
+            ));
+        }
+        Ok(Some(blob))
+    }
+
+    pub(super) fn artifact_work(
+        &self,
+        state: Snapshot,
+        tx: Transaction,
+        epoch: i64,
+        policy: octra_node_runtime::private_key::Policy,
+    ) -> super::artifact_pool::Work<Artifact> {
+        // The job cannot retain its manager through this Native clone.
+        let host = Self {
+            warmups: None,
+            ..self.clone()
+        };
+        Box::new(move |priority, cancelled| {
+            if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+                return Err("private artifact job cancelled".into());
+            }
+            let _crypto = host.runtime.crypto_pool().map(|pool| match priority {
+                super::warmup::Priority::Required => pool.scope(false, cancelled.clone()),
+                super::warmup::Priority::Speculative => pool.speculative_scope(cancelled.clone()),
+            });
+            let account = super::warmup::SenderAccount::load(&state, &tx.from)
+                .map_err(|error| error.to_string())?;
+            if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+                return Err("private artifact job cancelled".into());
+            }
+            let key = || host.proof_key(&state, &tx.from);
+            let result = if tx.op_type == OpType::KeySwitch {
+                octra_node_runtime::private_artifact::KeyArtifact::preverify(
+                    &account, &tx, policy, epoch, key,
+                )
+                .map(Artifact::Key)
+            } else {
+                octra_node_runtime::private_artifact::Artifact::preverify(
+                    &account,
+                    &octra_node_runtime::state_batch::StateBatch::from_snapshot(state.clone()),
+                    &tx,
+                    policy.balance,
+                    key,
+                )
+                .map(Artifact::Private)
+            };
+            result.map_err(|error| error.to_string())
+        })
+    }
+
+    /// Collect local capabilities only. Epoch::process binds each one again at
+    /// the current ordered source immediately before applying its verified plan.
+    pub(super) fn local_artifacts(
+        &self,
+        transactions: &[Transaction],
+    ) -> (
+        Vec<octra_node_runtime::private_artifact::Artifact>,
+        Vec<octra_node_runtime::private_artifact::KeyArtifact>,
+    ) {
+        let mut private = Vec::new();
+        let mut keys = Vec::new();
+        if let Some(pool) = &self.warmups {
+            for tx in transactions {
+                let Ok(hash) = tx.hash() else { continue };
+                if let Some(artifact) = pool.completed(hex::encode(hash).as_bytes()) {
+                    match artifact.as_ref() {
+                        Artifact::Private(artifact) => private.push(artifact.clone()),
+                        Artifact::Key(artifact) => keys.push(artifact.clone()),
+                    }
+                }
+            }
+        }
+        (private, keys)
+    }
+
+    fn pooled_private(
+        &self,
+        tx: &Transaction,
+        ledger: &impl private_balance::AccountView,
+        state: &Snapshot,
+        root: &[u8],
+        epoch: i64,
+        policy: octra_node_runtime::private_key::Policy,
+        minimum: &BigInt,
+    ) -> Option<Checked> {
+        use octra_node_runtime::private_artifact::{Binding as PrivateBinding, KeyBinding};
+        let pool = self.warmups.as_ref()?;
+        let lane = artifact_lane(tx, policy)?;
+        let hash = hex::encode(tx.hash().ok()?).into_bytes();
+        // Match native await(): at most one fresh-source artifact restart.
+        // Operational failure or a second source change falls back to the
+        // existing fresh synchronous verifier, never an old receipt.
+        for _ in 0..=1 {
+            let artifact = match pool.required(
+                hash.clone(),
+                lane,
+                self.artifact_work(state.clone(), tx.clone(), epoch, policy),
+            ) {
+                Ok(Some(artifact)) => artifact,
+                Err(_) if pool.closed() => {
+                    return Some(skip(
+                        Kind::Unavailable,
+                        b"private_preverify_pending".to_vec(),
+                    ));
+                }
+                Ok(None) | Err(_) => return None,
+            };
+            let key = || self.proof_key(state, &tx.from);
+            let bound = match artifact.as_ref() {
+                Artifact::Private(artifact) => artifact
+                    .bind(
+                        ledger,
+                        &octra_node_runtime::state_batch::StateBatch::from_snapshot(state.clone()),
+                        tx,
+                        policy.balance,
+                        key,
+                    )
+                    .map(|binding| match binding {
+                        PrivateBinding::Ready(bound) => Some(Ok((
+                            bound.current_cipher().to_vec(),
+                            bound.transition_hash(),
+                        ))),
+                        PrivateBinding::SourceChanged => None,
+                        PrivateBinding::Invalid(failure) => Some(Err(failure)),
+                    }),
+                Artifact::Key(artifact) => {
+                    artifact
+                        .bind(ledger, tx, policy, key)
+                        .map(|binding| match binding {
+                            KeyBinding::Ready(bound) => Some(Ok((
+                                bound.current_cipher().to_vec(),
+                                bound.transition_hash(),
+                            ))),
+                            KeyBinding::SourceChanged => None,
+                            KeyBinding::Invalid(failure) => Some(Err(failure)),
+                        })
+                }
+            };
+            match bound {
+                Ok(Some(Ok((current, transition)))) => {
+                    return Some(Self::private_receipt(
+                        tx, state, root, minimum, &current, transition,
+                    ));
+                }
+                Ok(Some(Err(failure))) | Err(private_balance::Error::Rejected(failure)) => {
+                    return Some(skip(
+                        Kind::Invalid,
+                        failure.preverify_reason.unwrap_or(failure.reason),
+                    ));
+                }
+                Ok(None) => pool.forget(&hash, &artifact),
+                // Eager artifact source capture cannot mask the original
+                // lazy verifier's malformed-payload refusal ordering.
+                Err(private_balance::Error::Unavailable(_)) => return None,
+            }
+        }
+        None
+    }
+
+    fn private_receipt(
+        tx: &Transaction,
+        state: &Snapshot,
+        root: &[u8],
+        minimum: &BigInt,
+        current: &[u8],
+        transition: String,
+    ) -> Checked {
+        let hash = match state
+            .get(&[b"pvac_hashes", &tx.from])
+            .filter(|hash| *hash != b"none")
+        {
+            Some(hash) => hash,
+            None if tx.op_type == OpType::KeySwitch => &[b'0'; 64],
+            None => return skip(Kind::Invalid, b"pvac_key_not_consensus_bound".to_vec()),
+        };
+        let binding = Binding::Private(State {
+            pre_state_hash: preverify_receipt::state_hash(root),
+            source_cipher_hash: hex::encode(Sha256::digest(current)).into_bytes(),
+            pvac_key_hash: hash.to_vec(),
+            transition_hash: Some(transition.into_bytes()),
+        });
+        match receipt(tx, binding, minimum) {
+            Ok(receipt) => Checked::Ready(Some(Box::new(receipt))),
+            Err(error) => skip(Kind::Invalid, error.to_string().into_bytes()),
+        }
+    }
+
+    /// Private-only proof preparation may borrow an owner-bound immutable view.
+    /// Full proposal preparation has already loaded the entire ledger before
+    /// any cache lookup, and Circle-cell proofs keep their full-Ledger path.
+    pub(super) fn prove_private(
+        &self,
+        tx: &Transaction,
+        ledger: &impl private_balance::AccountView,
+        state: &Snapshot,
+        root: &[u8],
+        epoch: i64,
+        policy: octra_node_runtime::private_key::Policy,
+        minimum: &BigInt,
+    ) -> Checked {
+        let _crypto = self.runtime.crypto_scope(
+            false,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
         if !matches!(
             tx.op_type,
             OpType::Encrypt | OpType::Decrypt | OpType::Stealth | OpType::Claim | OpType::KeySwitch
         ) {
             return skip(Kind::Unavailable, b"private_preverify_pending".to_vec());
+        }
+        if let Some(checked) = self.pooled_private(tx, ledger, state, root, epoch, policy, minimum)
+        {
+            return checked;
         }
         let hash = state
             .get(&[b"pvac_hashes", &tx.from])
@@ -300,22 +552,9 @@ impl Native {
                 return skip(Kind::Unavailable, b"private_preverify_pending".to_vec());
             }
         };
-        let hash = match hash {
-            Some(hash) => hash,
-            None if tx.op_type == OpType::KeySwitch => &[b'0'; 64],
-            None => return skip(Kind::Invalid, b"pvac_key_not_consensus_bound".to_vec()),
-        };
-        let binding = Binding::Private(State {
-            pre_state_hash: preverify_receipt::state_hash(root),
-            source_cipher_hash: hex::encode(Sha256::digest(current)).into_bytes(),
-            pvac_key_hash: hash.to_vec(),
-            transition_hash: Some(transition_hash.into_bytes()),
-        });
-        match receipt(tx, binding, minimum) {
-            Ok(receipt) => Checked::Ready(Some(Box::new(receipt))),
-            Err(error) => skip(Kind::Invalid, error.to_string().into_bytes()),
-        }
+        Self::private_receipt(tx, state, root, minimum, &current, transition_hash)
     }
+
     fn prove_cell(
         &self,
         tx: &Transaction,
@@ -374,3 +613,6 @@ impl Native {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod artifact_tests;

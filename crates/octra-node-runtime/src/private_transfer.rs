@@ -4,7 +4,7 @@
 //! can debit an encrypted balance, create an output, or consume a claim.
 use crate::private_crypto::isolated::PublicKey;
 use crate::{
-    private_balance::{Evidence, Profile},
+    private_balance::{AccountView, Evidence, Profile},
     private_crypto::isolated as crypto,
     private_error::{check, failure, Error},
     private_outputs::{self, Output},
@@ -146,7 +146,7 @@ impl Claim {
         })
     }
 }
-fn current<'a>(ledger: &'a Ledger, tx: &Transaction) -> Result<&'a [u8]> {
+fn current<'a>(ledger: &'a impl AccountView, tx: &Transaction) -> Result<&'a [u8]> {
     ledger
         .account(&tx.from)
         .map(|account| account.encrypted_balance.as_deref().unwrap_or(b"0"))
@@ -240,6 +240,49 @@ pub struct Verified {
     operation: Operation,
 }
 impl Verified {
+    pub(crate) fn retained_bytes(&self) -> usize {
+        let operation = match &self.operation {
+            Operation::Send(send) => [
+                &send.delta,
+                &send.commitment,
+                &send.range_delta,
+                &send.range_balance,
+                &send.eph_pub,
+                &send.tag,
+                &send.enc_amount,
+                &send.claim_pub,
+                &send.amount_commitment,
+                &send.zero_proof,
+            ]
+            .into_iter()
+            .map(Vec::capacity)
+            .fold(0, usize::saturating_add),
+            Operation::Claim { cipher, output, .. } => cipher
+                .capacity()
+                .saturating_add(std::mem::size_of::<Output>())
+                .saturating_add(
+                    [
+                        &output.stealth_tag,
+                        &output.eph_pub,
+                        &output.enc_amount,
+                        &output.amount,
+                        &output.tx_hash,
+                        &output.sender_addr,
+                        &output.claim_pub,
+                        &output.delta_cipher_stored,
+                        &output.amount_hash,
+                        &output.amount_commitment,
+                    ]
+                    .into_iter()
+                    .map(Vec::capacity)
+                    .fold(0, usize::saturating_add),
+                ),
+        };
+        std::mem::size_of::<Self>()
+            .saturating_add(self.current.capacity())
+            .saturating_add(self.next.capacity())
+            .saturating_add(operation)
+    }
     pub fn current_cipher(&self) -> &[u8] {
         &self.current
     }
@@ -344,7 +387,7 @@ impl Verified {
     }
 }
 pub fn verify<B: AsRef<[u8]>>(
-    ledger: &Ledger,
+    ledger: &impl AccountView,
     state: &StateBatch,
     tx: &Transaction,
     profile: Profile,
@@ -353,7 +396,7 @@ pub fn verify<B: AsRef<[u8]>>(
     resolve(ledger, state, tx, profile, Evidence::Proof, key)
 }
 pub(crate) fn resolve<B: AsRef<[u8]>>(
-    ledger: &Ledger,
+    ledger: &impl AccountView,
     state: &StateBatch,
     tx: &Transaction,
     profile: Profile,
@@ -363,7 +406,7 @@ pub(crate) fn resolve<B: AsRef<[u8]>>(
     resolve_inner(ledger, state, tx, profile, evidence, key, false, None)
 }
 fn resolve_inner<B: AsRef<[u8]>>(
-    ledger: &Ledger,
+    ledger: &impl AccountView,
     state: &StateBatch,
     tx: &Transaction,
     profile: Profile,
@@ -763,4 +806,21 @@ pub(crate) fn verify_single<B: AsRef<[u8]>>(
         false,
         cached,
     )
+}
+
+/// Native private_source distinguishes malformed claims, missing IDs and the
+/// complete parsed output. Artifact reuse hashes every native output field.
+pub(crate) fn artifact_claim_source(
+    tx: &Transaction,
+    fields: RuleMode,
+    state: &StateBatch,
+) -> Result<Option<(i64, Option<Output>)>> {
+    let claim = match Claim::parse(tx, fields) {
+        Ok(claim) => claim,
+        Err(Error::Rejected(_)) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    private_outputs::get(state, claim.id)
+        .map(|output| Some((claim.id, output)))
+        .map_err(operational)
 }

@@ -128,7 +128,7 @@ impl<A: Host, B: BundleHost, E: Executor + 'static> Publication for Canonical<A,
                 self.restore_services.store(true, Ordering::Release);
             }
             self.node.suspend("canonical consensus publication failed");
-            return Err(reason.to_string().into());
+            return Err(format!("{reason:#}").into());
         }
         // A view/configuration failure leaves services suspended but cannot
         // turn an already durable canonical commit into a failed publication.

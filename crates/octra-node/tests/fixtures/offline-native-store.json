@@ -1,0 +1,166 @@
+{
+  "auxiliary_scope": "Only LMDB reader-lock bytes may differ. This exact path is excluded from canonical-byte preservation; all other files and names remain checked. Actual differences must be reported. Source fixture remains untouched.",
+  "files": {
+    "HEAD.json": {
+      "bytes": 721,
+      "original_mode": 420,
+      "sha256": "94c9383699b09e7581355473c4e63aaada863f9555b747e833e19361ec75c73b"
+    },
+    "chaindata/epochlog/epochs.dat": {
+      "bytes": 548,
+      "original_mode": 420,
+      "sha256": "9867d0a79ae916f6e0130010701a6e8908350dff35f4d9bad59c768ee5e0695e"
+    },
+    "chaindata/index/data.mdb": {
+      "bytes": 73728,
+      "original_mode": 420,
+      "sha256": "d4c32a86d7027e658a50d455dfd3c5dbd5d925f7730966dd0ab3b47e31e1a09e"
+    },
+    "chaindata/index/lock.mdb": {
+      "bytes": 131264,
+      "original_mode": 420,
+      "sha256": "e5c256337aa63c6e740b8cab0815720afa3444fd09a13b39531d95b5303059ed"
+    },
+    "chaindata/txlog/seg000000.dat": {
+      "bytes": 124,
+      "original_mode": 420,
+      "sha256": "d9f0a6340461e8667a22ec9a2b6ea936be5a0cd6449a67ceda67334ef03249e1"
+    },
+    "commit_journal.log": {
+      "bytes": 262,
+      "original_mode": 420,
+      "sha256": "9079fa2225d4e38c537f91618e30aeba9609f06a99b61e27991dfd47c435a3e7"
+    },
+    "consensus/pending.lock": {
+      "bytes": 21,
+      "original_mode": 420,
+      "sha256": "c138ad7208e7f3ba2fc8be26f0fe79dbac5dd8d44b8ad6bd0f075cac7eebe937"
+    },
+    "consensus/round_mark": {
+      "bytes": 22,
+      "original_mode": 420,
+      "sha256": "9dc262eee827fc408a87a94345eaa855aab8bba202c03b21e0d2117d105da627"
+    },
+    "consensus/vote_floor": {
+      "bytes": 3,
+      "original_mode": 420,
+      "sha256": "7e332bcee418f7d700927c946d36341f0651d6d90997b58d3d5441dec96b2e74"
+    },
+    "finality/committed/0.json": {
+      "bytes": 1743,
+      "original_mode": 416,
+      "sha256": "c5a6ede6ca357f9d3c088643055a214f451dacb3219e6f0b21308628e95ea2d4"
+    },
+    "finality/committed/1.json": {
+      "bytes": 1743,
+      "original_mode": 416,
+      "sha256": "4e8257a58842a992a1d52e6c25f5b4641620f7964ad86ee524b2a5c9945d1e04"
+    },
+    "finality/committed_finalized.json": {
+      "bytes": 1743,
+      "original_mode": 416,
+      "sha256": "c5a6ede6ca357f9d3c088643055a214f451dacb3219e6f0b21308628e95ea2d4"
+    },
+    "finality/finality.log": {
+      "bytes": 434,
+      "original_mode": 416,
+      "sha256": "b9d837f049b47c3bc26d7060eed134cc3aa831d028ce641bb6ee117bfd49bb5c"
+    },
+    "irmin_store/index/lock": {
+      "bytes": 1,
+      "original_mode": 384,
+      "sha256": "e7f6c011776e8db7cd330b54174fd76f7d0216b612387a5ffcfb81e6f0919683"
+    },
+    "irmin_store/index/log": {
+      "bytes": 263,
+      "original_mode": 420,
+      "sha256": "32d558a4fa4e04e98b0ce3d615e595df7972fb04cdea4f3a41b683dc6b0d13c2"
+    },
+    "irmin_store/store.0.suffix": {
+      "bytes": 1582,
+      "original_mode": 420,
+      "sha256": "d589b786e81e0b18e78b75db4a4b7cfcac4231780e6b2091abfe3210c242e529"
+    },
+    "irmin_store/store.branches": {
+      "bytes": 163,
+      "original_mode": 420,
+      "sha256": "d40598a67d4207501b8ff68c03034cfb3bf2e41bac703a13029f5ae99c4dd464"
+    },
+    "irmin_store/store.control": {
+      "bytes": 37,
+      "original_mode": 420,
+      "sha256": "973f867f8b672ebcc31151f49e6c62d5918bfc948e85844184d12535acec02f6"
+    },
+    "irmin_store/store.dict": {
+      "bytes": 86,
+      "original_mode": 420,
+      "sha256": "308f1c75040eea0fc649bd16055f4d6c6c193cc798a0c8903bbded77cdb8485f"
+    },
+    "recovery_required": {
+      "bytes": 9,
+      "original_mode": 420,
+      "sha256": "a5b0a56fd8d2fcf82092fb779244729989674b90787530cbf7946f4d00da53a6"
+    },
+    "state_root": {
+      "bytes": 128,
+      "original_mode": 420,
+      "sha256": "3aff56a5e79c62340346ecf062f91811eecd9ba02694b8ddcb9b9dafadf3536c"
+    },
+    "vote_log/00000000000000000100_00000007_a968579c67f66f6ff0b8ca527bcc741a0f2a6e19e47f4b0ad60cb34b4f86b5ac.vote": {
+      "bytes": 174,
+      "original_mode": 384,
+      "sha256": "8117cb7d7693d0a97b87c9152c39a52deae559a863b1f3f57018ee97e4f7905d"
+    },
+    "vote_log/floor": {
+      "bytes": 3,
+      "original_mode": 384,
+      "sha256": "7e332bcee418f7d700927c946d36341f0651d6d90997b58d3d5441dec96b2e74"
+    },
+    "vote_log/round_mark": {
+      "bytes": 6,
+      "original_mode": 384,
+      "sha256": "43c4285d954d54c2a510a23f1b742a321afa344e380565de8f2404d850703cd3"
+    }
+  },
+  "host_fixture_sources": {
+    "scripts/node-port/legacy-repair-cases.ml": "09470a9fbc14263c202f56379b799ead04e51119de405952830d37696e9c381e",
+    "scripts/node-port/legacy-repair-qualify.py": "9f64a6646f151ce063bf3b18e054afbb096e43651d8237aaa307526406bdaefb",
+    "scripts/node-port/legacy-repair-storage.ml": "8943f28484a5d3507eecff6768afb136b6b79e5e7d10fa7fdac1bb3544b0e2b6"
+  },
+  "mutable_auxiliary_files": [
+    "chaindata/index/lock.mdb"
+  ],
+  "native_fixture_source": {
+    "lib/core/store_chaindata.ml": {
+      "classification": "adopted production census",
+      "sha256": "4b1610eee337c6fda912048a6d9aef01da0ae085de78846f42e4ca763b85c7bb"
+    },
+    "lib/core/store_irmin.ml": {
+      "classification": "adopted production census",
+      "sha256": "bdb6bd278be36d77ab70eab133c4e6c4cef756607be1586d1f4b16ad7fd4a343"
+    },
+    "test/recovery_case/recovery_case.ml": {
+      "classification": "unchanged adopted native archived test-support body outside production census",
+      "git_blob": "c13bbcbc09984fc4efc9ca53a2cd07c089de0f3c",
+      "sha256": "6dce56d82c4d4ac0bd208fbc12838571d4391ae5912cf02d4ae7f254d03587ad"
+    }
+  },
+  "native_pin": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "native_tools_executed": false,
+  "origin": {
+    "actual_case_count": 40,
+    "case": "certified-native-positive",
+    "head_epoch": 0,
+    "irmin_commit": "a227ff5cb623aada92417c43a26615b42f88c07699b48a1394fce7a876301b43b111ba0e5f7520fbf0ea8e40d0bb1175c6ee8c112b82aac198315daed1c20d57",
+    "ledger_root": "d7700cfcca05af77f7d65220acf1a08906804a58f03ff13014547e3bd3d070b869f2fb0fc74c5a5338c90ecafa6fda41440f31b0a718037fbf41b62db61d182c",
+    "native_committed_for_target": true,
+    "qualification_sha256": "8535ea678ca57a8a45e7493f44e7c78ef9225cdb80e07d8a4bb1d5e0cba57c99",
+    "result_sha256": "bac703086f2f02f77dafebdb157e70f40014cb88cab5243dec09fa33cce288c1",
+    "state_root": "7246ce7f88187e722c7268c3c3dac3e7048184bcf7bce0945b4c0b5457d3d7a5"
+  },
+  "private_scratch_permission_transform": "private destination directories0700/files0600; immutable captured source files0444, original recorded modes preserved in manifest",
+  "qualified": false,
+  "schema": "octra_genuine_native_offline_store_fixture_v1",
+  "scope": "Actual unchanged-native IRMIN/LMDB physical fixture retained from successful certified legacy repair. Synthetic recovery_case account octFROM, empty_account, known test transaction; no public state, wallet keys or secret files. Not native production-chain finality.",
+  "source_scope": "native physical storage fixture, not native tool execution evidence"
+}

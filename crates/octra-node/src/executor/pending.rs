@@ -536,11 +536,7 @@ impl Native {
         duty_guard: Option<Arc<octra_node_runtime::validator_control::DutyGuard>>,
         wallet_guard: Option<Arc<tokio::sync::OwnedMutexGuard<()>>>,
     ) -> Result<Vec<u8>> {
-        use octra_node_runtime::{
-            admission,
-            preverify_batch::{Checked, Kind},
-            staging::intake,
-        };
+        use octra_node_runtime::{admission, staging::intake};
         use transaction::Nonce;
         let draft = admission.draft();
         let rules = self
@@ -549,8 +545,6 @@ impl Native {
         let fold = draft.context().rules().fold.context();
         let head = draft.context().header().epoch_id - 1;
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64();
-        let ledger = account_store::ledger(&StateBatch::from_snapshot(draft.state().clone()))?;
-        let account = ledger.account(&tx.from);
         transaction::check_compute(
             rules.envelope.compute,
             rules.envelope.settle,
@@ -562,28 +556,31 @@ impl Native {
                 reason: error.to_string(),
             })
         })?;
-        admission::pre_signature(
-            &tx,
-            account.is_some(),
-            &admission::Precheck {
-                now,
-                max_timestamp_drift: 300.,
-                observer: rpc && self.observer_submissions,
-                bft: true,
-                profile: &self.config.profile,
-                duty: Some((head, fold.ready_exec_mode)),
-                limits: self.config.payload,
-            },
-        )
-        .map_err(admission::Error::from)?;
+        let precheck = admission::Precheck {
+            now,
+            max_timestamp_drift: 300.,
+            observer: rpc && self.observer_submissions,
+            bft: true,
+            profile: &self.config.profile,
+            duty: Some((head, fold.ready_exec_mode)),
+            limits: self.config.payload,
+        };
+        // Native already owns a loaded ledger. Reject its cheap route/profile
+        // failures before loading even one account from our captured tree.
+        admission::pre_route(&tx, &precheck).map_err(admission::Error::from)?;
+        let state = draft.state().clone();
+        let account = account_store::load(&StateBatch::from_snapshot(state.clone()), &tx.from)?;
+        admission::pre_signature(&tx, account.is_some(), &precheck)
+            .map_err(admission::Error::from)?;
         let tx = transaction::normalize_envelope(
             &tx,
             account
+                .as_ref()
                 .and_then(|a| a.public_key.as_deref())
                 .or(tx.public_key.as_deref()),
         )
         .map_err(admission::Error::from)?;
-        admission::signature(&tx, account.and_then(|a| a.public_key.as_deref()))
+        admission::signature(&tx, account.as_ref().and_then(|a| a.public_key.as_deref()))
             .map_err(admission::Error::from)?;
         admission::payload(&tx, self.config.payload)?;
         admission::post_signature(
@@ -593,59 +590,18 @@ impl Native {
                 preverify_pending: Nonce::default(),
                 preverify_pending_max: Nonce::new(128)?,
                 bft: true,
-                confirmed_nonce: account.expect("sender admission").nonce,
+                confirmed_nonce: account.as_ref().expect("sender admission").nonce,
                 bft_window: self.pending_nonce_window,
             },
         )
         .map_err(admission::Error::from)?;
-        let host = self.clone();
-        let captured = admission.clone();
-        let input = tx.clone();
-        let minimum = rules.stealth_minimum.clone();
-        let proving_guard = duty_guard.clone();
-        let proving_wallet = wallet_guard.clone();
-        let verified = super::run_worker(self.worker.clone(), move || {
-            let _duty = proving_guard;
-            let _wallet = proving_wallet;
-            // Native queue intake starts only private/key-switch proof jobs.
-            // Circle bindings are checked against the ordered proposal state;
-            // accepting the queue entry supplies no execution receipt.
-            if matches!(
-                input.op_type,
-                OpType::CircleCall | OpType::CircleBalanceCellPut | OpType::CircleRegisterCellPut
-            ) {
-                return Ok(Checked::Ready(None));
-            }
-            let captured = captured.draft();
-            let ledger =
-                account_store::ledger(&StateBatch::from_snapshot(captured.state().clone()))?;
-            Ok(host.prove(
-                &input,
-                &ledger,
-                captured.state(),
-                captured.context().parent().ledger_root.as_bytes(),
-                head + 1,
-                host.private_policy(captured.context().rules(), head + 1),
-                &minimum,
-            ))
-        })
-        .await
-        .map_err(|e| anyhow!(Unavailable(e.to_string())))?;
-        let unavailable = matches!(
-            &verified,
-            Checked::Skip {
-                kind: Kind::Unavailable,
-                ..
-            }
-        );
-        let verdict = match verified {
-            Checked::Ready(_) => Ok(()),
-            Checked::Skip { reason, .. } => Err(String::from_utf8_lossy(&reason).into_owned()),
-        };
-        struct Intake(Result<(), String>);
+        // BFT queue intake authenticates shape, signature and local policy.
+        // Private proof work starts speculatively after durable staging; its
+        // result belongs to ordered proposal execution, never this acceptance.
+        struct Intake;
         impl intake::Host for Intake {
             fn preverify(&mut self, _: &Transaction, _: &Pool) -> Result<(), String> {
-                self.0.clone()
+                Ok(())
             }
             fn save_drops(&mut self, _: &[DropRecord]) {}
             fn invalidate(&mut self, _: &[u8]) {}
@@ -668,45 +624,36 @@ impl Native {
             // intent lock while an owned queue worker can still persist duty.
             let _duty = duty_guard;
             let _wallet = wallet_guard;
+            // Full supply and all other queued senders still belong to the
+            // authoritative ledger. Build it only after authentication, on the
+            // bounded owned worker and outside the queue/canonical lease.
+            let ledger = account_store::ledger(&StateBatch::from_snapshot(state))?;
             let draft = captured.draft();
             let fold = draft.context().rules().fold.context();
-            Ok(
-                pending.mutate(Some(draft), draft.context().parent().cursor, |pool| {
-                    intake::submit(
-                        pool,
-                        &tx,
-                        &ledger,
-                        &intake::Rules {
-                            bft: true,
-                            profile: host.config.profile.clone(),
-                            compute: rules.envelope.compute,
-                            settle: rules.envelope.settle,
-                            proof: fold.proof_exec,
-                            duty: Some((head, fold.ready_exec_mode)),
-                            queue_head: Some(head),
-                            stealth_minimum: rules.stealth_minimum,
-                        },
-                        &intake::Rpc {
-                            now,
-                            max_drift: 300.,
-                            observer: rpc && host.observer_submissions,
-                            preverify_capacity: true,
-                            preverify_pending: Nonce::new(0)?,
-                            preverify_maximum: Nonce::new(128)?,
-                            nonce_window: host.pending_nonce_window,
-                        },
-                        &mut Intake(verdict),
-                        &|| added_at,
-                    )
-                    .map_err(|e| {
-                        if unavailable {
-                            anyhow!(Unavailable(format!("{e:?}")))
-                        } else {
-                            anyhow!(e)
-                        }
-                    })
-                }),
-            )
+            let staged = pending.mutate(Some(draft), draft.context().parent().cursor, |pool| {
+                intake::stage(
+                    pool,
+                    &tx,
+                    &ledger,
+                    &intake::Rules {
+                        bft: true,
+                        profile: host.config.profile.clone(),
+                        compute: rules.envelope.compute,
+                        settle: rules.envelope.settle,
+                        proof: fold.proof_exec,
+                        duty: Some((head, fold.ready_exec_mode)),
+                        queue_head: Some(head),
+                        stealth_minimum: rules.stealth_minimum.clone(),
+                    },
+                    &mut Intake,
+                    &|| added_at,
+                )
+                .map_err(|error| anyhow!(admission::Error::Rejected(intake::staging_error(error))))
+            });
+            if staged.is_ok() {
+                host.warm_pending(&captured, &pending, &tx, &rules);
+            }
+            Ok(staged)
         })
         .await
         .map_err(|e| anyhow!(Unavailable(e.to_string())))?

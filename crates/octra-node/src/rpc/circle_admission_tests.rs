@@ -21,6 +21,7 @@ struct Rpc {
     url: String,
     pending: Arc<executor::Pending>,
     task: Option<JoinHandle<()>>,
+    context: Arc<crate::rpc::Context>,
 }
 impl Drop for Rpc {
     fn drop(&mut self) {
@@ -92,6 +93,7 @@ impl Rpc {
         });
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/rpc", listener.local_addr().unwrap());
+        let context = submission.clone().context();
         let task = tokio::spawn(async move {
             axum::serve(listener, submission.router()).await.unwrap();
         });
@@ -99,6 +101,7 @@ impl Rpc {
             url,
             pending,
             task: Some(task),
+            context,
         }
     }
     async fn submit(&self, tx: &Transaction) -> Value {
@@ -124,6 +127,11 @@ impl Rpc {
         assert!(task.await.unwrap_err().is_cancelled());
     }
 }
+
+#[path = "private_admission_tests.rs"]
+mod private_admission_tests;
+#[path = "visibility_tests.rs"]
+mod visibility_tests;
 
 fn sign_current(mut tx: Transaction, who: u8) -> Transaction {
     // RPC drift is the actual host wall clock. Authenticated epoch time remains

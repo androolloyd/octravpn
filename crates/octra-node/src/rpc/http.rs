@@ -1,5 +1,5 @@
 //! Native main HTTP interface over the same authenticated committed reader as RPC.
-use super::{native, Context};
+use super::Context;
 use axum::{
     body::{self, Body},
     extract::State,
@@ -316,7 +316,39 @@ fn query<'a>(rows: &'a [QueryRow], key: &[u8]) -> Option<&'a [u8]> {
         .find(|(k, _)| k == key)
         .and_then(|(_, v)| v.first().map(Vec::as_slice))
 }
-async fn handle(State(host): State<Arc<Context>>, request: Request<Body>) -> Response {
+pub(crate) async fn handle(State(host): State<Arc<Context>>, request: Request<Body>) -> Response {
+    if request.method() == Method::GET
+        && matches!(
+            request.uri().path(),
+            "/" | "/status" | "/state-sync/head" | "/state-sync/range"
+        )
+    {
+        let uri = request.uri().clone();
+        return host
+            .node
+            .visibility()
+            .read(|| {
+                // Native stable HTTP routes ignore the GET body. Recreate only
+                // their immutable request target; no write request is replayed.
+                let request = Request::builder()
+                    .method(Method::GET)
+                    .uri(uri.clone())
+                    .body(Body::empty())
+                    .expect("captured HTTP target");
+                handle_once(State(host.clone()), request)
+            })
+            .await
+            .unwrap_or_else(|| {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "committed state changed during read; retry",
+                )
+                    .into_response()
+            });
+    }
+    handle_once(State(host), request).await
+}
+async fn handle_once(State(host): State<Arc<Context>>, request: Request<Body>) -> Response {
     let method = request.method().clone();
     let path = request.uri().path().to_owned();
     if method == Method::GET && path == "/favicon.ico" {
@@ -341,7 +373,8 @@ async fn handle(State(host): State<Arc<Context>>, request: Request<Body>) -> Res
         return status(&host).await;
     }
     if method == Method::GET && path == "/metrics" {
-        return match native::invoke(&host, b"node_metrics", b"[]").await {
+        // Native /metrics is outside stable_http; its JSON-RPC alias is guarded.
+        return match host.node.native_metrics() {
             Ok(raw) => json_response(StatusCode::OK, raw),
             Err(_) => unavailable("native metrics unavailable"),
         };
@@ -1134,6 +1167,7 @@ fn legacy(method: &Method, path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rpc::native;
     use axum::body::Bytes;
     use tower::ServiceExt;
 

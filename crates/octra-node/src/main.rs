@@ -9,6 +9,15 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Inspect a stopped store without repairing or importing it.
+    #[command(alias = "check_store")]
+    CheckStore(octra_node::offline_cli::CheckStore),
+    /// Audit stored account cipher representation without exposing contents.
+    #[command(alias = "fhe_audit")]
+    FheAudit(octra_node::offline_cli::FheAudit),
+    /// Check or durably prepare the stopped validator's anti-equivocation floor.
+    #[command(alias = "vote_floor")]
+    VoteFloor(octra_node::offline_cli::VoteFloor),
     /// Resume a locally staged repair in a stopped native-format store.
     LegacyRepair(octra_node::legacy_repair::Options),
     /// Stage an empty native-format fork only after authenticated peer proof.
@@ -45,6 +54,9 @@ enum Command {
     },
     /// Manage the signed local validator duty pause; no network transaction.
     ValidatorControl(octra_node::validator_cli::Options),
+    /// Prepare, sign or submit native operator transactions, or wallet exit intents.
+    #[command(name = "validator-tx", alias = "bft-control-tx")]
+    ValidatorTransaction(octra_node::validator_cli::transaction::Options),
     /// Prepare, authorize and serve native finalized state-sync snapshots.
     Snapshot {
         #[command(subcommand)]
@@ -110,6 +122,9 @@ enum Command {
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().command {
+        Command::CheckStore(options) => std::process::exit(options.run().await?),
+        Command::FheAudit(options) => std::process::exit(options.run().await?),
+        Command::VoteFloor(options) => std::process::exit(options.run().await?),
         Command::LegacyRepair(options) => options.run()?,
         Command::LegacyStage(options) => options.run().await?,
         Command::CompileLegacy {
@@ -155,6 +170,7 @@ async fn main() -> Result<()> {
             .map_err(anyhow::Error::msg)?;
         }
         Command::ValidatorControl(options) => options.run()?,
+        Command::ValidatorTransaction(options) => options.run().await?,
         Command::Snapshot { command } => command.run(shutdown()).await?,
         Command::InitIdentity { key } => {
             println!(
@@ -233,7 +249,12 @@ async fn main() -> Result<()> {
             octra_node::network::RoleConfig::Public(mut config) => {
                 config.compute_provider |= compute_provider;
                 config.publisher |= publisher;
-                octra_node::network::run(*config, crypto()?, shutdown()).await?;
+                octra_node::network::run_with_runtime_factory(
+                    *config,
+                    crypto_from_settings,
+                    shutdown(),
+                )
+                .await?;
             }
             octra_node::network::RoleConfig::Single(config) => {
                 anyhow::ensure!(
@@ -249,12 +270,20 @@ async fn main() -> Result<()> {
 /// Only this CLI assumes that its own executable implements the hidden helper.
 /// Library launchers receive the runtime capability from their embedding host.
 fn crypto() -> Result<octra_node_runtime::circle::CircleRuntime> {
-    use octra_node_runtime::{
-        circle::CircleRuntime,
-        crypto_worker::{Limits, Pool},
-    };
-    let pool =
-        Pool::open(&std::env::current_exe()?, Limits::capture()).map_err(anyhow::Error::msg)?;
+    crypto_with_limits(octra_node_runtime::crypto_worker::Limits::capture())
+}
+fn crypto_from_settings(
+    settings: &octra_node_protocol::consensus::profile::Settings,
+) -> Result<octra_node_runtime::circle::CircleRuntime> {
+    crypto_with_limits(octra_node_runtime::crypto_worker::Limits::from_values(
+        |name| settings.get(name).map(<[u8]>::to_vec),
+    ))
+}
+fn crypto_with_limits(
+    limits: octra_node_runtime::crypto_worker::Limits,
+) -> Result<octra_node_runtime::circle::CircleRuntime> {
+    use octra_node_runtime::{circle::CircleRuntime, crypto_worker::Pool};
+    let pool = Pool::open(&std::env::current_exe()?, limits).map_err(anyhow::Error::msg)?;
     Ok(CircleRuntime::isolated(pool))
 }
 fn shutdown() -> tokio::sync::watch::Receiver<bool> {
@@ -274,4 +303,24 @@ fn shutdown() -> tokio::sync::watch::Receiver<bool> {
         stop.send_replace(true);
     });
     shutdown
+}
+
+#[cfg(test)]
+mod startup_settings_tests {
+    use super::*;
+
+    #[test]
+    fn cli_worker_capability_uses_the_captured_file_values() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("network.env");
+        std::fs::write(&path, b"OCTRA_PVAC_VERIFY_WORKERS=2\nOCTRA_PVAC_VERIFY_TIMEOUT_SEC=1\nOCTRA_PVAC_VERIFY_MAX_RSS_MB=64\n").unwrap();
+        let values = octra_node::network_profile::parse_env(&std::fs::read(path).unwrap()).unwrap();
+        let settings =
+            octra_node_protocol::consensus::profile::Settings::from_values(values).unwrap();
+        let runtime = crypto_from_settings(&settings).unwrap();
+        let limits = runtime.crypto_pool().unwrap().worker().limits();
+        assert_eq!(limits.capacity, 2);
+        assert_eq!(limits.timeout_seconds.to_bits(), 1_f64.to_bits());
+        assert_eq!(limits.rss_mb, 64);
+    }
 }

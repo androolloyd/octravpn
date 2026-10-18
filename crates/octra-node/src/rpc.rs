@@ -37,7 +37,7 @@ mod context;
 pub(crate) use context::{Context, SingleOptions};
 pub(crate) mod grpc;
 pub(crate) mod http;
-mod native;
+pub(crate) mod native;
 
 pub struct Submission<A: Host> {
     pub node: Arc<Node<A>>,

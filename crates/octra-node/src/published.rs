@@ -78,7 +78,11 @@ impl State {
             .map_or(&self.reason, |(_, reason)| reason)
     }
 }
-pub(crate) struct Shared(Mutex<State>, pub(crate) watch::Sender<()>);
+pub(crate) struct Shared(
+    Mutex<State>,
+    pub(crate) watch::Sender<()>,
+    crate::epoch_visibility::Visibility,
+);
 impl Shared {
     pub(crate) fn new() -> Self {
         Self(
@@ -92,7 +96,11 @@ impl Shared {
                 root_ticket: Arc::new(()),
             }),
             watch::channel(()).0,
+            crate::epoch_visibility::Visibility::default(),
         )
+    }
+    pub(crate) fn visibility(&self) -> crate::epoch_visibility::Visibility {
+        self.2.clone()
     }
     pub(crate) fn current(&self) -> Result<Arc<Serving>> {
         let state = self.0.lock().expect("service state lock");

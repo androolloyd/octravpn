@@ -1,0 +1,135 @@
+{
+  "schema": "octra_native_interface_implementation_scope_v1",
+  "native_pin": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "source_inventory": {
+    "path": "docs/rust-node/source-map.json",
+    "sha256": "6440fdf5895e791ce99ff1904aea396fc88c7e12645846a32702286aa9c17efa",
+    "native_file_count": 1158,
+    "scope": "source inventory, not behavior or port completeness"
+  },
+  "implementation_status": "successor_candidate_pending_combined_qualification",
+  "full_rust_node_complete": false,
+  "universal_behavioral_equivalence_proven": false,
+  "public_mainnet_qualified": false,
+  "families": [
+    {
+      "id": "read_visibility",
+      "native_sources": [
+        "node_runtime/epoch_visibility.ml",
+        "node_runtime/rpc_dispatch.ml"
+      ],
+      "rust_sources": [
+        "crates/octra-node/src/epoch_visibility.rs",
+        "crates/octra-node/src/rpc/native.rs",
+        "crates/octra-node/src/rpc/grpc.rs",
+        "crates/octra-node/src/single/facade/publication.rs"
+      ],
+      "boundary": "Generation-stable reads wait across owned publication and retry a changed generation twice; writes and compute are not replayed."
+    },
+    {
+      "id": "bft_intake_and_warmup",
+      "native_sources": [
+        "bin/octra_node.ml",
+        "lib/core/private_ledger.ml",
+        "lib/core/private_transition.ml",
+        "node_runtime/consensus_preverify_pool.ml",
+        "node_runtime/consensus_private_preverify.ml",
+        "node_runtime/consensus_key_switch_preverify.ml"
+      ],
+      "rust_sources": [
+        "crates/octra-node/src/executor/pending.rs",
+        "crates/octra-node/src/executor/warmup.rs",
+        "crates/octra-node/src/executor/artifact_pool.rs",
+        "crates/octra-node/src/executor/proofs.rs",
+        "crates/octra-node/src/executor/stage.rs",
+        "crates/octra-node-runtime/src/private_artifact.rs",
+        "crates/octra-node-runtime/src/private_artifact/key.rs",
+        "crates/octra-node-runtime/src/private_epoch.rs",
+        "crates/octra-node-runtime/src/crypto_worker.rs",
+        "crates/octra-node-runtime/src/consensus_preverify_cache.rs"
+      ],
+      "boundary": "Authenticated BFT staging precedes bounded private/KeySwitch proof jobs. Required work promotes or joins owned jobs; opaque local artifacts may survive unrelated heads only with fresh source/policy binding and current receipts. Ordered execution retains nonce/debit/claim/limit checks; history-based KeySwitch entitlement and Single intake policy remain separate. Combined qualification is pending."
+    },
+    {
+      "id": "validator_transactions",
+      "native_sources": [
+        "bin/bft_control_tx.ml"
+      ],
+      "rust_sources": [
+        "crates/octra-node/src/validator_cli/transaction.rs",
+        "crates/octra-node/src/validator_cli.rs"
+      ],
+      "boundary": "Wallet transaction prepare/sign/submit and signed local intents coexist with the local duty API; preparation can emit inadmissible native transactions and is not canonical acceptance."
+    },
+    {
+      "id": "snapshot_administration",
+      "native_sources": [
+        "bin/octra_state_sync_manifest.ml",
+        "lib/bootstrap/state_sync_manifest.ml",
+        "lib/bootstrap/state_sync_verify.ml",
+        "lib/bootstrap/sync_anchor.ml"
+      ],
+      "rust_sources": [
+        "crates/octra-node/src/bootstrap/export/offline.rs",
+        "crates/octra-node/src/bootstrap/export/package.rs",
+        "crates/octra-node/src/native_tools.rs",
+        "crates/octra-node-runtime/src/canonical/offline.rs"
+      ],
+      "boundary": "Portable/canonical snapshot administration reuses protocol finality and contents checks; canonical signing requires an independently trusted supplied Anchor. Native physical forms explicitly reuse the pinned original backend."
+    },
+    {
+      "id": "stopped_store_tools",
+      "native_sources": [
+        "bin/check_store.ml",
+        "bin/fhe_audit.ml",
+        "bin/vote_floor.ml",
+        "node_runtime/vote_floor.ml"
+      ],
+      "rust_sources": [
+        "crates/octra-node/src/offline_cli.rs",
+        "crates/octra-node/src/offline_cli/vote_floor.rs",
+        "crates/octra-node/src/offline_cli/fhe.rs",
+        "crates/octra-node-runtime/src/canonical/offline.rs",
+        "crates/octra-node/src/native_tools.rs"
+      ],
+      "boundary": "Current canonical diagnostics open read-only under real stopped-writer leases; native physical formats use explicit pinned artifacts. Vote-floor mutation retains native journal and directory ownership."
+    },
+    {
+      "id": "profiles_and_execution_rules",
+      "native_sources": [
+        "node_runtime/consensus_profile.ml",
+        "lib/consensus/c_config.ml",
+        "lib/core/rule_graph.ml"
+      ],
+      "rust_sources": [
+        "crates/octra-node-protocol/src/consensus/profile.rs",
+        "crates/octra-node-protocol/src/rules.rs",
+        "crates/octra-node-runtime/src/execution_rules.rs"
+      ],
+      "boundary": "Public profile/settings/hash comparisons and actual mixed workloads are separate controls; a private fixture profile label does not establish stock full-release startup validity."
+    },
+    {
+      "id": "active_private_execution",
+      "native_sources": [
+        "lib/core/private_transition.ml",
+        "node_runtime/consensus_private_preverify.ml",
+        "node_runtime/consensus_vm_transition.ml"
+      ],
+      "rust_sources": [
+        "crates/octra-node-runtime/src/private_epoch.rs",
+        "crates/octra-node-runtime/src/private_transfer.rs",
+        "crates/octra-node-runtime/src/private_outputs.rs",
+        "crates/octra-node-runtime/src/circle_hfhe.rs"
+      ],
+      "boundary": "Active private proof/transition/worker paths are distinct from experimental library surfaces. Recrypt and aggregate-range verification remain refused where adopted native code refuses them."
+    }
+  ],
+  "qualification_policy": "This is a compact source correspondence, not new passing evidence. Historical checkpoints retain their own source/binary/profile and execution scope; the final combined candidate still needs its own actual results.",
+  "known_boundaries": [
+    "Native Irmin/chaindata maintenance and snapshot forms use the explicitly pinned unchanged native backend; no all-Rust physical backend claim.",
+    "Mixed private-genesis fixtures are explicit local test authority; trusted legacy-genesis proof fixtures do not derive public entitlement or qualify every stock release profile.",
+    "Active native refusal of Private/Recrypt and aggregate-range capabilities is preserved; uncalled experimental HFHE library code is not a network capability.",
+    "Dispatch/handler coverage and finite native differentials do not prove all error branches or universal behavior.",
+    "Public observer progress is finite retained-state evidence. Sustained public serving/P2P retention, public paid service and Mainnet remain separate gates."
+  ]
+}

@@ -13,27 +13,30 @@ struct State {
     inflight: usize,
     head: Option<Head>,
     stopped: bool,
+    visibility: Option<crate::epoch_visibility::Apply>,
 }
 pub(super) struct Bridge {
     shared: Arc<Shared>,
-    state: Mutex<State>,
+    state: Arc<Mutex<State>>,
     changed: watch::Sender<()>,
 }
 pub(super) struct Lease {
     generation: Arc<()>,
     ticket: Arc<()>,
     pub(super) head: Head,
+    state: Arc<Mutex<State>>,
 }
 impl Bridge {
     pub(super) fn new(shared: Arc<Shared>) -> Self {
         Self {
             shared,
-            state: Mutex::new(State {
+            state: Arc::new(Mutex::new(State {
                 generation: Arc::new(()),
                 inflight: 0,
                 head: None,
                 stopped: false,
-            }),
+                visibility: None,
+            })),
             changed: watch::channel(()).0,
         }
     }
@@ -72,6 +75,7 @@ impl Bridge {
             generation: state.generation.clone(),
             ticket,
             head,
+            state: self.state.clone(),
         })
     }
     fn current<T>(&self, lease: &Lease, action: impl FnOnce() -> T) -> Option<T> {
@@ -94,6 +98,9 @@ impl Bridge {
     pub(super) fn close(&self) {
         let mut state = self.state.lock().expect("local publication state");
         state.stopped = true;
+        if state.inflight == 0 {
+            drop(state.visibility.take());
+        }
         state.generation = Arc::new(());
         self.shared.suspend("local services stopped");
         self.changed.send_replace(());
@@ -104,6 +111,17 @@ impl PublicationHook for Bridge {
         let mut state = self.state.lock().expect("local publication state");
         if state.stopped {
             return;
+        }
+        if state.visibility.is_none() {
+            if let Ok(apply) = self.shared.visibility().begin() {
+                state.visibility = Some(apply);
+            } else {
+                state.stopped = true;
+                self.shared
+                    .suspend("local epoch visibility is inconsistent");
+                self.changed.send_replace(());
+                return;
+            }
         }
         state.generation = Arc::new(());
         match state.inflight.checked_add(1) {
@@ -116,6 +134,10 @@ impl PublicationHook for Bridge {
     fn committed(&self, head: &Head) {
         let mut state = self.state.lock().expect("local publication state");
         if state.stopped {
+            state.inflight = state.inflight.saturating_sub(1);
+            if state.inflight == 0 {
+                drop(state.visibility.take());
+            }
             return;
         }
         if state.inflight == 0 {
@@ -139,6 +161,17 @@ impl PublicationHook for Bridge {
         // Post-release callbacks may arrive out of order. All paired writes
         // must finish; only their highest actual head can become available.
         self.changed.send_replace(());
+    }
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        let mut state = self.state.lock().expect("local publication state");
+        if state.inflight == 0 && Arc::ptr_eq(&state.generation, &self.generation) {
+            // A refresh success, error or cancellation ends this completed
+            // apply. A newer write still owns the visibility transition.
+            drop(state.visibility.take());
+        }
     }
 }
 
@@ -221,5 +254,46 @@ mod tests {
             assert!(bridge.capture().is_err());
             assert!(bridge.completed_head().is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn old_refresh_drop_cannot_release_a_newer_apply() {
+        let shared = Arc::new(Shared::new());
+        let visibility = shared.visibility();
+        let bridge = Bridge::new(shared);
+        bridge.initialize(head(0));
+        let old = bridge.capture().unwrap();
+        bridge.revoke();
+        bridge.committed(&head(1));
+        drop(old);
+        let reading = visibility.read(|| async { 7 });
+        tokio::pin!(reading);
+        tokio::select! {
+            biased;
+            _ = &mut reading => panic!("old refresh released newer apply"),
+            () = tokio::task::yield_now() => (),
+        }
+        drop(bridge.capture().unwrap());
+        assert_eq!(reading.await, Some(7));
+    }
+
+    #[tokio::test]
+    async fn closing_services_keeps_visibility_until_owned_commit_finishes() {
+        let shared = Arc::new(Shared::new());
+        let visibility = shared.visibility();
+        let bridge = Bridge::new(shared);
+        bridge.initialize(head(0));
+        bridge.revoke();
+        bridge.close();
+        let reading = visibility.read(|| async { 9 });
+        tokio::pin!(reading);
+        tokio::select! {
+            biased;
+            _ = &mut reading => panic!("close released unfinished apply"),
+            () = tokio::task::yield_now() => (),
+        }
+        bridge.committed(&head(1));
+        assert_eq!(reading.await, Some(9));
+        assert!(bridge.capture().is_err());
     }
 }

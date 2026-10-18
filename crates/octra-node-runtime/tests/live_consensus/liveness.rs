@@ -414,3 +414,80 @@ async fn wall_clock_cannot_skip_current_proposal_grace_and_expired_work_cannot_r
         .iter()
         .all(|vote| vote.round == 1));
 }
+
+#[tokio::test]
+async fn captured_verify_grace_controls_real_inflight_work_without_process_settings() {
+    let leader = validators(4).leader(1, 0).unwrap().address.clone();
+    let next = validators(4).leader(1, 1).unwrap().address.clone();
+    let id = (1..=4)
+        .find(|id| address(*id) != leader && address(*id) != next)
+        .unwrap();
+    for verify_ms in [0, 300_000] {
+        let grace = GraceConfig::capture(|name| {
+            Some(if name.ends_with("VERIFY_GRACE_MS") {
+                verify_ms.to_string().into_bytes()
+            } else {
+                b"0".to_vec()
+            })
+        });
+        let timeouts = TimeoutConfig {
+            propose: 300_000,
+            ..TimeoutConfig::default()
+        };
+        let receiver = node_with_grace(
+            id,
+            4,
+            vec![],
+            None,
+            timeouts,
+            Duration::from_secs(2000),
+            grace,
+        )
+        .await;
+        let other = if id == 1 { 2 } else { 1 };
+        let sender = node_with_timeouts(
+            other,
+            4,
+            vec![receiver.endpoint.clone()],
+            None,
+            timeouts,
+            Duration::from_secs(2000),
+        )
+        .await;
+        let third_id = (1..=4)
+            .find(|member| *member != id && *member != other)
+            .unwrap();
+        let third = node_with_timeouts(
+            third_id,
+            4,
+            vec![receiver.endpoint.clone(), sender.endpoint.clone()],
+            None,
+            timeouts,
+            Duration::from_secs(2000),
+        )
+        .await;
+        wait(|| {
+            receiver.handle.status().borrow().started
+                && receiver.swarm.peers().len() == 2
+                && sender.handle.status().borrow().started
+                && third.handle.status().borrow().started
+        })
+        .await;
+        assert_eq!(receiver.handle.grace_config(), grace);
+        receiver.gate.send_replace(false);
+        receiver.authority.ready.store(true, Ordering::SeqCst);
+        set_clock(&receiver, 0.);
+        poll(&receiver).await;
+        send_proposal(&sender, &receiver, &proposal(0, 4)).await;
+        wait(|| receiver.authority.checks.load(Ordering::SeqCst) == 1).await;
+        set_clock(&receiver, 1000.);
+        poll(&receiver).await;
+        assert_eq!(resets(&receiver), usize::from(verify_ms == 0));
+        assert_eq!(
+            receiver.handle.status().borrow().round,
+            i64::from(verify_ms == 0)
+        );
+        assert!(receiver.authority.commits.lock().unwrap().is_empty());
+        assert_eq!(receiver.authority.journal.floor().unwrap(), Some(0));
+    }
+}

@@ -5,7 +5,8 @@
 //! publishing a native certificate. `serve` exposes only that completed package.
 //! The standalone `ledger` operation remains an image-only interchange API.
 mod cli;
-mod codec;
+pub(crate) mod codec;
+pub mod offline;
 pub(crate) mod package;
 mod serve;
 use super::Authority;

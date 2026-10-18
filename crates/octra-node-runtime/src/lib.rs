@@ -63,6 +63,7 @@ pub mod preverify;
 pub mod preverify_batch;
 pub mod preverify_state;
 pub mod private_account_rpc;
+pub mod private_artifact;
 pub mod private_balance;
 pub mod private_crypto;
 pub mod private_epoch;

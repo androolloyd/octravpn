@@ -25,7 +25,7 @@ use octra_node_protocol::{
 use octra_node_runtime::{
     canonical::CanonicalStore,
     circle::CircleRuntime,
-    consensus_driver::{Driver, Host as _},
+    consensus_driver::{Driver, GraceConfig, Host as _},
     finality::proposal::Policy,
     validator_history::{Authority, CanonicalValidators, Environment, ReceiptPolicy},
 };
@@ -184,10 +184,11 @@ pub(crate) async fn supervise_archive(
 fn resolve_local_setting(
     release: Option<&octra_node_runtime::status_read::Release>,
     name: &str,
+    process: impl FnOnce() -> Option<Vec<u8>>,
 ) -> Option<Vec<u8>> {
     match release {
         Some(release) => release.settings.get(name).map(<[u8]>::to_vec),
-        None => std::env::var_os(name).map(|value| value.as_encoded_bytes().to_vec()),
+        None => process(),
     }
 }
 
@@ -247,7 +248,12 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
     }
     .unwrap_or(100)
     .max(1);
-    let local_setting = |name: &str| resolve_local_setting(status_release.as_ref(), name);
+    let local_setting = |name: &str| {
+        resolve_local_setting(status_release.as_ref(), name, || {
+            std::env::var_os(name).map(|value| value.as_encoded_bytes().to_vec())
+        })
+    };
+    let proposal_grace = GraceConfig::capture(local_setting);
     let bundle_cache_cap = local_setting("OCTRA_BUNDLE_CACHE_CAP");
     let fees = octra_node_protocol::submit_rpc::Fees::capture(local_setting);
     let grpc =
@@ -609,13 +615,14 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
             let publication = Canonical::new(node.clone(), bundles.clone(), executor.clone(), 10.)
                 .await?
                 .with_pending(pending.clone());
-            let (handle, driver) = Driver::new(
+            let (handle, driver) = Driver::new_with_grace(
                 engine,
                 journal.clone(),
                 swarm.clone(),
                 validator,
                 publication,
                 Ok(vec![]),
+                proposal_grace,
             )?;
             authority.attach(handle)?;
             Ok::<_, anyhow::Error>(driver)
@@ -865,6 +872,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
             join,
             config: driver_config,
             timeouts,
+            proposal_grace,
             voting,
             minimum_peers,
             health,
@@ -963,6 +971,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         tasks.abort_all();
         while tasks.join_next().await.is_some() {}
     }
+    executor.shutdown_preverification().await;
     executor.shutdown_migration_status().await;
     lifecycle.http.shutdown();
     lifecycle.tokens.shutdown().await;
@@ -1000,10 +1009,33 @@ mod tests {
                 source_commit: None,
                 binary_hash: None,
             };
-            let captured = resolve_local_setting(Some(&release), "OCTRA_BUNDLE_CACHE_CAP");
+            let captured = resolve_local_setting(Some(&release), "OCTRA_BUNDLE_CACHE_CAP", || {
+                panic!("captured settings cannot consult the process")
+            });
             assert_eq!(captured.as_deref(), value);
             assert_eq!(configured_capacity(captured.as_deref()), expected);
         }
+    }
+
+    #[test]
+    fn network_file_grace_overrides_process_and_captured_absence_uses_defaults() {
+        use crate::network_profile::{parse_env, Profile};
+        for (file, expected) in [
+            (b"OCTRA_BFT_PROPOSAL_BUILD_GRACE_MS=0\nOCTRA_BFT_PROPOSAL_VERIFY_GRACE_MS=0x493e0\n".as_slice(), (0, 300_000)),
+            (b"OCTRA_BFT_PROPOSAL_BUILD_GRACE_MS=300001\n".as_slice(), (180_000, 180_000)),
+            (b"".as_slice(), (180_000, 180_000)),
+        ] {
+            let release = Profile::new(parse_env(file).unwrap()).unwrap().status_release();
+            // This is the launch resolver with a conflicting process source,
+            // including settings absent from the captured network file.
+            let grace = GraceConfig::capture(|name| {
+                resolve_local_setting(Some(&release), name, || Some(b"1".to_vec()))
+            });
+            assert_eq!((grace.build_ms(), grace.verify_ms()), expected);
+        }
+        let standalone =
+            GraceConfig::capture(|name| resolve_local_setting(None, name, || Some(b"7".to_vec())));
+        assert_eq!((standalone.build_ms(), standalone.verify_ms()), (7, 7));
     }
 
     fn cursor() -> Cursor {

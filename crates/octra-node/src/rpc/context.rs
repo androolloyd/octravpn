@@ -28,6 +28,7 @@ use std::{
 
 #[async_trait]
 pub(crate) trait ReadNode: Send + Sync {
+    fn visibility(&self) -> crate::epoch_visibility::Visibility;
     fn snapshot(&self) -> Result<Committed>;
     async fn head(&self) -> Result<Head>;
     fn reader(&self) -> Reader;
@@ -224,6 +225,9 @@ impl<A: Host> Submission<A> {
 struct BftNode<A: Host>(Arc<Node<A>>);
 #[async_trait]
 impl<A: Host> ReadNode for BftNode<A> {
+    fn visibility(&self) -> crate::epoch_visibility::Visibility {
+        self.0.shared.visibility()
+    }
     fn snapshot(&self) -> Result<Committed> {
         self.0.snapshot()
     }

@@ -3,12 +3,14 @@
 //! Live engine ownership. Peer readers enqueue consensus input without waiting
 //! for execution, so a proposal's bundle can arrive on the same connection.
 mod diagnostics;
+mod grace;
 mod inbound;
 mod liveness;
 mod outputs;
 mod round_recovery;
 mod work;
 pub use diagnostics::Diagnostics;
+pub use grace::GraceConfig;
 pub use liveness::{configured_stall_sec, LivenessContext};
 
 use crate::consensus_votes::{Precommit, Readiness, VoteGuard};
@@ -103,8 +105,13 @@ pub struct Handle {
     input: mpsc::Sender<Input>,
     status: watch::Receiver<Status>,
     diagnostics: watch::Receiver<Result<Option<Diagnostics>, Error>>,
+    proposal_grace: GraceConfig,
 }
 impl Handle {
+    /// Local startup configuration captured by this driver generation.
+    pub fn grace_config(&self) -> GraceConfig {
+        self.proposal_grace
+    }
     pub fn diagnostics(&self) -> Result<Option<Diagnostics>, Error> {
         if self.diagnostics.has_changed().is_err() {
             return Ok(None);
@@ -183,7 +190,7 @@ pub struct Driver<H: Host, C: Publication> {
     evidence: octra_node_protocol::consensus::evidence::Pool,
     round_replies: BTreeMap<Bytes, (i64, i64, RoundStep, Instant)>,
     initialized: bool,
-    work_grace_ms: (i64, i64),
+    proposal_grace: GraceConfig,
     checking: bool,
     relay: ProposalRelay<Broadcast>,
     future_votes: BTreeMap<Bytes, Vote>,
@@ -215,12 +222,33 @@ impl<H: Host, C: Publication> Driver<H, C> {
     /// the engine. VoteGuard independently checks recovery wires and floors.
     /// Construction never starts voting or network tasks.
     pub fn new(
+        engine: Engine,
+        journal: JournalOwner,
+        swarm: Swarm,
+        host: H,
+        publication: C,
+        recovery_votes: Result<Vec<Bytes>, Error>,
+    ) -> Result<(Handle, Self), Error> {
+        Self::new_with_grace(
+            engine,
+            journal,
+            swarm,
+            host,
+            publication,
+            recovery_votes,
+            GraceConfig::from_env(),
+        )
+    }
+    /// Construct from one trusted launcher capture, also used by replacement
+    /// generations. No process settings are read by this constructor.
+    pub fn new_with_grace(
         mut engine: Engine,
         journal: JournalOwner,
         swarm: Swarm,
         host: H,
         publication: C,
         recovery_votes: Result<Vec<Bytes>, Error>,
+        proposal_grace: GraceConfig,
     ) -> Result<(Handle, Self), Error> {
         let chain = engine.chain_id().to_vec();
         let address = engine.address().to_vec();
@@ -248,6 +276,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 input,
                 status: view,
                 diagnostics: diagnostic_receiver,
+                proposal_grace,
             },
             Self {
                 engine,
@@ -270,10 +299,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 evidence: octra_node_protocol::consensus::evidence::Pool::default(),
                 round_replies: BTreeMap::new(),
                 initialized: false,
-                work_grace_ms: (
-                    grace("OCTRA_BFT_PROPOSAL_BUILD_GRACE_MS"),
-                    grace("OCTRA_BFT_PROPOSAL_VERIFY_GRACE_MS"),
-                ),
+                proposal_grace,
                 checking: false,
                 relay,
                 future_votes: BTreeMap::new(),
@@ -420,12 +446,4 @@ impl<H: Host, C: Publication> Driver<H, C> {
             }
         }
     }
-}
-
-fn grace(name: &str) -> i64 {
-    std::env::var(name)
-        .ok()
-        .and_then(|v| octra_node_protocol::native_integer::parse_int63(v.as_bytes()))
-        .filter(|v| (0..=300_000).contains(v))
-        .unwrap_or(180_000)
 }

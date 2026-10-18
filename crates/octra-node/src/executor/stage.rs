@@ -142,6 +142,7 @@ impl Native {
             previous.as_bytes(),
             config.max_multi_exec_calls,
         )?;
+        let (private_artifacts, key_artifacts) = self.local_artifacts(transactions);
         let mut private = private_epoch::Epoch::new(
             self.private_policy(context, epoch),
             private_epoch::Limits {
@@ -151,7 +152,9 @@ impl Native {
             epoch,
             Some(gate),
             config.migration.as_deref(),
-        );
+        )
+        .with_artifacts(private_artifacts)
+        .with_keys(key_artifacts);
         let root_at = |head| roots.get(&head).cloned().flatten();
         let mut validators = validator_transaction::Host {
             chain: &header.chain_id,

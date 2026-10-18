@@ -21,8 +21,10 @@ use sqlx::{
 use crate::state_batch::{Snapshot, StateBatch, StoredObject};
 mod epoch_tags;
 mod epochs;
-pub use epoch_tags::EpochTagStats;
+pub use epoch_tags::{EpochTagRetention, EpochTagStats};
 mod inodes;
+mod offline;
+pub use offline::OfflineStore;
 mod reader;
 mod records;
 mod snapshots;
@@ -276,6 +278,17 @@ impl CanonicalStore {
         state: Snapshot,
         date: i64,
     ) -> Result<Self> {
+        Self::create_with_retention(path, chain, state, date, EpochTagRetention::capture()?).await
+    }
+
+    /// Initialize with an already captured local retention setting.
+    pub async fn create_with_retention(
+        path: &Path,
+        chain: ChainIdentity,
+        state: Snapshot,
+        date: i64,
+        retention: EpochTagRetention,
+    ) -> Result<Self> {
         chain.validate().map_err(error)?;
         let ledger_root = hex::encode(state.root().map_err(error)?);
         let (index_hash, index_root) =
@@ -312,7 +325,7 @@ impl CanonicalStore {
             date,
             message,
         };
-        Self::initialize(path, chain, state, anchor, None).await
+        Self::initialize(path, chain, state, anchor, None, retention).await
     }
 
     async fn initialize(
@@ -321,8 +334,9 @@ impl CanonicalStore {
         state: Snapshot,
         anchor: Head,
         bootstrap: Option<bootstrap::Bootstrap>,
+        retention: EpochTagRetention,
     ) -> Result<Self> {
-        let epoch_tag_keep = epoch_tags::capture_keep()?;
+        let epoch_tag_keep = retention.keep_epochs();
         let state = state.with_persisted_counter().map_err(error)?;
         anchor.validate()?;
         let cursor = anchor.cursor;
@@ -395,7 +409,16 @@ impl CanonicalStore {
     /// Reopen without repairing missing history. Corruption or mismatched chain
     /// identity requires explicit recovery; no new anchor is silently installed.
     pub async fn open(path: &Path, expected_chain: &ChainIdentity) -> Result<Self> {
-        let epoch_tag_keep = epoch_tags::capture_keep()?;
+        Self::open_with_retention(path, expected_chain, EpochTagRetention::capture()?).await
+    }
+
+    /// Reopen with a captured setting, without consulting ambient environment.
+    pub async fn open_with_retention(
+        path: &Path,
+        expected_chain: &ChainIdentity,
+        retention: EpochTagRetention,
+    ) -> Result<Self> {
+        let epoch_tag_keep = retention.keep_epochs();
         let pool = connect(path).await?;
         let row = sqlx::query("SELECT chain,anchor FROM node_identity WHERE id=0")
             .fetch_one(&pool)

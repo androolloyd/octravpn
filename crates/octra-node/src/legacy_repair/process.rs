@@ -213,13 +213,13 @@ fn terminate(child: &mut Child) -> Result<()> {
 }
 
 #[cfg(unix)]
-fn nonblocking(pipe: &impl std::os::fd::AsFd) -> Result<()> {
+pub(crate) fn nonblocking(pipe: &impl std::os::fd::AsFd) -> Result<()> {
     use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
     fcntl_setfl(pipe, fcntl_getfl(pipe)? | OFlags::NONBLOCK)?;
     Ok(())
 }
 #[cfg(not(unix))]
-fn nonblocking<T>(_: &T) -> Result<()> {
+pub(crate) fn nonblocking<T>(_: &T) -> Result<()> {
     bail!("legacy backend transport requires Unix")
 }
 
@@ -266,7 +266,7 @@ fn source(_: &Path) -> Result<fs::File> {
     bail!("legacy backend transport requires Unix")
 }
 
-fn freeze(path: &Path, expected: &str) -> Result<tempfile::TempDir> {
+pub(crate) fn freeze(path: &Path, expected: &str) -> Result<tempfile::TempDir> {
     let expected = hex::decode(expected)?;
     ensure!(expected.len() == 32, "backend SHA256 must contain 32 bytes");
     let mut input = source(path)?;

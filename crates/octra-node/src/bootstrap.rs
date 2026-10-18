@@ -16,7 +16,10 @@ use octra_node_protocol::{
         migration, roots,
     },
 };
-use octra_node_runtime::{canonical::CanonicalStore, ledger_image};
+use octra_node_runtime::{
+    canonical::{CanonicalStore, EpochTagRetention},
+    ledger_image,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -94,12 +97,21 @@ impl Authority {
         &self,
         directory: &Path,
     ) -> Result<(CanonicalStore, Option<migration::Admission>)> {
+        self.reopen_with_migration_with_retention(directory, EpochTagRetention::capture()?)
+            .await
+    }
+    pub async fn reopen_with_migration_with_retention(
+        &self,
+        directory: &Path,
+        retention: EpochTagRetention,
+    ) -> Result<(CanonicalStore, Option<migration::Admission>)> {
         // Startup uses retained evidence and the caller's current trust, never
         // the network.json copied alongside the downloaded data as authority.
-        let store = CanonicalStore::open_from_checkpoint(
+        let store = CanonicalStore::open_from_checkpoint_with_retention(
             &directory.join("canonical.sqlite"),
             &self.network.identity,
             &self.trust(),
+            retention,
         )
         .await?;
         let checkpoint = store.anchor().cursor.epoch.0;
@@ -214,6 +226,16 @@ fn candidates(values: Vec<Candidate>) -> Result<Vec<Candidate>> {
 /// Install only after finality, exporter, network, chunk, image, HEAD, recent
 /// roots and configured migration checks all bind to the same checkpoint.
 pub async fn install(config: Config, destination: &Path) -> Result<Report> {
+    install_with_retention(config, destination, EpochTagRetention::capture()?).await
+}
+
+/// Install with retention captured by a configured embedding launcher.
+/// The CLI without an environment-file input retains its ambient convenience.
+pub async fn install_with_retention(
+    config: Config,
+    destination: &Path,
+    retention: EpochTagRetention,
+) -> Result<Report> {
     ensure!(
         !config.sources.is_empty() && config.sources.len() <= 64,
         "snapshot requires 1 to 64 sources"
@@ -299,6 +321,7 @@ pub async fn install(config: Config, destination: &Path) -> Result<Report> {
             &authority,
             &cache,
             stage.clone(),
+            retention,
         )
         .await;
         match attempt {
@@ -323,6 +346,7 @@ async fn install_candidate(
     authority: &Authority,
     cache: &resume::Cache,
     stage: Arc<tempfile::TempDir>,
+    retention: EpochTagRetention,
 ) -> Result<Report> {
     let draft = candidate.certificate.draft();
     let checkpoint = &draft.checkpoint;
@@ -429,7 +453,7 @@ async fn install_candidate(
         }
     }
     let records = restored.records;
-    let store = CanonicalStore::create_from_checkpoint(
+    let store = CanonicalStore::create_from_checkpoint_with_retention(
         &stage.path().join("canonical.sqlite"),
         config.network.identity.clone(),
         restored.state,
@@ -437,6 +461,7 @@ async fn install_candidate(
         &window,
         &authority.trust(),
         now()?,
+        retention,
     )
     .await?;
     store.close().await;

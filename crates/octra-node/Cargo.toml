@@ -40,7 +40,7 @@ tower = { version = "0.5", features = ["util"] }
 ed25519-dalek.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1", features = ["fs"] }
+rustix = { version = "1", features = ["fs", "process"] }
 
 [dev-dependencies]
 boringtun.workspace = true

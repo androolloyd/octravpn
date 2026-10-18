@@ -23,9 +23,9 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 self.now(),
                 work.started_at,
                 if self.checking {
-                    self.work_grace_ms.1
+                    self.proposal_grace.verify_ms()
                 } else {
-                    self.work_grace_ms.0
+                    self.proposal_grace.build_ms()
                 },
             )
         })

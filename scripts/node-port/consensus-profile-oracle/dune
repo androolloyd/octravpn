@@ -1,0 +1,4 @@
+(executable
+ (name profile)
+ (modules profile)
+ (libraries octra_core octra_node_runtime octra_consensus octra_net yojson zarith unix))

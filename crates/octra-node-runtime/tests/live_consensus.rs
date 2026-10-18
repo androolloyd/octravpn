@@ -21,7 +21,9 @@ use octra_node_protocol::{
 };
 use octra_node_runtime::{
     consensus_bundle,
-    consensus_driver::{Driver, Handle, Host, LivenessContext, ProposalPlan, Publication, Verdict},
+    consensus_driver::{
+        Driver, GraceConfig, Handle, Host, LivenessContext, ProposalPlan, Publication, Verdict,
+    },
     consensus_recovery,
     consensus_votes::{Precommit, Readiness},
 };
@@ -281,6 +283,26 @@ async fn node_with_timeouts(
     timeouts: TimeoutConfig,
     read_idle: Duration,
 ) -> Node {
+    node_with_grace(
+        id,
+        n,
+        bootstrap,
+        restored,
+        timeouts,
+        read_idle,
+        GraceConfig::from_env(),
+    )
+    .await
+}
+async fn node_with_grace(
+    id: u8,
+    n: u8,
+    bootstrap: Vec<Endpoint>,
+    restored: Option<Proposal>,
+    timeouts: TimeoutConfig,
+    read_idle: Duration,
+    proposal_grace: GraceConfig,
+) -> Node {
     let dir = tempfile::tempdir().unwrap();
     let journal = JournalOwner::open(dir.path()).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -347,13 +369,14 @@ async fn node_with_timeouts(
     if let Some(proposal) = restored {
         engine.restore_precommit_lock(proposal).unwrap();
     }
-    let (handle, driver) = Driver::new(
+    let (handle, driver) = Driver::new_with_grace(
         engine,
         journal,
         swarm.clone(),
         authority.clone(),
         authority.clone(),
         Ok(vec![]),
+        proposal_grace,
     )
     .unwrap();
     let (stop, shutdown) = watch::channel(false);

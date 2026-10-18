@@ -6,6 +6,13 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 async fn fixture(meta: Option<&[u8]>) -> (tempfile::TempDir, CanonicalStore) {
+    fixture_with_retention(meta, EpochTagRetention::capture().unwrap()).await
+}
+
+async fn fixture_with_retention(
+    meta: Option<&[u8]>,
+    retention: EpochTagRetention,
+) -> (tempfile::TempDir, CanonicalStore) {
     let directory = tempfile::tempdir().unwrap();
     let mut state = StateBatch::default();
     state.begin().unwrap();
@@ -21,11 +28,12 @@ async fn fixture(meta: Option<&[u8]>) -> (tempfile::TempDir, CanonicalStore) {
         hex::encode(index).as_bytes(),
     )
     .unwrap();
-    let store = CanonicalStore::create(
+    let store = CanonicalStore::create_with_retention(
         &directory.path().join("chain.db"),
         ChainIdentity::genesis("epoch-tag-storage-fixture", StateRoot(root)),
         state.snapshot(),
         0,
+        retention,
     )
     .await
     .unwrap();
@@ -372,4 +380,39 @@ async fn exact_native_prune_boundaries_preserve_immutable_rows() {
         (None, false, false, None)
     );
     store.close().await;
+}
+
+#[tokio::test]
+async fn explicit_retention_is_used_by_real_create_and_reopen() {
+    let retention = EpochTagRetention::from_value(Some(b"4096")).unwrap();
+    let (directory, store) = fixture_with_retention(Some(b"0"), retention).await;
+    let chain = store.chain().clone();
+    let head = store.head().await.unwrap();
+    assert_eq!(
+        store.reader().epoch_tag_stats().await.unwrap().keep_epochs,
+        4096
+    );
+    store.close().await;
+    for (raw, expected) in [(Some(b"65536".as_slice()), 65536), (None, 8192)] {
+        let store = CanonicalStore::open_with_retention(
+            &directory.path().join("chain.db"),
+            &chain,
+            EpochTagRetention::from_value(raw).unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            store.reader().epoch_tag_stats().await.unwrap().keep_epochs,
+            expected
+        );
+        assert_eq!(store.head().await.unwrap(), head);
+        assert_eq!(
+            store.reader().epoch_tag(0).await.unwrap(),
+            Some(head.clone())
+        );
+        store.close().await;
+    }
+    for raw in [b"4095".as_slice(), b"65537", b"invalid"] {
+        assert!(EpochTagRetention::from_value(Some(raw)).is_err());
+    }
 }

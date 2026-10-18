@@ -212,9 +212,18 @@ fn bootstrap_peers(configured: &[String], settings: &Settings) -> Vec<Endpoint> 
 pub async fn run(
     config: Config,
     runtime: CircleRuntime,
+    shutdown: watch::Receiver<bool>,
+) -> Result<()> {
+    run_with_runtime_factory(config, |_| Ok(runtime), shutdown).await
+}
+
+/// Capture the public profile once before constructing a CLI-owned runtime.
+/// Embedders that already own a runtime keep using `run` unchanged.
+pub async fn run_with_runtime_factory(
+    config: Config,
+    make_runtime: impl FnOnce(&Settings) -> Result<CircleRuntime>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<()> {
-    launch::require_crypto(&runtime)?;
     if let Some(proxy) = config.p2p_proxy {
         octra_node_protocol::network::proxy::validate(proxy)?;
     }
@@ -236,6 +245,11 @@ pub async fn run(
         &bootstrap::read_limited(&config.environment, 1024 * 1024)?,
     )?)?;
     let settings = &profile.settings;
+    let retention = octra_node_runtime::canonical::EpochTagRetention::from_value(
+        settings.get("OCTRA_GC_KEEP_EPOCHS"),
+    )?;
+    let runtime = make_runtime(settings)?;
+    launch::require_crypto(&runtime)?;
     let chain = config.network.identity.chain_id.as_bytes();
     ensure!(
         settings.get("OCTRA_CHAIN_ID") == Some(chain),
@@ -274,7 +288,7 @@ pub async fn run(
     )?;
     let authority = bootstrap::Authority::new(config.network.clone())?;
     let (store, migration) = tokio::select! {
-        opened = authority.reopen_with_migration(&config.data) => opened?,
+        opened = authority.reopen_with_migration_with_retention(&config.data, retention) => opened?,
         _ = shutdown.wait_for(|stopping| *stopping) => return Ok(()),
     };
     let migration = migration.map(Arc::new);

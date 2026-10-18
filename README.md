@@ -68,6 +68,16 @@ native libraries. Transfers, state and ExEx histories agree across a clean
 four-node restart. This covers the recorded Standard/private-genesis fixture;
 stock-launcher and mixed Circle/private-proof parity remain separate.
 
+The [native interface successor](docs/rust-node/native-interfaces.md) adds
+publication-stable reads, authenticated queue-first proof warmup and native-format
+operator transaction/snapshot/store tooling. Its final combined qualification is
+pending. Native physical stores use an explicitly pinned compatibility backend;
+private-genesis fixtures do not establish public entitlement or universal parity.
+The [current qualification status](docs/rust-node/checkpoints/2026-10-18/interface-candidate.json)
+records the remaining mixed private-proof and nested traffic failures. Captured
+startup settings and failure diagnostics are implemented; their combined rerun
+is pending.
+
 Retained finality audits can [reuse verified work within one process](docs/rust-node/checkpoints/2026-10-17/audit-reuse.md).
 Every audit still rereads the full prefix and authenticates historical validator
 authority; startup, exported records and new publication retain their complete

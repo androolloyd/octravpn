@@ -13,7 +13,7 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
 };
-mod process;
+pub(crate) mod process;
 mod staging;
 pub use staging::{stage_if_proven, StageOptions};
 const MAX: u64 = 1_048_576;
