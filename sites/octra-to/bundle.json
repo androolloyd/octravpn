@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "path": "/index.html",
+      "content_type": "text/html",
+      "bytes": 5162,
+      "sha256": "aa70cb50eda8fed61f9d6bdffe66997f460e6bb3eab0bff1a27662847441abcd"
+    },
+    {
+      "path": "/join.html",
+      "content_type": "text/html",
+      "bytes": 5971,
+      "sha256": "04c4e6d1a124b2d3d323502e028488acd05d83354b8e7b2c6a447e85612e1132"
+    },
+    {
+      "path": "/browse.html",
+      "content_type": "text/html",
+      "bytes": 4432,
+      "sha256": "84888d9f9dfec3d09d1081aa40c9868d3961f218ca4da2febb9090c2ea00e7f1"
+    },
+    {
+      "path": "/operators.html",
+      "content_type": "text/html",
+      "bytes": 3375,
+      "sha256": "31342b291041714c3c697905a3cfdc5f0e0fa6a6adde1b5fc901791be24af179"
+    },
+    {
+      "path": "/style.css",
+      "content_type": "text/css",
+      "bytes": 10604,
+      "sha256": "1b877d80869c8589fa5e8a548df965577366bad48f9a7979838762c8bfe6aeb5"
+    },
+    {
+      "path": "/logo.svg",
+      "content_type": "image/svg+xml",
+      "bytes": 310,
+      "sha256": "65b678c50556b02b205df9d3435bbfc1d8bebb3a79bba98b9c976eb697919262"
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Join an Octranet with stock Tailscale, then choose a prepaid OCT route.">
+  <title>Join Octranet — octra.to</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar wrap">
+    <a class="brand" href="index.html"><img src="logo.svg" alt="" width="34" height="34"><span>octra<span class="brand-dot">.</span>to</span></a>
+    <nav aria-label="Main navigation"><a href="browse.html">Circles</a><a href="operators.html">For operators</a><a class="nav-join" href="join.html">Join Octranet <span aria-hidden="true">↗</span></a></nav>
+  </header>
+  <main class="wrap subpage">
+    <p class="eyebrow"><span class="signal"></span> PUBLIC DEVNET / TESTER GUIDE</p>
+    <h1>Your path in.<br><em>On your terms.</em></h1>
+    <p class="lede narrow">The devnet onboarding Circle is published. Joining a network still requires an operator-issued HTTPS login server and a private, usually single-use enrollment key. Open self-service signup is not available yet.</p>
+    <div class="status-ribbon"><strong>Published</strong><span>Circle assets on public devnet</span><strong>To join</strong><span>Get an operator-issued invitation</span></div>
+    <div class="guide-grid">
+      <div class="guide-main">
+        <section class="guide-step">
+          <span class="step-num">01 / GET THE INVITE</span>
+          <h2>Start with a trusted operator.</h2>
+          <p>Install the official Tailscale client for your device. The operator gives you an HTTPS login-server origin and a preauth key minted by their running control service. Ask for the network name, published OCT tariff and support contact at the same time.</p>
+          <p class="quiet">Do not use an offline fixture key or a server address copied from an unverified message. The key normally works once; keep it out of screenshots and public chat.</p>
+        </section>
+        <section class="guide-step">
+          <span class="step-num">02 / JOIN THE MESH</span>
+          <h2>Use the Tailscale you know.</h2>
+          <p>Replace both placeholders with the values your operator provided. This command is for macOS or Linux; Windows uses the same flags without <code>sudo</code>.</p>
+          <pre><code>sudo tailscale up \
+  --login-server https://YOUR-OPERATOR.example \
+  --authkey YOUR-SINGLE-USE-KEY</code></pre>
+          <p>Check the result with <code>tailscale status</code>. On later restarts, do not reuse the single-use key; your Tailscale installation keeps the device registration.</p>
+        </section>
+        <section class="guide-step">
+          <span class="step-num">03 / SEE THE FREE FRONT DOOR</span>
+          <h2>Orient before you pay.</h2>
+          <p>The operator’s bounded portal can show this Circle site after registration, even without a paid allowance. It can explain the offer and funding path. It cannot browse arbitrary Circles, sign a transaction or carry general Internet traffic for free.</p>
+          <p class="quiet">The devnet source Circle is <code>octC9XpV4K4LJWFzc16zvaS1Rk3z8nyiqS7xwswH84Tca7E</code>. That identifies the published site; it is not a wallet or funding address.</p>
+        </section>
+        <section class="guide-step">
+          <span class="step-num">04 / BUY FINITE TRAFFIC</span>
+          <h2>Fund locally. Review the rate.</h2>
+          <p>Ask your operator for an accepted prepaid plan with its exact tariff and a funded devnet OCT wallet. Review the offered bytes and OCT cost before the local client signs. For a stock Tailscale device, the client uses your public <code>nodekey:</code> identity, private receipt key and a durable journal:</p>
+          <pre><code>octravpn stock-payments \
+  --plan accepted-plan.json \
+  --journal /private/path/plan-journal \
+  --receipt-key /private/path/receipt.key \
+  --node-key nodekey:YOUR-PUBLIC-NODE-KEY</code></pre>
+          <p>Paid forwarding starts only after the byte purchase is confirmed. The operator chooses the rate; the protocol takes no commission. You can withdraw available channel OCT, while settled byte purchases stay final.</p>
+        </section>
+        <section class="guide-step">
+          <span class="step-num">05 / USE YOUR ROUTE</span>
+          <h2>Browse and exit when admitted.</h2>
+          <p>Choose the operator’s advertised exit in Tailscale. On a paid route with trusted DNS and TLS, public Circles open as regular HTTPS pages at <code>circles.octra.to</code>. Purchased bytes are finite: the connection pauses on exhaustion rather than extending credit.</p>
+          <a class="inline-link" href="browse.html">See the Circle URL format <span aria-hidden="true">↗</span></a>
+        </section>
+      </div>
+      <aside class="guide-aside">
+        <div class="aside-card"><span class="eyebrow">KEEP THIS PRIVATE</span><h3>Your wallet stays yours.</h3><p>Never paste wallet secrets, receipt keys or enrollment credentials into a Circle page. The site is read-only. Funding and signing happen in the local client.</p></div>
+        <div class="aside-card light"><span class="eyebrow">BEFORE YOU START</span><h3>Ask for four things.</h3><ol><li>HTTPS login server</li><li>Private enrollment key</li><li>Published tariff and plan</li><li>Operator support contact</li></ol><p>Until the operator can provide all four, you can inspect this public Circle but cannot finish joining from this page alone.</p></div>
+      </aside>
+    </div>
+  </main>
+  <footer class="footer wrap"><div><a class="brand" href="index.html"><img src="logo.svg" alt="" width="30" height="30"><span>octra<span class="brand-dot">.</span>to</span></a><p>Circle-hosted front door to Octranet.</p></div><div class="footer-links"><a href="join.html">Join</a><a href="browse.html">Browse</a><a href="operators.html">Operate</a></div><small>Public devnet alpha.</small></footer>
+</body>
+</html>

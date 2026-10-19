@@ -1,0 +1,8 @@
+octra.to {
+    @blocked path /rpc /rpc/* /app /app/* /circles/* /resolve
+    respond @blocked 404
+
+    reverse_proxy 127.0.0.1:20885 {
+        header_up Host octra.to
+    }
+}

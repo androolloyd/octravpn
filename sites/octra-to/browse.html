@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Turn a public oct:// Circle address into an ordinary HTTPS URL on Octranet.">
+  <title>Browse public Circles — octra.to</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar wrap">
+    <a class="brand" href="index.html"><img src="logo.svg" alt="" width="34" height="34"><span>octra<span class="brand-dot">.</span>to</span></a>
+    <nav aria-label="Main navigation"><a href="browse.html">Circles</a><a href="operators.html">For operators</a><a class="nav-join" href="join.html">Join Octranet <span aria-hidden="true">↗</span></a></nav>
+  </header>
+  <main class="wrap subpage">
+    <p class="eyebrow"><span class="signal"></span> CIRCLES IN YOUR BROWSER</p>
+    <h1>From <em>oct://</em><br>to anywhere.</h1>
+    <p class="lede narrow">A public Circle is addressed by its ID and a path. Once a paid Circle route, DNS and TLS are active, any browser on the admitted Octranet can request it over ordinary HTTPS.</p>
+    <div class="address-card">
+      <span class="step-num">NATIVE CIRCLE LINK</span>
+      <p class="address-line">oct://<strong>YOUR-CIRCLE</strong>/index.html</p>
+      <span class="address-arrow" aria-hidden="true">↓</span>
+      <span class="step-num">HTTPS ON THE PAID ROUTE</span>
+      <p class="address-line">https://circles.octra.to/circles/<strong>YOUR-CIRCLE</strong>/index.html</p>
+    </div>
+    <div class="guide-grid browse-grid">
+      <div class="guide-main">
+        <section class="guide-step"><span class="step-num">01 / START WITH A REAL CIRCLE</span><h2>This site is one.</h2><p>The octra.to source is already published on public devnet as <code>octC9XpV4K4LJWFzc16zvaS1Rk3z8nyiqS7xwswH84Tca7E</code>. Its root file is <code>/index.html</code>. This known public asset is allowlisted at the free front door.</p><a class="inline-link" href="oct://octC9XpV4K4LJWFzc16zvaS1Rk3z8nyiqS7xwswH84Tca7E/index.html">Open this Circle’s home <span aria-hidden="true">↗</span></a></section>
+        <section class="guide-step"><span class="step-num">02 / REPLACE THE PREFIX</span><h2>Keep the ID and path.</h2><p>For another public Circle, replace <code>oct://</code> with <code>https://circles.octra.to/circles/</code> in the address bar. For example, <code>oct://CIRCLE/docs/start.html</code> becomes <code>https://circles.octra.to/circles/CIRCLE/docs/start.html</code>.</p><p>The paid gateway also accepts <code>/resolve?u=</code> followed by a percent-encoded native link and redirects to the same-origin HTTPS path. This is useful for apps that can construct links; DNS cannot do that translation by itself.</p></section>
+        <section class="guide-step"><span class="step-num">03 / VERIFY WHAT YOU SEE</span><h2>Only public assets resolve.</h2><p>The gateway reads the canonical Circle snapshot and pins subresources to that snapshot. Sealed or private assets do not become public because someone guessed their URL. A stale or unavailable node fails closed.</p><p class="quiet">The URL pattern does not itself prove the paid gateway is active. Your operator must provide the route, DNS and a trusted HTTPS certificate before a browser can load it.</p></section>
+      </div>
+      <aside class="guide-aside">
+        <div class="aside-card"><span class="eyebrow">NO POPUP REQUIRED</span><h3>Ordinary HTTPS.</h3><p>When the route is deployed, the browser only sees an HTTPS address. It does not need an <code>oct://</code> protocol handler or an Octra extension.</p></div>
+        <div class="aside-card light"><span class="eyebrow">WHY A PAID ROUTE?</span><h3>Someone carries the bytes.</h3><p>This portal grants one bounded Circle read capability. An operator may charge for general Circle browsing and Internet traffic on the separate prepaid route.</p><a href="join.html">How to join <span aria-hidden="true">↗</span></a></div>
+      </aside>
+    </div>
+  </main>
+  <footer class="footer wrap"><div><a class="brand" href="index.html"><img src="logo.svg" alt="" width="30" height="30"><span>octra<span class="brand-dot">.</span>to</span></a><p>Circle-hosted front door to Octranet.</p></div><div class="footer-links"><a href="join.html">Join</a><a href="browse.html">Browse</a><a href="operators.html">Operate</a></div><small>Public devnet alpha.</small></footer>
+</body>
+</html>

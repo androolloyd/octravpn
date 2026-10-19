@@ -1,0 +1,130 @@
+{
+  "schema": "octra_to_devnet_site_release_v1",
+  "observed_at_utc": "2026-10-19T10:15:54.039941+00:00",
+  "chain_id": "octra-devnet-9871-cluster",
+  "circle": "octC9XpV4K4LJWFzc16zvaS1Rk3z8nyiqS7xwswH84Tca7E",
+  "rpc": "https://devnet.octrascan.io/rpc",
+  "asset_manifest_sha256": "9234bdcce5728c364a203eeaed651c529a6caff9c909877064b14338b5f26b45",
+  "asset_manifest": [
+    {
+      "path": "/index.html",
+      "content_type": "text/html",
+      "bytes": 5162,
+      "sha256": "aa70cb50eda8fed61f9d6bdffe66997f460e6bb3eab0bff1a27662847441abcd"
+    },
+    {
+      "path": "/join.html",
+      "content_type": "text/html",
+      "bytes": 5971,
+      "sha256": "04c4e6d1a124b2d3d323502e028488acd05d83354b8e7b2c6a447e85612e1132"
+    },
+    {
+      "path": "/browse.html",
+      "content_type": "text/html",
+      "bytes": 4432,
+      "sha256": "84888d9f9dfec3d09d1081aa40c9868d3961f218ca4da2febb9090c2ea00e7f1"
+    },
+    {
+      "path": "/operators.html",
+      "content_type": "text/html",
+      "bytes": 3375,
+      "sha256": "31342b291041714c3c697905a3cfdc5f0e0fa6a6adde1b5fc901791be24af179"
+    },
+    {
+      "path": "/style.css",
+      "content_type": "text/css",
+      "bytes": 10604,
+      "sha256": "1b877d80869c8589fa5e8a548df965577366bad48f9a7979838762c8bfe6aeb5"
+    },
+    {
+      "path": "/logo.svg",
+      "content_type": "image/svg+xml",
+      "bytes": 310,
+      "sha256": "65b678c50556b02b205df9d3435bbfc1d8bebb3a79bba98b9c976eb697919262"
+    }
+  ],
+  "updated_assets": [
+    {
+      "path": "/index.html",
+      "sha256": "aa70cb50eda8fed61f9d6bdffe66997f460e6bb3eab0bff1a27662847441abcd",
+      "nonce": 526,
+      "tx_hash": "942d1c2eb769ae9064138f8a4beaccd45b016d0e6e54989e50a31617dfeaf12b",
+      "intake_status": "accepted",
+      "canonical_readback": true
+    },
+    {
+      "path": "/join.html",
+      "sha256": "04c4e6d1a124b2d3d323502e028488acd05d83354b8e7b2c6a447e85612e1132",
+      "nonce": 527,
+      "tx_hash": "939401f98095aa2eb577a66be96d574e1199c8e6fb07945e44e644e9d618ab13",
+      "intake_status": "accepted",
+      "canonical_readback": true
+    },
+    {
+      "path": "/browse.html",
+      "sha256": "84888d9f9dfec3d09d1081aa40c9868d3961f218ca4da2febb9090c2ea00e7f1",
+      "nonce": 528,
+      "tx_hash": "b316c983a54862a378e07523f87b54912b2f2957a9eeff9e92600d1becd8d5da",
+      "intake_status": "accepted",
+      "canonical_readback": true
+    },
+    {
+      "path": "/operators.html",
+      "sha256": "31342b291041714c3c697905a3cfdc5f0e0fa6a6adde1b5fc901791be24af179",
+      "nonce": 529,
+      "tx_hash": "7ef4cba0d70787078ac80dfca04576cf33827faaa1a22588cf13530a12428585",
+      "intake_status": "accepted",
+      "canonical_readback": true
+    },
+    {
+      "path": "/style.css",
+      "sha256": "1b877d80869c8589fa5e8a548df965577366bad48f9a7979838762c8bfe6aeb5",
+      "nonce": 530,
+      "tx_hash": "20d3d81a6f50368f37c9b8d024e2916232460833d1674693950d73bd95aed28b",
+      "intake_status": "accepted",
+      "canonical_readback": true
+    }
+  ],
+  "all_six_canonical_readback": true,
+  "observer": {
+    "switched_at_utc": "2026-10-19T10:14:45.950083+00:00",
+    "image": "octra-native-vpn-devnet-relay:20261019-receive-only",
+    "image_sha256": "3d490aa51f958403bc53b3c5ce3b80e9f6da2cae545338aa52833ce2098ae191",
+    "node": "octra-devnet-paid-candidate-20261019",
+    "control": "octra-devnet-paid-control-server-20261019",
+    "gateway_bridge": "octra-devnet-public-gateway-20261019",
+    "rollback_node": "octra-devnet-paid-candidate-20261019-before-fast-receive",
+    "rollback_control": "octra-devnet-paid-control-server-20261019-before-fast-receive",
+    "qualification": "out/octra-receive-only-payments-20261019/qualification.json",
+    "scope": "Container cutover and process health only; public sync, Circle gateway HTTP, paid traffic and DNS/TLS require separate checks."
+  },
+  "isolated_paid_gate": {
+    "qualified": true,
+    "main_exit": 0,
+    "target_exit": 0,
+    "run_exit": 0,
+    "scope": "isolated four-validator prepaid payment-plan application; real client, two endpoint kernels and canonical claims; no public-chain or Mainnet claim"
+  },
+  "public_dns_a_record_active": false,
+  "public_tls_active": false,
+  "public_https_verified": false,
+  "scope": "Six Circle assets finalized with matching public RPC readback; source-bound release image passed isolated paid qualification; new observer rejoined public devnet and its bounded local Circle gateway passed a serving-window route check. Public octra.to DNS/TLS and sustained HTTP availability remain open.",
+  "local_gateway_probe": {
+    "observed_at_utc": "2026-10-19T10:38:09.864697+00:00",
+    "route": "Mac 127.0.0.1:20806 -> Docker bridge -> Rust 127.0.0.1:20805",
+    "serving_window_statuses": {
+      "/": 200,
+      "/join.html": 200,
+      "/browse.html": 200,
+      "/operators.html": 200,
+      "/style.css": 200,
+      "/logo.svg": 200,
+      "/circles/other-circle/index.html": 404,
+      "/resolve?u=other-circle": 400
+    },
+    "css_sha256_prefix": "1b877d80869c",
+    "logo_sha256_prefix": "65b678c50556",
+    "html": "sanitized and same-Circle links rewritten by the Rust gateway",
+    "availability": "Intermittent HTTP 503 during canonical audit; one concurrent serving-window probe passed, not sustained availability."
+  }
+}

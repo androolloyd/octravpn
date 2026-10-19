@@ -1,11 +1,11 @@
 //! Read-only HTTPS facade for ordinary tailnet HTTP clients. TLS and tailnet
 //! admission belong to the reverse proxy; mount only on its loopback backend.
-use super::{failure, resolved_asset, Browser};
-use crate::{AssetResolver, Error, OctUrl, Provenance};
+use super::{failure, resolved_asset, secure, Browser};
+use crate::{render, AssetResolver, Error, OctUrl, Provenance};
 use axum::{
-    extract::{OriginalUri, State},
+    extract::{OriginalUri, Query, State},
     http::{header, HeaderMap, Uri},
-    response::Response,
+    response::{IntoResponse, Redirect, Response},
     routing::get,
     Router,
 };
@@ -224,6 +224,13 @@ impl Gateway {
             .route("/circles/:circle/*path", get(serve))
             .route("/snapshots/:scope/:circle/", get(serve))
             .route("/snapshots/:scope/:circle/*path", get(serve));
+        // Resolving a pasted oct:// URL is part of paid Circle browsing, not
+        // the bounded unpaid portal capability.
+        let router = if self.portal.is_none() {
+            router.route("/resolve", get(resolve))
+        } else {
+            router
+        };
         let router = if self.site.is_some() || self.portal.is_some() {
             router.fallback_service(get(serve).with_state(self.clone()))
         } else {
@@ -233,11 +240,12 @@ impl Gateway {
     }
 }
 
-async fn serve(
-    State(gateway): State<Gateway>,
-    headers: HeaderMap,
-    OriginalUri(uri): OriginalUri,
-) -> Response {
+#[derive(Deserialize)]
+struct ResolveQuery {
+    u: String,
+}
+
+fn check_host(gateway: &Gateway, headers: &HeaderMap) -> Result<(), Error> {
     // Never infer authority from Forwarded/X-Forwarded-* or the request URL.
     let expected = gateway
         .origin
@@ -250,7 +258,33 @@ async fn serve(
                 || host.eq_ignore_ascii_case(&format!("{expected}:443"))
         })
     {
-        return failure(&Error::Invalid("unexpected gateway Host".into()));
+        return Err(Error::Invalid("unexpected gateway Host".into()));
+    }
+    Ok(())
+}
+
+async fn resolve(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Query(query): Query<ResolveQuery>,
+) -> Response {
+    if let Err(error) = check_host(&gateway, &headers) {
+        return failure(&error);
+    }
+    let url = match OctUrl::parse(&query.u) {
+        Ok(url) => url,
+        Err(error) => return failure(&error),
+    };
+    secure(Redirect::to(&render::gateway_route(None, &url)).into_response())
+}
+
+async fn serve(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    OriginalUri(uri): OriginalUri,
+) -> Response {
+    if let Err(error) = check_host(&gateway, &headers) {
+        return failure(&error);
     }
     if let Some(portal) = &gateway.portal {
         let target = match portal.target(&gateway.browser.scope, &uri) {
