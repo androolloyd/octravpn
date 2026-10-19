@@ -32,6 +32,7 @@ fn options(directory: &Path) -> Options {
                         manifest_hash: tariff.hash_hex().unwrap(),
                     },
                     tariff,
+                    operator_generation: 1,
                     original_budget_ou: 200_000,
                     prepaid_bytes: vec![100_000],
                     control_url: "http://127.0.0.1/".into(),
@@ -47,6 +48,7 @@ fn options(directory: &Path) -> Options {
     Options {
         journal: directory.join("route"),
         hops,
+        pins: vec![None, None],
         mode: crate::JournalMode::Create,
     }
 }
@@ -85,6 +87,69 @@ fn each_route_requires_independent_plans_keys_paths_and_interfaces() {
     value.hops[1].plan.binding = value.hops[0].plan.binding.clone();
     value.hops[1].plan.tariff = value.hops[0].plan.tariff.clone();
     assert!(validate(&value).is_err());
+}
+#[test]
+fn shielded_requirement_refuses_public_circle_before_loading_any_key() {
+    let route: RoutePlan = serde_json::from_value(serde_json::json!({
+        "journal": "/nonexistent/route",
+        "hops": [],
+        "payment_privacy": "shielded_required"
+    }))
+    .unwrap();
+    let error = route.options(crate::JournalMode::Create).err().unwrap();
+    assert!(error
+        .to_string()
+        .contains("shielded route settlement is unavailable"));
+    let legacy: RoutePlan = serde_json::from_value(serde_json::json!({
+        "journal": "/nonexistent/route",
+        "hops": []
+    }))
+    .unwrap();
+    assert_eq!(legacy.payment_privacy, PaymentPrivacy::Public);
+}
+#[test]
+fn pinned_bootstrap_rejects_missing_or_mismatched_addresses_before_network() {
+    let route: RoutePlan = serde_json::from_value(serde_json::json!({
+        "journal": "/nonexistent/route",
+        "bootstrap_privacy": "pinned_ips",
+        "hops": [{
+            "plan": serde_json::to_value(&options(Path::new("/tmp")).hops[0].plan).unwrap(),
+            "journal": "/nonexistent/hop",
+            "receipt_key": "/nonexistent/key",
+            "interface_name": "octroute0"
+        }, {
+            "plan": serde_json::to_value(&options(Path::new("/tmp")).hops[1].plan).unwrap(),
+            "journal": "/nonexistent/hop2",
+            "receipt_key": "/nonexistent/key2",
+            "interface_name": "octroute1"
+        }]
+    }))
+    .unwrap();
+    assert!(route
+        .options(crate::JournalMode::Create)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("both operator IP pins"));
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.pins = pins()
+        .into_iter()
+        .map(|pin| {
+            Some(RoutePins {
+                wireguard: pin.wireguard,
+                control: "127.0.0.1:80".parse().unwrap(),
+            })
+        })
+        .collect();
+    validate(&value).unwrap();
+    value.pins[1].as_mut().unwrap().wireguard.set_port(51821);
+    assert!(validate(&value)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("pin port"));
 }
 #[test]
 fn downstream_peers_cannot_overlap_any_direct_management_pin() {

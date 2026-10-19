@@ -12,6 +12,14 @@ All six current assets are byte-verified on public devnet at Circle
 pins the five update transactions and all six asset hashes. DNS delegation is
 live; the public `octra.to` A record and TLS endpoint are still pending.
 
+The site also presents the bonded devnet operator's sealed offer. Its
+`operator-profile.json` is published at `/operators/octra.to/v1.json` in the
+operator-owned tariff Circle, signed by that Circle's owner wallet. It binds the
+site name, wallet, payment Circle, offer and tariff asset without claiming that
+public enrollment or sustained exit service is available. The profile is not a
+free portal asset; its canonical hash and transaction belong in the deployment
+checkpoint.
+
 Publish these six files at the **same paths** in one Circle configured for public
 resources, then wait for canonical inclusion before enabling the gateway:
 

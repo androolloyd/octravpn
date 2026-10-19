@@ -1,0 +1,257 @@
+{
+  "date": "2026-10-19",
+  "network": "octra-devnet-9871-cluster",
+  "rpc": "https://devnet.octrascan.io/rpc",
+  "status": "in_progress",
+  "scope": "Public-devnet payer funding, a signed 1 MiB purchase, exact operator earnings withdrawal, and five routed HTTP requests through the prepaid VPN are confirmed. Sustained public-exit availability remains unqualified.",
+  "payment_circle": "oct4qzVq1RsPQnnoYpbXNuqjHYpPPs2LPdDK2inWZDwYCoP",
+  "operator": "oct1JBUrYbeTQazQ39LQn4ZjnPLHfDpLGXouqon1jZhJfYP",
+  "payer": "octAk173SxzDxJjgo5iEdxRSoeoyTyPFkrJXJL3rcvD6Qop",
+  "payer_funding": {
+    "transfer_tx": "d181fa1e437f7cd68389a21305c78ae0b5b5cd362d6ff08836be0c63d2d14a74",
+    "amount_ou": 2000000,
+    "confirmed_epoch": 1716746
+  },
+  "payer_registration": {
+    "tx": "a8d55d3f90ccb4e915354894d97d26a4d91f5238f1c78a82049f8ac7e0b836e1",
+    "confirmed_epoch": 1716760,
+    "generation": 1
+  },
+  "channel_deposit": {
+    "tx": "a2aeb3483cb94c2b2e4b5acca002c906e727d21bed2d0763cb9a581d43f3eefe",
+    "confirmed_epoch": 1716774,
+    "amount_ou": 1000000
+  },
+  "plan": {
+    "index": 1,
+    "offer": 0,
+    "budget_ou": 100000,
+    "tx": "c0ee0623ba71344b2769723347c6898d0d40ab4c807023a106f6da5511881d50",
+    "confirmed_epoch": 1716779,
+    "prepaid_target_bytes": 1048576,
+    "rate_ou_per_mib": 1000,
+    "manifest_hash": "6dbf15ffc4b5db0c2b50170661b79191f2b34c15839bd0c5cfe85769c7ac61ae"
+  },
+  "node_sample": {
+    "image_before_relay_fix": "octra-native-vpn-devnet-current:local",
+    "state": "isolated copy of retained observer state",
+    "voting": false,
+    "peer_count": 24,
+    "epoch": 1716799,
+    "state_root": "ba7b222e58612df1766d009b6d463db3be956cc04577b6190bb980ccd7c21904",
+    "root_matched_official_at_epoch": true,
+    "serving_sample": true,
+    "payment_circle_configured": true,
+    "tun_interface": "octrapay0",
+    "control_exposure": "private Docker bridge only",
+    "kernel_nat_exposure": "inside node container namespace only"
+  },
+  "first_client_attempt": {
+    "client_namespace": "isolated Docker bridge container",
+    "result": "No forwarded traffic. The client saw an intermittent HTTP 403 on connect while the observer was catching up; the signed byte authorization was durably queued.",
+    "claim_slots": 1,
+    "signed_attempts": 2,
+    "fee_budget_ou": 25000,
+    "fee_reserved_ou": 2000,
+    "canonical_purchase_confirmed": false,
+    "blocker": "The nonvoting observer tried local transaction admission, which correctly rejects with observer node is read-only."
+  },
+  "claim_and_withdrawal": {
+    "claim_tx": "14d9861c1201400a052009fd3212037a865975a11af514d6d65741dbbbf7b00f",
+    "claim_confirmed_epoch": 1716931,
+    "canonical_purchased_bytes": 1048576,
+    "operator_earnings_after_claim_ou": 1000,
+    "withdrawal_tx": "26eeb904b33c8ab4d08c72a06ac05d194a431fd6c620ad2a2ded70e1de301e0a",
+    "withdrawal_confirmed_epoch": 1716937,
+    "withdrawn_ou": 1000,
+    "operator_earnings_after_withdrawal_ou": 0,
+    "actual_forwarded_traffic": "confirmed after fresh canonical publication; two HTTP/1.1 301 responses through octrapay1"
+  },
+  "current_head_observation": {
+    "historical_root_match": {
+      "epoch": 1716968,
+      "state_root": "a3dbdbb921a549d0a0187ba29888464e27766d0a9fd3ea0c2e12b61a69bc5c07"
+    },
+    "lagged_serving_sample": {
+      "local_epoch": 1716938,
+      "official_head_epoch": 1716962,
+      "local_serving": true
+    },
+    "qualification_rule": "A serving sample alone was not treated as current-head qualification. This limited payer is controlled, and no other payer operation occurred after plan creation. Public testers still need sustained current-head availability."
+  },
+  "paid_transport_attempt": {
+    "client_tun_opened": true,
+    "client_tun_address": "198.19.164.50/32",
+    "connect_http_status": 403,
+    "packets_forwarded": "not_observed",
+    "local_status_at_last_sample": {
+      "epoch": 1716999,
+      "peers": 19,
+      "serving": true,
+      "state_root": "9ece5972fc40810272390c3d3a19d9975e21c86cb13d7bec3c2418fcbcc94ada"
+    },
+    "public_historical_root_at_local_epoch_matched": true,
+    "official_head_at_later_sample": {
+      "epoch": 1716999,
+      "state_root": "9ece5972fc40810272390c3d3a19d9975e21c86cb13d7bec3c2418fcbcc94ada"
+    },
+    "last_block_finalized_utc": "2026-10-19T04:32:48.705632+00:00",
+    "later_sample_utc": "2026-10-19T04:37:59Z",
+    "payment_publication_max_age_seconds": 120,
+    "diagnostic_limit": "The payment lease was necessarily stale at the later sample, but the client got its generic 403 at 04:33:25Z during active catch-up. The exact check that rejected that earlier poll has not been isolated."
+  },
+  "successful_paid_transport": {
+    "canonical_epoch": 1717003,
+    "state_root": "536afe7f1474a9028e5e45a4503fda7d28cd908a3c0e9095fa97559ff2afe382",
+    "official_root_matched": true,
+    "client_route": "1.1.1.1 dev octrapay1 src 198.19.164.50",
+    "destination": "1.1.1.1:80",
+    "responses": [
+      "HTTP/1.1 301 Moved Permanently",
+      "HTTP/1.1 301 Moved Permanently"
+    ],
+    "client_alive_after_responses": true,
+    "client_confirmed_bytes": 2284,
+    "operator_meter_committed_bytes": 2284,
+    "client_uncertain_bytes": 0,
+    "operator_meter_uncertain_bytes": 0,
+    "canonical_prepaid_allowance_bytes": 1048576,
+    "operator_earnings_after_traffic_ou": 0,
+    "interpretation": "This proves a bounded public-devnet paid TUN to Internet HTTP path while admission was fresh. It does not prove sustained availability, arbitrary destinations, or recovery across a process restart."
+  },
+  "relay_fix": {
+    "approach": "Explicit HTTPS claim RPC intake for nonvoting payment observers; the existing local canonical purchased-byte floor remains the sole forwarding gate.",
+    "focused_host_tests": "2 passed",
+    "linux_image": "octra-native-vpn-devnet-relay:20261019",
+    "linux_image_sha256": "1aa5813c9271a5e22c6fa33ecded6432ca7a3983ae88635704ca5a96c08afcb9",
+    "release_payment_tests": "53 Rust node, 18 client-payment, 21 client-runner, 20 meter, 19 node-payment, and 23 native AML payment tests passed",
+    "compiled_circle_json_unchanged": true,
+    "same_journal_replay": "The restarted observer relayed the durably saved claim, which reached public-devnet finality; local canonical catch-up and client transport remain pending."
+  },
+  "reconnect_upgrade": {
+    "sampled_utc": "2026-10-19T05:46:54Z",
+    "node_image": "octra-native-vpn-devnet-relay:20261019-final",
+    "client_image": "octra-native-vpn-devnet-relay:20261019-reconnect",
+    "client_image_sha256": "b8ca3d27c2f6effef7366f3d08156bfaf720df70f9b415e59f5928b29d5e30ce",
+    "client_source_sha256": "47f5cd1cd786eb5f4fb5e83377f4b8d65fbbd903ba1a94f3194a9913e5580c08",
+    "source_hashes_matched_local": true,
+    "focused_closed_control_connection_test": "passed",
+    "client_clippy_all_targets": "passed with -D warnings",
+    "image_qualification": "Dockerfile Rust, AML and Python payment suites passed",
+    "reused_original_purchase_journal": true,
+    "client_bytes_at_sample": 3413,
+    "client_authorized_bytes_at_sample": 1048576,
+    "client_uncertain_bytes_at_sample": 0,
+    "operator_meter_committed_bytes_at_sample": 3413,
+    "operator_meter_purchased_bytes_at_sample": 1048576,
+    "operator_meter_uncertain_bytes_at_sample": 0,
+    "operator_earnings_after_recovery_ou": 0,
+    "claim_queue_slots_at_sample": 0,
+    "client_behavior": "The opt-in reconnect process stayed alive through HTTP 403 catch-up refusals, reopened its TUN using the original journal, and sent one bounded Internet HTTP request. No new purchase or claim was submitted.",
+    "live_transport_reopened": true,
+    "post_restart_http_status": "HTTP/1.1 301 Moved Permanently",
+    "post_restart_root_match": {
+      "epoch": 1717199,
+      "state_root": "85c35f3c3ef013b2d70c8e16ce3aa9a08f676d3b01cfa9932e4993db50aa3d91",
+      "matched_official_rpc": true,
+      "serving_samples_over_30_seconds": 6
+    },
+    "qualification_limit": "This proves one post-restart traffic recovery. Admission still flaps with public-devnet catch-up, so sustained exit availability remains unqualified."
+  },
+  "join_source_observation": {
+    "sampled_utc": "2026-10-19T05:55:16Z",
+    "primary_current_epoch": 1706812,
+    "secondary_current_epoch": 1717205,
+    "secondary_head_epoch": 1717204,
+    "secondary_state_root": "5555e17745545589d22e44dc43c9d5b0d81003a183430453c37627de11a88e8e",
+    "secondary_matches_official_rpc": true,
+    "staged_join_source": "https://devnet.octrascan.io/state-sync/secondary",
+    "both_captured_source_settings_use_secondary": true,
+    "running_node_uses_staged_source": true,
+    "replacement_image": "octra-native-vpn-devnet-relay:20261019-diagnostic",
+    "replacement_image_sha256": "37a762e552a16e9a87239bfa733a5769cb10e6db506b08d273e14be591038b80",
+    "replacement_source_sha256": "4a2fa213fa141e9897069015baa001456dc2442de0f4b0d1b76526421b67b24b",
+    "candidate_observer_join_cap_seconds": 300,
+    "validator_join_cap_seconds": 60,
+    "first_replacement_join": "With only OCTRA_JOIN_RPC changed, the other captured setting still named the stale primary. The join verified five records before its per-source deadline, then failed over to the stale source and returned synced=false.",
+    "current_restart": "Both captured settings name only the secondary. On the retained observer, startup authenticated 76 consecutive epochs and reported synced=true at 2026-10-19T06:37:09Z. The node reopened RPC at 06:37:15Z with 15 peers observed after bootstrap; its epoch 1717317 root 0f55f86b163325ecda86356d6217a5fb530cc1661c519090bc6e145257e084e8 matched the official RPC at that epoch. The observer then reached a serving window, the prepaid client reconnected, and one isolated HTTP request through octrapay1 returned HTTP/1.1 301. Client and operator journals both recorded 4542 committed bytes, 1048576 authorized/purchased bytes, and zero uncertain bytes; the claim queue stayed empty and on-chain operator earnings remained zero.",
+    "qualification_limit": "This validates the secondary-only authenticated restart join and one paid transport recovery using the original purchase. The observer still suspends during active canonical-history auditing and publication, so sustained current-head paid service remains unqualified."
+  },
+  "retained_audit_availability_sample": {
+    "duration_seconds": 90,
+    "poll_interval_seconds": 0.5,
+    "start_epoch": 1717355,
+    "end_epoch": 1717360,
+    "status_samples": {
+      "auditing_canonical_history": 103,
+      "serving": 24,
+      "catching_up_canonical_history": 18,
+      "catching_up_authenticated_http_history": 8,
+      "publishing_canonical_epoch": 26
+    },
+    "interpretation": "The retained full-prefix audit was the largest observed admission delay, but this status sample does not isolate its CPU, SQLite or authenticated-path subcosts. Raising the SQLite pool and audit concurrency from four to twelve did not improve a 128-epoch local audit benchmark and was reverted. The local paired validator-path read optimization retains fresh per-resume checks and has not yet been measured on this public observer."
+  },
+  "live_exex_sample": {
+    "canonical_sequence": 19642,
+    "outbox_sequence": 19642,
+    "outbox_epoch": 1717402,
+    "outbox_root": "de7d017c9f8cc643f5c36ccf1e50cacbe6d0fd921c6ff01fae7ad4923ef27eec",
+    "archive_extension": "devnet-archive",
+    "archive_checkpoint_sequence": 19642,
+    "archive_checkpoint_epoch": 1717402,
+    "archive_checkpoint_root": "de7d017c9f8cc643f5c36ccf1e50cacbe6d0fd921c6ff01fae7ad4923ef27eec",
+    "interpretation": "A read-only SQLite sample found the live ExEx archive checkpoint exactly at the canonical outbox head. It does not by itself prove long-duration recovery or every extension's behavior."
+  },
+  "paired_audit_read_candidate": {
+    "image": "octra-native-vpn-devnet-relay:20261019-audit-pair",
+    "image_sha256": "24d574aae8c94a87a2b2ea7bcc256335d46f6bee8881985261f239da34bc6526",
+    "image_source_sha256": "ce2628f54d872a40147849f27fd36b7a3fbb3bf1b645f47ff0b5d40fee22d0bc",
+    "scope": "One historical-head check and one short-lived authenticated object/edge cache for the active and pending validator paths, with fresh raw reads on every later audit. No validator-selection, finality or consensus rule changed.",
+    "local_regressions": "Nine selected-path tests, the scheduled-membership canonical restart, the audit-reuse test and strict runtime clippy passed. The Linux qualification image completed its Rust, AML-related payment and Python test layers.",
+    "source_boundary": "The runtime source hashes in the image matched the local files at build time. A later test-only edge-deletion case and checkpoint edits make the current whole-worktree hash differ from the image manifest; the live candidate is a performance diagnostic, not a frozen release artifact.",
+    "deployment": "At 2026-10-19T07:30Z the nonvoting observer was gracefully replaced on the same retained state, key, bridge IP 192.168.215.2 and loopback host ports. The paid client, funded plan and journal were preserved. The isolated control sidecar and container-only NAT rule were restored. The replacement completed authenticated HTTP join at 07:46:41Z, verifying 32 epochs from the secondary source, then opened RPC. In a later serving window the preserved client reopened octrapay1 and one isolated Internet HTTP request returned HTTP/1.1 301. Client and operator journals both reached 5671 committed bytes with 1048576 purchased bytes, zero uncertain bytes, no queued claim and zero new on-chain earnings.",
+    "steady_state_sample": {
+      "duration_seconds": 90,
+      "poll_interval_seconds": 0.5,
+      "start_epoch": 1717509,
+      "end_epoch": 1717513,
+      "status_samples": {
+        "auditing_canonical_history": 102,
+        "serving": 31,
+        "catching_up_canonical_history": 19,
+        "catching_up_authenticated_http_history": 7,
+        "publishing_canonical_epoch": 20
+      },
+      "comparison": "The old image's comparable 90-second window had 103 auditing and 24 serving samples. This candidate had 102 auditing and 31 serving samples; the full audit transition remained about 34 seconds in both. Network conditions and peer counts differed, so the small sample does not establish an availability gain. The paired-path optimization is being reverted from source pending a stronger improvement."
+    }
+  },
+  "retained_sql_audit_candidate": {
+    "source_status": "local WIP; not in the running devnet image",
+    "change": "Read each retained predecessor/head, certificate, receipts and reward source in one SQLite joined statement; still reload ExEx events, historical rules and the full prefix on every resume.",
+    "safety": "All eight finality_publication tests pass, including warm-prefix raw mutation and missing receipt evidence; runtime strict clippy passes.",
+    "local_128_signed_epoch_workload": {
+      "baseline_cold_ms": 201.6,
+      "baseline_warm_ms": 110.7,
+      "candidate_cold_ms_samples": [
+        225.0,
+        251.5,
+        190.0,
+        192.7
+      ],
+      "candidate_warm_ms_samples": [
+        117.1,
+        142.3,
+        100.6,
+        102.7
+      ],
+      "interpretation": "No stable material improvement established; timings vary with host load. This cannot qualify public serving availability."
+    },
+    "remaining_gate": "Measure source-identical Linux image under the active public head and fix repeated full-prefix audit service suspension without weakening raw historical mutation detection."
+  },
+  "operator_earnings_regression": {
+    "test": "vpn::payments::circle_tests::circle_custody_buys_before_delivery_withdraws_immediately_and_uses_canonical_week",
+    "result": "passed",
+    "assertions": "A compiled Circle claim credits operator earnings before delivery; withdraw_earnings transfers the exact balance immediately, clears earnings, and refuses replay. Operator stake remains on its separate seven-day unlock path.",
+    "public_devnet_readback": "get_earnings returned 0 after the confirmed 1000 OU operator withdrawal"
+  }
+}

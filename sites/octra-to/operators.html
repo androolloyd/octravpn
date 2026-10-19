@@ -15,14 +15,51 @@
   <main class="wrap subpage">
     <p class="eyebrow"><span class="signal"></span> BUILD A BETTER WAY THROUGH</p>
     <h1>Run a route.<br><em>Own the terms.</em></h1>
-    <p class="lede narrow">An operator can welcome new devices through a free Circle-hosted front door, then sell finite byte allowances at its own published OCT rates. The protocol takes zero commission.</p>
+    <p class="lede narrow">Run your own Rust node, build a personal Octranet, and decide separately whether to offer paid exit traffic. Our devnet operator shows the model: a bonded wallet, a public Circle tariff, and no protocol commission.</p>
+    <section class="operator-identity" aria-labelledby="octra-operator">
+      <p class="eyebrow">PUBLISHED ON PUBLIC DEVNET</p>
+      <h2 id="octra-operator">The octra.to offer.</h2>
+      <p>Payment Circle <code>oct4qzVq1RsPQnnoYpbXNuqjHYpPPs2LPdDK2inWZDwYCoP</code></p>
+      <p>Operator <code>oct1JBUrYbeTQazQ39LQn4ZjnPLHfDpLGXouqon1jZhJfYP</code></p>
+      <p>Offer <code>0</code> · sealed default class · <strong>1,000 OU/MiB</strong> · 100 OCT operator bond</p>
+      <p>Operator-signed Circle profile <code>oct8zCTzCkDYwHUWYYtHyPavaCakS2W1du6dw34S3tV5oyf</code> at <code>/operators/octra.to/v1.json</code></p>
+      <p class="operator-limit">The offer is on-chain. Public enrollment and a sustained Internet exit are still being qualified; do not send funds until you have a verified plan and reachable service.</p>
+    </section>
+    <section class="operator-guide" aria-labelledby="run-node">
+      <p class="eyebrow">YOUR NODE / YOUR CHOICE</p>
+      <h2 id="run-node">Start as a node.<br><em>Opt into exit later.</em></h2>
+      <p>Choose a Linux VPS with a public IPv4 address, persistent SSD storage and enough CPU, memory and bandwidth for an authenticated full history. A home server with a reliable public route can also work. Dedicated resources are the safer starting point for an always-on validator. Size from a real snapshot and sustained sync measurements; we have not published a validated minimum VPS size.</p>
+      <div class="operator-cards setup-cards">
+        <article><span class="step-num">01 / CHOOSE A HOST</span><h3>Cloud VPS</h3><p>DigitalOcean Droplets or Hetzner Cloud offer public IPs, persistent storage and firewall controls. Start with an observer, monitor resource use, then resize before seeking validator duty.</p></article>
+        <article><span class="step-num">02 / SYNC OCTRA</span><h3>Rust node</h3><p>Build the pinned repository, generate a unique node identity, bootstrap from an independently trusted devnet config, then run <code>octra-node</code> as a supervised service. Keep RPC private.</p></article>
+        <article><span class="step-num">03 / ADD SERVICE</span><h3>Mesh first</h3><p>Configure the embedded mesh and HTTPS control endpoint. Give users daemon-minted, single-use enrollment keys. A personal network does not require a paid exit or operator bond.</p></article>
+      </div>
+      <div class="setup-steps">
+        <section><span class="step-num">OBSERVE BEFORE VOTING</span><h3>Bring up a verified devnet observer.</h3><pre><code>cargo build --locked --release -p octra-node
+target/release/octra-node init-identity --key /private/node.key
+target/release/octra-node bootstrap --config bootstrap.json --directory /private/octra-state
+target/release/octra-node run-network --config network.json</code></pre><p>The bootstrap and network files must pin the real chain origin, validator and exporter trust, config hash and checkpoint floor. Never use a config downloaded from the same untrusted snapshot as its own authority. Start with <code>"voting": false</code>; confirm canonical head/root, peers and restart recovery before changing role.</p></section>
+        <section><span class="step-num">EXPLICIT EXIT OPT-IN</span><h3>Sell traffic only when ready.</h3><p>To carry other people’s Internet traffic, add canonical <code>payments</code>, <code>mesh.stock_exit</code>, a fixed <code>stock_portal</code> and optional paid Circle gateway to your node config. Publish a tariff in your own Circle, bond your operator wallet, expose trusted HTTPS control, configure DNS, TLS, NAT and the advertised exit, then test a finite paid purchase end to end. Without that configuration, node sync and mesh membership do not advertise a paid exit. Other nodes can join your mesh, but routing through a second operator requires a separate accepted plan for that hop.</p></section>
+        <section><span class="step-num">VALIDATOR PATH</span><h3>Earn chain duty separately.</h3><p>Validator enrollment, stake and active membership are chain decisions. Turning on <code>"voting": true</code> is not enough. Verify the current devnet validator requirements and your bonded identity before enabling duty; keep the operator key and node state durable. We intend to require paid VPN operators to be Octra validators in a future protocol version. The current payment Circle does not enforce that rule.</p></section>
+      </div>
+      <p class="operator-source">Full configuration and recovery instructions: <code>github.com/androolloyd/octravpn/blob/main/docs/rust-node/devnet.md</code> and <code>github.com/androolloyd/octravpn/blob/main/docs/architecture/stock-paid-exit.md</code>.</p>
+    </section>
+    <section class="operator-network" aria-labelledby="route-network">
+      <p class="eyebrow">OPERATOR TO OPERATOR</p>
+      <h2 id="route-network">Build a route across<br><em>open channels.</em></h2>
+      <p>Each operator can choose its peers, publish a signed endpoint and tariff, and accept a separate prepaid channel for the next hop. A channel balance is spendable capacity, not permission to forward. Every hop must have a confirmed finite byte purchase before carrying traffic.</p>
+      <div class="route-chain" aria-label="Client to entry operator to exit operator to destination"><span>YOU</span><b>→</b><span>ENTRY</span><b>→</b><span>EXIT</span><b>→</b><span>DESTINATION</span></div>
+      <p>Choose the entry you trust; it carries encrypted traffic to the next operator rather than connecting you directly to an unknown destination. The final exit still sees the destination. Today the native Linux client can run an explicitly accepted two- or three-operator route with one durable plan per hop.</p>
+      <p>The next release goal is to compare healthy exits by measured path latency and price, then propose the closest viable route for your approval. Shielded per-hop payments are required before we can call that operator network private: the current devnet Circle publicly exposes payer and operator relationships. Automatic discovery, private settlement and stock Tailscale mesh-to-mesh routing are not live.</p>
+      <p class="operator-source">Current manual route format: <code>github.com/androolloyd/octravpn/blob/main/docs/architecture/nested-paid-exits.md</code>.</p>
+    </section>
     <div class="operator-cards">
       <article><span class="step-num">01 / THE FRONT DOOR</span><h2>Help people in.</h2><p>Publish a small, exact allowlist of public Circle assets for instructions and offer discovery. The registration-only route cannot carry arbitrary Circle or Internet traffic.</p></article>
       <article><span class="step-num">02 / THE PAID ROUTE</span><h2>Sell finite bytes.</h2><p>Post a public tariff with explicit traffic classes. A user accepts a plan and signs a purchase. The node waits for canonical confirmation before it forwards those bytes.</p></article>
       <article><span class="step-num">03 / THE SETTLEMENT</span><h2>Keep what you earn.</h2><p>OCT moves between payer and operator. Available channel value can include earned OCT, so an exit operator can fund its own usage without first moving earnings out.</p></article>
     </div>
     <section class="operator-note"><p class="eyebrow">THE RULES ARE VISIBLE</p><h2>Price freely.<br><em>Change carefully.</em></h2><p>The current devnet payment Circle delays a new rate for 24 hours, giving payers time to leave. A payer can withdraw available channel OCT immediately; settled purchases stay final. An operator’s stake has a seven-day unstake period. Service still depends on a reachable control plane, canonical state and working routes.</p><a class="button button-dark" href="join.html">See the tester journey <span aria-hidden="true">↗</span></a></section>
-    <section class="operator-footnote"><span class="step-num">PUBLIC DEVNET ALPHA</span><p>A Circle custody app, bonded canary operator and sealed offer exist on public devnet. Bounded paid traffic has been tested. This site does not advertise production availability, certify another operator’s route or issue credentials.</p></section>
+    <section class="operator-footnote"><span class="step-num">PUBLIC DEVNET ALPHA</span><p>Our bonded offer exists on public devnet and bounded paid traffic has been tested. This site does not issue credentials or promise a continuously available exit. The node and VPN validator roles remain independent today.</p></section>
   </main>
   <footer class="footer wrap"><div><a class="brand" href="index.html"><img src="logo.svg" alt="" width="30" height="30"><span>octra<span class="brand-dot">.</span>to</span></a><p>Circle-hosted front door to Octranet.</p></div><div class="footer-links"><a href="join.html">Join</a><a href="browse.html">Browse</a><a href="operators.html">Operate</a></div><small>Public devnet alpha.</small></footer>
 </body>

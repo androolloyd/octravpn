@@ -4,14 +4,14 @@
     {
       "path": "/index.html",
       "content_type": "text/html",
-      "bytes": 5162,
-      "sha256": "aa70cb50eda8fed61f9d6bdffe66997f460e6bb3eab0bff1a27662847441abcd"
+      "bytes": 5186,
+      "sha256": "dac058979e0176acb0edefad605e166ab79c5b57a707571a650e80d56ae0ca07"
     },
     {
       "path": "/join.html",
       "content_type": "text/html",
-      "bytes": 5971,
-      "sha256": "04c4e6d1a124b2d3d323502e028488acd05d83354b8e7b2c6a447e85612e1132"
+      "bytes": 6230,
+      "sha256": "e9555481c2b0014901631189f23c86dce8f9b033289f5dc32ad31575311acb92"
     },
     {
       "path": "/browse.html",
@@ -22,14 +22,14 @@
     {
       "path": "/operators.html",
       "content_type": "text/html",
-      "bytes": 3375,
-      "sha256": "31342b291041714c3c697905a3cfdc5f0e0fa6a6adde1b5fc901791be24af179"
+      "bytes": 9677,
+      "sha256": "0a8562dad9f3ee70bf512d4f375379b4031e1868cee5aac04cd360895224c908"
     },
     {
       "path": "/style.css",
       "content_type": "text/css",
-      "bytes": 10604,
-      "sha256": "1b877d80869c8589fa5e8a548df965577366bad48f9a7979838762c8bfe6aeb5"
+      "bytes": 12397,
+      "sha256": "29a6a7c2df6928a8dd5d264152f24cfbbd511457eaf684327378c0a5ab1b83f6"
     },
     {
       "path": "/logo.svg",

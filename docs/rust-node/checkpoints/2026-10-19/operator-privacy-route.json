@@ -1,0 +1,33 @@
+{
+  "schema": "octranet_operator_privacy_route_v1",
+  "date": "2026-10-19",
+  "network": "octra-devnet-9871-cluster",
+  "operator_profile": {
+    "circle": "oct8zCTzCkDYwHUWYYtHyPavaCakS2W1du6dw34S3tV5oyf",
+    "path": "/operators/octra.to/v1.json",
+    "sha256": "cfcc2f61738efcb21df8115f2896ebfa773dab1daae3678a9acd46cb3aa0cff9",
+    "tx": "d3bbd1713ae11e63641fa63c299408eba5c06c80a236efeab1764745a6b39ad8",
+    "canonical_readback": true,
+    "status": "invite_only_pending_public_control"
+  },
+  "portal_circle": "octC9XpV4K4LJWFzc16zvaS1Rk3z8nyiqS7xwswH84Tca7E",
+  "portal_assets": {
+    "manifest": "sites/octra-to/bundle.json",
+    "all_six_canonical_readback": true,
+    "latest_operators_page_tx": "d49c4b446138e2e1a1cdecf3bcb009e6587c43ac5a70f847e4de5395e5078077",
+    "latest_operators_page_sha256": "0a8562dad9f3ee70bf512d4f375379b4031e1868cee5aac04cd360895224c908"
+  },
+  "client_privacy_change": {
+    "downstream_control": "routed through the preceding paid tunnel with a persistent blackhole fallback",
+    "physical_exceptions": "entry control and entry WireGuard IP only",
+    "bootstrap_privacy": "pinned_ips avoids operator hostname lookups when every hop has accepted control and WireGuard IP pins",
+    "payment_privacy": "shielded_required fails before key loading or journal preparation; existing Circle settlement remains public"
+  },
+  "validation": {
+    "octravpn_client_tests": "passed",
+    "octravpn_client_strict_clippy": "passed",
+    "site_bundle_check": "passed",
+    "git_diff_check": "passed"
+  },
+  "limits": "No shielded Circle payment proof or state transition exists; no live Linux multi-hop packet capture was run for this change. DNS/TLS for the public octra.to origin and sustained public paid-exit availability remain open."
+}

@@ -1,5 +1,6 @@
 //! Nested exits share the existing exclusive route namespace. Every downstream
-//! endpoint has a persistent /32 blackhole beneath its paid carrier route.
+//! peer and non-loopback control IP has a persistent /32 blackhole beneath its
+//! paid carrier route. Only the entry may use a physical management exception.
 use super::{
     json_array, reject_stale, require_ipv6_guard_capability, require_physical_public_path,
     verify_lock_metadata, Route, Runner, System, BLOCK_METRIC, PAID_METRIC, PROTO,
@@ -80,19 +81,7 @@ impl Lease {
                 "composite TUN name is already in use"
             );
         }
-        // Capture all management routes before installing any blocking route.
-        let mut management = BTreeSet::from([*entry.ip()]);
-        management.extend(
-            controls
-                .iter()
-                .map(|peer| *peer.ip())
-                .filter(|ip| !ip.is_loopback()),
-        );
-        let downstream: BTreeSet<_> = peers.iter().map(|peer| *peer.ip()).collect();
-        ensure!(
-            management.is_disjoint(&downstream),
-            "downstream operator overlaps a direct management exception"
-        );
+        let (management, downstream) = route_endpoints(entry, controls, peers)?;
         let mut direct = Vec::new();
         for ip in management {
             direct.push(physical(&runner, ip, interfaces)?);
@@ -128,16 +117,23 @@ impl Lease {
         &mut self,
         previous: &crate::Interface,
         peer: SocketAddrV4,
+        control: SocketAddrV4,
     ) -> Result<()> {
         ensure!(
             self.downstream.contains(peer.ip()),
             "unaccepted downstream endpoint"
         );
+        ensure!(
+            control.ip().is_loopback() || self.downstream.contains(control.ip()),
+            "unaccepted downstream control endpoint"
+        );
         super::require_address(&System, &previous.name, false)?;
-        let route = via_interface(&format!("{}/32", peer.ip()), previous);
-        route.call(&System, "add")?;
-        self.routes.push(route);
-        selected(&System, &peer.ip().to_string(), &previous.name)?;
+        for route in next_routes(previous, peer, control) {
+            let target = route.args[0].trim_end_matches("/32").to_owned();
+            route.call(&System, "add")?;
+            self.routes.push(route);
+            selected(&System, &target, &previous.name)?;
+        }
         Ok(())
     }
 
@@ -168,6 +164,48 @@ impl Lease {
         }
         Ok(())
     }
+}
+
+fn route_endpoints(
+    entry: SocketAddrV4,
+    controls: &[SocketAddrV4],
+    peers: &[SocketAddrV4],
+) -> Result<(BTreeSet<Ipv4Addr>, BTreeSet<Ipv4Addr>)> {
+    ensure!(
+        controls.len() == peers.len() + 1 && !controls.is_empty(),
+        "each route hop requires a control pin"
+    );
+    let mut management = BTreeSet::from([*entry.ip()]);
+    if !controls[0].ip().is_loopback() {
+        management.insert(*controls[0].ip());
+    }
+    let mut downstream: BTreeSet<_> = peers.iter().map(|peer| *peer.ip()).collect();
+    downstream.extend(
+        controls[1..]
+            .iter()
+            .map(|control| *control.ip())
+            .filter(|ip| !ip.is_loopback()),
+    );
+    ensure!(
+        management.is_disjoint(&downstream),
+        "downstream endpoint overlaps an entry physical exception"
+    );
+    Ok((management, downstream))
+}
+
+fn next_routes(
+    previous: &crate::Interface,
+    peer: SocketAddrV4,
+    control: SocketAddrV4,
+) -> Vec<Route> {
+    let mut targets = BTreeSet::from([*peer.ip()]);
+    if !control.ip().is_loopback() {
+        targets.insert(*control.ip());
+    }
+    targets
+        .into_iter()
+        .map(|target| via_interface(&format!("{target}/32"), previous))
+        .collect()
 }
 
 fn install_with(
@@ -396,6 +434,44 @@ mod tests {
             ]
         );
         assert!(!allowed.args.iter().any(|arg| arg == "eth0"));
+    }
+    #[test]
+    fn downstream_control_is_blocked_until_its_carrier_exists() {
+        let entry = "8.8.8.8:51820".parse().unwrap();
+        let controls = [
+            "8.8.8.7:443".parse().unwrap(),
+            "9.9.9.7:443".parse().unwrap(),
+        ];
+        let peers = ["9.9.9.9:51820".parse().unwrap()];
+        let (management, downstream) = route_endpoints(entry, &controls, &peers).unwrap();
+        assert_eq!(
+            management,
+            BTreeSet::from(["8.8.8.8".parse().unwrap(), "8.8.8.7".parse().unwrap()])
+        );
+        assert_eq!(
+            downstream,
+            BTreeSet::from(["9.9.9.9".parse().unwrap(), "9.9.9.7".parse().unwrap()])
+        );
+        let blocked = blockers(&downstream);
+        for ip in downstream {
+            assert!(blocked
+                .iter()
+                .any(|route| route.args[0] == "blackhole" && route.args[1] == format!("{ip}/32")));
+        }
+        let carrier = crate::Interface {
+            name: "octroute0".into(),
+            address: "198.18.0.2".parse().unwrap(),
+            mtu: 1280,
+        };
+        let routes = next_routes(&carrier, peers[0], controls[1]);
+        assert_eq!(routes.len(), 2);
+        assert!(routes
+            .iter()
+            .all(|route| route.args.contains(&"octroute0".into())));
+        assert!(routes.iter().any(|route| route.args[0] == "9.9.9.7/32"));
+        assert!(routes.iter().any(|route| route.args[0] == "9.9.9.9/32"));
+        assert_eq!(next_routes(&carrier, peers[0], peers[0]).len(), 1);
+        assert!(route_endpoints(entry, &[controls[0], entry], &peers).is_err());
     }
     #[test]
     fn management_route_cannot_be_an_existing_paid_or_tailnet_interface() {

@@ -21,17 +21,23 @@ Create a route JSON file with these fields:
 ```text
 {
   "journal": "route-journal",
+  "payment_privacy": "public",
+  "bootstrap_privacy": "pinned_ips",
   "hops": [
     {
       "plan": <complete accepted entry-plan JSON object>,
       "journal": "entry-journal",
       "receipt_key": "/private/path/entry-receipt.key",
+      "wireguard_pin": "ENTRY_PUBLIC_IPV4:WG_PORT",
+      "control_pin": "ENTRY_PUBLIC_IPV4:HTTPS_PORT",
       "interface_name": "octra-entry"
     },
     {
       "plan": <complete accepted exit-plan JSON object>,
       "journal": "exit-journal",
       "receipt_key": "/private/path/exit-receipt.key",
+      "wireguard_pin": "EXIT_PUBLIC_IPV4:WG_PORT",
+      "control_pin": "EXIT_PUBLIC_IPV4:HTTPS_PORT",
       "interface_name": "octra-exit"
     }
   ]
@@ -54,6 +60,17 @@ running. Ctrl-C requests a clean shutdown that joins every hop before removing
 its owned route lease. The Rust library exposes the same lifecycle through
 `MultiPaymentClient`, `MultiPaymentOptions` and `MultiRoutePlan`.
 
+The current Circle records payer, plan, and purchase data publicly. The optional
+`payment_privacy` field defaults to `public` for older files. Setting it to
+`shielded_required` refuses the route before loading a key or opening a journal;
+it never silently downgrades to public payment. Shielded settlement is a future
+chain/Circle integration, not a property of this prepaid route.
+`bootstrap_privacy: "pinned_ips"` requires both accepted IP:port pins for every
+hop, skips operator hostname DNS lookups, and checks the ports and literal-IP
+origins against their accepted plans. Obtain the pins through an authenticated
+source; the later TLS and WireGuard handshakes still authenticate the operator.
+The default `system_dns` resolves operator names before arming the route.
+
 ## Recovery and limits
 
 An error, cancelled future or process death retains blocking routes. Preserve the
@@ -70,10 +87,14 @@ Remove only the rules and routes verified against this exact interrupted route,
 including its priority-1 policy rules. Do not flush a routing table or numeric
 protocol tag. Foreign policy, interfaces or retained leases cause refusal.
 
-Management endpoint IPs are explicit direct-route exceptions. This is not a
-per-socket firewall guarantee. Personal `100.64.0.0/10` traffic follows existing
-host policy. Downstream endpoint blackholes prevent a broken carrier from falling
-back to the ordinary Internet route. IPv6 exit traffic is captured and refused.
+Only entry peer and control IPs are direct-route exceptions. The downstream
+peer and non-loopback control IPs are blackholed until the preceding paid tunnel
+is ready, then both follow that tunnel. Control requests use HTTPS outside local
+tests. This is not a per-socket firewall guarantee; resolving a hostname before
+the route is armed can still disclose that operator hostname to the configured
+DNS resolver. Personal `100.64.0.0/10` traffic follows existing host policy.
+Downstream endpoint blackholes prevent a broken carrier from falling back to the
+ordinary Internet route. IPv6 exit traffic is captured and refused.
 The no-fragment profile uses final MTUs of 1075 bytes for two hops and 867 for
 three, allowing standard WireGuard padding. Oversized UDP is refused; arbitrary
 path-MTU recovery or delivery is not promised. Exhaustion never triggers a top-up.

@@ -6,6 +6,23 @@
 
 A decentralized VPN on Octra with WireGuard traffic, Circle-hosted offers and
 portal assets, and OCT payments directly between users and operators.
+New deployments target [Circle custody](docs/architecture/circle-prepaid.md):
+the payment Circle runs the contract, operator Circles publish tariffs and
+sites, and a portal Circle hosts the bounded unpaid onboarding pages. Rust
+nodes carry packets and enforce canonical prepaid allowances. Existing Program
+configurations remain supported. This Circle-first candidate is locally tested;
+the public-devnet paid route has a bounded packet test, while sustained service
+for public testers remains unqualified.
+
+The [public devnet deployment](docs/rust-node/checkpoints/2026-10-18/devnet-circle-deployment.json)
+has a confirmed, initialized, factory-owned payment Circle and a separate
+[octra.to onboarding Circle](sites/octra-to/README.md) with six byte-verified
+assets. A bonded devnet operator published a tariff, and a signed 1 MiB
+purchase credited 1,000 OU of earnings that the operator withdrew. A later
+[bounded paid observer run](docs/rust-node/checkpoints/2026-10-19/devnet-paid-observer.json)
+forwarded HTTP traffic with matching client/operator byte counters. The
+observer still has intermittent serving gaps, and the public `octra.to` HTTPS
+origin is not active yet.
 
 The current [prepaid channel application](program/octranet-payments.aml) buys
 finite byte allowances before forwarding. Operators choose per-class prices;
@@ -32,6 +49,12 @@ recovery, instant withdrawals, earnings reuse and matching ExEx. The
 [adversarial review](docs/audit/octranet-prepaid-2026-10-17.md) records fixes,
 source pins and proof limits. Purchase authorization does not prove Internet
 delivery; no arbitrary non-delivery slashing or delivery insurance is implemented.
+The current payment candidate can slash a bonded operator for two conflicting
+operator-signed service statements in one plan/class/sequence slot and reserve
+the bond for that payer after the seven-day lock. Paid transport now emits
+durably sequenced statements; the client retains verified statements and
+same-slot conflicts. This path still needs combined live qualification before
+it can be presented as an available user remedy.
 
 The Rust node integrates transaction execution, authenticated peers, the native
 validator driver, canonical commitments, ExEx, Circle browsing and the opt-in
@@ -95,8 +118,20 @@ and canonical history at epoch 1,711,611. Read-only audits verified **66 new
 epochs and 491 transaction events** with matching ExEx. A later guarded sample
 reached epoch 1,711,685; catch-up was active, serving suspended and connected
 peers zero. Sustained public availability and P2P retention remain unqualified.
-Public paid service is unconfigured; onboarding, portal funding, public DNS/TLS
-and Mainnet remain open gates. The prepaid candidate is **not deployed to Mainnet**.
+Public paid service has only bounded devnet evidence; sustained availability,
+public DNS/TLS and Mainnet remain open gates. The prepaid candidate is **not
+deployed to Mainnet**.
+The devnet payment Circle now has a bonded operator and a sealed,
+byte-verified 1,000 OU/MiB offer; the adopted Rust observer has read its
+Circle assets from retained state. A bounded on-chain canary bought a signed
+1 MiB allowance, withdrew the operator's exact earnings, and returned the
+payer's unspent OCT. Later bounded paid forwarding is documented in the
+[paid observer checkpoint](docs/rust-node/checkpoints/2026-10-19/devnet-paid-observer.json);
+sustained service remains unqualified.
+The current Circle custody source passed a separate isolated stock
+Tailscale 1.104.1/Headscale 29.5 gate with prepaid traffic, MagicDNS, Circle
+HTTPS, direct and DERP transport, restart, withdrawal and replay checks; its
+exact evidence is in the [devnet Circle deployment record](docs/rust-node/checkpoints/2026-10-18/devnet-circle-deployment.json).
 The [earlier core adoption](docs/rust-node/checkpoints/2026-10-17/core-parity-public-adoption.json)
 retains its own historical scope.
 
@@ -281,6 +316,14 @@ per audience (contributor / auditor / operator) and
 
 ## What's shielded, by layer
 
+The table below describes historical session designs, not the current prepaid
+Circle. In the current app, payer, operator, plan, balance and purchase metadata
+are public. Explicit nested routes encrypt payload carriage and now carry
+downstream control traffic through the preceding tunnel; accepted IP pins avoid
+operator bootstrap DNS. `payment_privacy: "shielded_required"` refuses to start
+because Circle settlement is not shielded. The final exit still sees the
+Internet destination, and application content needs end-to-end encryption.
+
 | Surface             | Shielded?      | Mechanism                                          |
 | ------------------- | -------------- | -------------------------------------------------- |
 | Tunnel contents     | yes            | WireGuard Noise IK                                 |
@@ -345,7 +388,10 @@ cross-check; structured exit codes 0/1/2/3). See
 [`docs/operator-guide.md`](docs/operator-guide.md) §8a "Auditing
 receipt activity" for the runbook.
 
-Slashing (identical 90% burn / 10% bounty in both versions):
+Historical v1/v2 slashing design (these rows do not describe the prepaid
+Circle candidate; see its signed same-slot rule above). The current source
+disables opaque `slash_double_sign`, so the historical descriptions below are
+not evidence that this entrypoint can presently slash:
 
 | Condition                  | Evidence                                                      |
 | -------------------------- | ------------------------------------------------------------- |
@@ -528,9 +574,9 @@ cargo test --workspace
 ## What's blocked
 
 - **Public paid onboarding remains unqualified.** Local packet and custody
-  qualification does not provision public Circle assets, wallet funding,
-  control reachability or trusted DNS/TLS for `octra.to`. Public observation of
-  devnet does not enable a paid exit. Mainnet is a separate launch gate.
+  qualification plus devnet Circle publication and a bounded paid HTTP probe
+  do not establish sustained public service or trusted DNS/TLS for `octra.to`.
+  Mainnet is a separate launch gate.
 - **Public HFHE settlement remains unqualified.** The May 20 key-load
   blocker was historical. The October 17 recheck found no registered key
   for its test wallet, outdated RPC arguments and a nonexistent probe method.

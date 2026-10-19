@@ -45,6 +45,7 @@ pub use payment_runner::{
 pub use payments::OpenMode as JournalMode;
 
 pub use multihop::{
-    Client as MultiPaymentClient, HopPlan as MultiHopPlan, Options as MultiPaymentOptions,
-    RoutePlan as MultiRoutePlan,
+    BootstrapPrivacy as MultiBootstrapPrivacy, Client as MultiPaymentClient,
+    HopPlan as MultiHopPlan, Options as MultiPaymentOptions, PaymentPrivacy as MultiPaymentPrivacy,
+    RoutePins as MultiRoutePins, RoutePlan as MultiRoutePlan,
 };

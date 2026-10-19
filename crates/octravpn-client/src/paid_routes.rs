@@ -32,8 +32,9 @@ pub(crate) struct PaidRouteGuard {
     unavailable: std::convert::Infallible,
 }
 
-/// One exclusive host lease for a complete nested prepaid route. Management
-/// destinations are explicit IP exceptions, not a per-socket firewall policy.
+/// One exclusive host lease for a complete nested prepaid route. Only entry
+/// management has a physical exception; downstream control follows its paid
+/// carrier and is blackholed until that carrier is ready.
 pub(crate) struct CompositeRouteGuard {
     #[cfg(target_os = "linux")]
     lease: linux::multi::Lease,
@@ -60,14 +61,19 @@ impl CompositeRouteGuard {
         }
     }
     #[cfg_attr(not(target_os = "linux"), allow(clippy::needless_pass_by_ref_mut))]
-    pub(crate) fn next(&mut self, previous: &crate::Interface, peer: SocketAddrV4) -> Result<()> {
+    pub(crate) fn next(
+        &mut self,
+        previous: &crate::Interface,
+        peer: SocketAddrV4,
+        control: SocketAddrV4,
+    ) -> Result<()> {
         #[cfg(target_os = "linux")]
         {
-            self.lease.next(previous, peer)
+            self.lease.next(previous, peer, control)
         }
         #[cfg(not(target_os = "linux"))]
         {
-            let _ = (previous, peer);
+            let _ = (previous, peer, control);
             match self.unavailable {}
         }
     }

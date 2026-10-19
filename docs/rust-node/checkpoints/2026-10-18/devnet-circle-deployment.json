@@ -1,0 +1,283 @@
+{
+  "schema": "octranet_public_devnet_circle_deployment_v1",
+  "observed_at_utc": "2026-10-19T01:09:28.263928+00:00",
+  "chain_id": "octra-devnet-9871-cluster",
+  "rpc": "https://devnet.octrascan.io/rpc",
+  "runtime_observation": {
+    "source_commit": "f7637a7eda10b78702ad56844707f7fd308db0e3",
+    "config_hash": "d71d868ed83ce627e481a6a186cb23eb6d8e948daf865afa06c5d34df445e9c5",
+    "consensus_profile": 16
+  },
+  "candidate": {
+    "local_build_sha256": "78d37341d2eb045e04170e104b3c11c118ad32aefa70e10f1b148834815b59fc",
+    "core_source_sha256": "cbfa3350e4c432bcfcfef411702483aed2a999c4c377f294702c9a622223efc5",
+    "child_code_hash": "f871410b1ff7b4bba8f90653df83d34e5b4896f2b0fd505fae84359cef68e1c9",
+    "factory_code_hash": "75e957e998a13d7a50b2b7c9ec87dafdd060c6b0d0a0b13af39d5c1c0736e2aa",
+    "terms": {
+      "custody_cap": 200000000,
+      "domain": "1d3137c20fea3347de7dba6d90a0c7bea4da5ecd4f1f2e59e5b87b98e2f119ad",
+      "minimum_stake": 100000000
+    }
+  },
+  "deployer": "oct8Tdgu4RLbSGah1fVoVHW4T4cLFDmsoKhTyVD8gCndNFm",
+  "factory": {
+    "circle": "oct9WKTLQgX4HoL8CvTMqHUsLdt3UCRUqWiLYspGbQqH8kH",
+    "transaction": "65e3301451d2edd721ae5ada185cd51b8bf960aa924879c2fd793551d3b65e29",
+    "confirmed_epoch": 1716375,
+    "verified_code_hash": true
+  },
+  "payments": {
+    "circle": "oct4qzVq1RsPQnnoYpbXNuqjHYpPPs2LPdDK2inWZDwYCoP",
+    "spawn_transaction": "3d0cf7cc0de8662ec4aff222921a50d6f4a639c140298a6ed912c50e610d4a02",
+    "spawn_confirmed_epoch": 1716381,
+    "spawn_receipt_success": true,
+    "initialize_transaction": "58b008fecb9a9c9e1a8bd8c99ac54244df68fb3d14cbef494273ad029b68ff09",
+    "initialize_confirmed_epoch": 1716387,
+    "initialize_receipt_success": true,
+    "verified_parent_factory": true,
+    "verified_code_hash": true,
+    "observed_terms": {
+      "domain": "1d3137c20fea3347de7dba6d90a0c7bea4da5ecd4f1f2e59e5b87b98e2f119ad",
+      "custody_cap_ou": 200000000,
+      "minimum_stake_ou": 100000000,
+      "rate_notice_ms": 86400000,
+      "operator_unstake_ms": 604800000,
+      "user_exit_ms": 0,
+      "locked_value_ou": 0
+    }
+  },
+  "portal": {
+    "circle": "octC9XpV4K4LJWFzc16zvaS1Rk3z8nyiqS7xwswH84Tca7E",
+    "deploy_transaction": "9a87a8292ebeef3128ad5843b1475fda192624226b78e7d991c28a6dc3f0c781",
+    "deploy_confirmed_epoch": 1716394,
+    "bundle_manifest_sha256": "e8c5b135d007f2f85b360c1706b09a8cf7cadacac8d9e33a5f1d41fd80a8accb",
+    "assets_status": "all_six_finalized_and_byte_verified",
+    "asset_journal_local": "/private/tmp/octra-devnet-circle-20261018/portal-assets-journal.json",
+    "confirmed_assets": [
+      {
+        "path": "/browse.html",
+        "transaction": "e25e150979ced16f1f618d67e418f7cf2ecfa54f8aa97fc776c72fbc95b41820",
+        "confirmed_epoch": 1716412,
+        "sha256": "69d86eda8593f07de356ac1e96545da560046dbedd3bdcd32527cd355b1c4f98"
+      },
+      {
+        "path": "/index.html",
+        "transaction": "3b48b4e7bd8ebc756856102c813ce38bf1837bd8c2ecd26306d243e284dc0c44",
+        "confirmed_epoch": 1716399,
+        "sha256": "49d040db54d3c37b5e28df007287bc88520b286fbfbd6a11cf7dc07ff2edd959"
+      },
+      {
+        "path": "/join.html",
+        "transaction": "5a528ab64751c5a12dbdf47c723cd269450feea6baf23d3414f8ea5d9cd620d7",
+        "confirmed_epoch": 1716401,
+        "sha256": "dc72c630e9e94deb0b25d40f75519c9a7974876427390f91231fb0d6f41d354c"
+      },
+      {
+        "path": "/logo.svg",
+        "transaction": "b67099a21ae4519719f0fada69f321421ee4ac52a1b06206d091a6f549df2648",
+        "confirmed_epoch": 1716396,
+        "sha256": "65b678c50556b02b205df9d3435bbfc1d8bebb3a79bba98b9c976eb697919262"
+      },
+      {
+        "path": "/operators.html",
+        "transaction": "c92d64002775c819d3b141719ee32f5b7002f630e61fb82cf48375e9e9f92552",
+        "confirmed_epoch": 1716414,
+        "sha256": "dc86efc75d5d8dd5d9148e1f95afab53bc3933ced904e0cdfba69b25b089eeff"
+      },
+      {
+        "path": "/style.css",
+        "transaction": "e3d4f426c485eb608bc7d4cb84a883fb72564fc14b167cdd101efbe3661357db",
+        "confirmed_epoch": 1716418,
+        "sha256": "cb0c962a37476ff88722e49eff404212be303218b780de7732a655dd042a0b85"
+      }
+    ],
+    "remaining_assets": [],
+    "public_dns_a_record_active": false,
+    "public_tls_active": false,
+    "rust_observer_byte_exact_readback_epoch": 1716418
+  },
+  "scope": "Confirmed public-devnet payment custody Circle, onboarding Circle, bonded operator and sealed 1,000 OU/MiB offer. Public accounting canary verified a signed byte purchase, operator earnings withdrawal, and immediate payer withdrawal; no Internet delivery was claimed. Exact-source local stock Circle gate passed. Candidate Rust binary adopted retained devnet state and byte-read Circle assets. Public paid forwarding, octra.to DNS/TLS and sustained availability remain open. No mainnet claim.",
+  "rust_observer": {
+    "observed_at_utc": "2026-10-19T01:11:51.487618+00:00",
+    "serving": true,
+    "connected_peers": 9,
+    "canonical_epoch": 1716399,
+    "canonical_state_root": "50c8cf33447879b3271fb94c13fac868b3a817157b57ee04aa50ed2c52761452",
+    "payment_transport": "unconfigured",
+    "circle_code_hash_matched": true,
+    "circle_domain_matched": true,
+    "scope": "Local retained-state Rust observer readback, not this candidate binary adoption or paid traffic qualification",
+    "portal_assets_byte_exact": 6,
+    "portal_readback_epoch": 1716418,
+    "portal_readback_peers": 14
+  },
+  "public_rpc_observation": {
+    "observed_at_utc": "2026-10-19T01:23:04.654502+00:00",
+    "head_at_least_epoch": 1716418,
+    "asset_publication_finalized": true,
+    "scope": "All six asset transactions confirmed; no public HTTPS origin qualification"
+  },
+  "economics": {
+    "deployer_initial_balance_ou": 54609781057,
+    "deployer_final_balance_ou": 54592581057,
+    "confirmed_nonces": [
+      510,
+      511,
+      512,
+      513,
+      514,
+      515,
+      516,
+      517,
+      518,
+      519
+    ],
+    "observed_debit_ou": 17200000,
+    "payment_circle_locked_value_ou": 0,
+    "operator_stake_ou": 0,
+    "payer_deposit_ou": 0,
+    "protocol_commission_ou": 0,
+    "scope": "Devnet balance before/after these confirmed transactions; declared transaction OU debited, no value transferred into custody"
+  },
+  "local_stock_circle_gate": {
+    "qualified": true,
+    "evidence": "/private/tmp/octra-stock-circle-current-20261018-v2/qualification.json",
+    "cleanup_verified": true,
+    "application": "circle",
+    "native_source_sha256": "8496927df2deb259173d72190030c5735bf04ffe99af489a48f87449350c6705",
+    "node_image_sha256": "fea8caab7b0ddd1b8c9cfea0bbc8b2d431214b1bbcb9cfa8c4486a0d921e1272",
+    "fixture_image_sha256": "bb61bc37c63984dd532fa97ed9102228facf39a25843248cf6c574bca8445922",
+    "headscale_commit": "570fa5a60c8ed792b643a301b5e91d3b668ba614",
+    "stock_tailscale_version": "1.104.1",
+    "scope": "Isolated four-validator native Circle custody with real stock Tailscale kernel join, prepaid TCP/UDP/ICMP, MagicDNS, Circle HTTPS, direct and DERP, forced restart, reenrollment, exhaustion, instant withdrawal, replay refusal and four ExEx sinks; no public-network paid session or DNS/TLS qualification"
+  },
+  "updated_at_utc": "2026-10-19T02:43:29.130390+00:00",
+  "operator_canary": {
+    "wallet": "oct1JBUrYbeTQazQ39LQn4ZjnPLHfDpLGXouqon1jZhJfYP",
+    "funding": {
+      "amount_ou": 120000000,
+      "transaction": "c4e1fc924eca5671f0437447b8d9cb884603943ebde60ae18ceb84c131fa7f91",
+      "confirmed_epoch": 1716600
+    },
+    "bond": {
+      "amount_ou": 100000000,
+      "transaction": "ef75d2c6a2dc1724efdd9dbffb0145282d7f9b3ef4d5ec28890740998ac27ab1",
+      "confirmed_epoch": 1716605,
+      "canonical_stake_verified": true
+    },
+    "receipt_key": {
+      "transaction": "3b36a62f5e33cfa09acdf8b5b2e482f827d44f63270649bb2ce584a8fa822527",
+      "confirmed_epoch": 1716611,
+      "canonical_key_matches_local_signer": true
+    },
+    "tariff_circle": {
+      "circle": "oct8zCTzCkDYwHUWYYtHyPavaCakS2W1du6dw34S3tV5oyf",
+      "deploy_transaction": "2b0c5026138c7c4674ede3c46b578259d541cfd2a64f96d9d8f3ce9d17d1ddcb",
+      "confirmed_epoch": 1716616,
+      "owner_verified": true,
+      "asset_path": "/offers/6dbf15ffc4b5db0c2b50170661b79191f2b34c15839bd0c5cfe85769c7ac61ae/tariff.json",
+      "asset_transaction": "b7078e1a928fffa7558770f7484ed0ccc9c10b47ba351d819177e52257641497",
+      "asset_confirmed_epoch": 1716618,
+      "asset_sha256": "6dbf15ffc4b5db0c2b50170661b79191f2b34c15839bd0c5cfe85769c7ac61ae",
+      "asset_bytes": 143,
+      "byte_exact_readback": true
+    },
+    "offer": {
+      "index": 0,
+      "create_transaction": "7dbc2b4cdf7d0adda18d40fa2410735dce9281945c8ed600be9de5c7fcb0219a",
+      "create_confirmed_epoch": 1716628,
+      "class_transaction": "2556c34943011c00871f47413210732c9a0c814f138104af4368b0c8b09aea83",
+      "class_confirmed_epoch": 1716631,
+      "rate_ou_per_mib": 1000,
+      "seal_transaction": "0e238ad6422d2a3af09ef06a24c764afc480bcd76184804780106f3dbf262845",
+      "seal_confirmed_epoch": 1716635,
+      "canonical_owner_manifest_rate_sealed_and_available_verified": true
+    },
+    "scope": "Public devnet bond and sealed offer remain live. One signed accounting canary credited and withdrew 1,000 OU of operator earnings; the payer withdrew all unspent OCT. No public paid forwarding is configured."
+  },
+  "candidate_adoption": {
+    "passed": true,
+    "evidence": "out/octra-devnet-circle-20261018/public-adoption/adoption.json",
+    "binary_sha256": "24d6a001ff899064b54f0dfccc491b343b6fbd780bc7a37f54077016ef82d36e",
+    "old_head_epoch": 1716587,
+    "adopted_head_epoch": 1716603,
+    "retained_state": true,
+    "voting": false,
+    "payments_configured": false,
+    "local_circle_byte_exact_readback": [
+      "/index.html",
+      "/offers/6dbf15ffc4b5db0c2b50170661b79191f2b34c15839bd0c5cfe85769c7ac61ae/tariff.json"
+    ],
+    "scope": "The candidate binary is running on public devnet with retained state; 16 to 17 peers observed and Circle reads succeeded during serving windows, but sustained availability and paid service are still open."
+  },
+  "payer_accounting_canary": {
+    "payer": "oct8Tdgu4RLbSGah1fVoVHW4T4cLFDmsoKhTyVD8gCndNFm",
+    "register": {
+      "transaction": "daa9b19df47de4aed148067d989a1c96036b2feda8e671792592f7a0a45989e4",
+      "confirmed_epoch": 1716648,
+      "generation": 1
+    },
+    "deposit": {
+      "transaction": "32834003e900655de6e5fd77b22a8fdc9756250133bf8ce2240fcf649415623d",
+      "confirmed_epoch": 1716652,
+      "amount_ou": 1000000
+    },
+    "plan": {
+      "index": 0,
+      "offer": 0,
+      "budget_ou": 100000,
+      "transaction": "ed62161b7e29217310b9cffdfb530ceb09d25b50518f4c8957fab695d3957ecd",
+      "confirmed_epoch": 1716655
+    },
+    "purchase": {
+      "transaction": "e2b4772bb5bcae9eb18fb74c11a3c507771ce80626971578ebdbeed2015a3a56",
+      "confirmed_epoch": 1716660,
+      "signed_cumulative_bytes": 1048576,
+      "traffic_class": 0,
+      "operator_earnings_increment_ou": 1000,
+      "payer_funds_after_ou": 999000,
+      "plan_remaining_after_ou": 99000
+    },
+    "operator_earnings_withdrawal": {
+      "transaction": "85e77fa49357a8977010b7caab7de500476b02d8bdae348c62ad8ba84f16b720",
+      "confirmed_epoch": 1716666,
+      "amount_ou": 1000,
+      "earnings_after_ou": 0
+    },
+    "payer_channel_withdrawal": {
+      "transaction": "c9886dd3a8fc82d7581f9bf7c0fd6dcfc7f500b43a9f99fbc0a9cf92a5719d37",
+      "confirmed_epoch": 1716671,
+      "amount_ou": 999000,
+      "generation_after": 2,
+      "funds_after_ou": 0,
+      "reserved_after_ou": 0,
+      "can_forward_after": false,
+      "locked_value_after_ou": 100000000
+    },
+    "replay_probe": {
+      "submitted": false,
+      "reason": "public RPC capacity response before nonce fetch; isolated stock gate already verified replay refusal"
+    },
+    "scope": "Real public-devnet Circle accounting and operator earnings withdrawal with a signed 1 MiB purchase. No Internet bytes were delivered in this canary; this is not paid transport qualification."
+  },
+  "observer_five_minute_soak": {
+    "responses": 30,
+    "serving_samples": 5,
+    "min_epoch": 1716663,
+    "max_epoch": 1716687,
+    "max_peers": 18,
+    "evidence": "/private/tmp/octra-devnet-circle-20261018/observer-soak.json",
+    "scope": "Canonical progress and public peer discovery observed, but serving admission was intermittent; sustained availability is not qualified."
+  },
+  "observer_idle_head_soak": {
+    "observed_at_utc": "2026-10-19T02:57:56Z",
+    "responses": 30,
+    "serving_samples": 30,
+    "head_epoch": 1716699,
+    "state_root": "f4a0e49728723d55d5c55296c547afb333689636114c8be212d518765ee5ebf8",
+    "official_head_and_root_matched": true,
+    "max_peers": 16,
+    "evidence": "/private/tmp/octra-devnet-circle-20261018/observer-soak-v2.json",
+    "scope": "Five-minute serving continuity at an unchanged official head. This does not qualify serving while new epochs are produced."
+  }
+}

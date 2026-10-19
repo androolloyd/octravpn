@@ -3,9 +3,10 @@
 //! carriage to the next operator; only the exit observes the web destination.
 //!
 //! Linux only: a single exclusive policy-route lease arms IPv4/IPv6 blockers
-//! before payment. Operator control IPs and the entry IP are explicit direct
-//! management exceptions, not a per-socket firewall. Personal 100.64/10 uses
-//! existing host policy. All downstream endpoints have /32 blocking fallbacks.
+//! before payment. Only entry control and peer IPs are direct management
+//! exceptions. Downstream control and peer IPs travel through the preceding
+//! paid tunnel, with /32 blocking fallbacks. Personal 100.64/10 uses existing
+//! host policy.
 //! An error, cancellation or crash retains the blockers; clean caller-requested
 //! shutdown closes every hop before deliberately restoring ordinary routes.
 //!
@@ -22,7 +23,7 @@ use anyhow::{ensure, Context, Result};
 use octravpn_core::ip_tunnel;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     io::Read as _,
     net::{Ipv4Addr, SocketAddrV4},
     path::{Path, PathBuf},
@@ -42,6 +43,26 @@ mod tests;
 pub struct RoutePlan {
     pub journal: PathBuf,
     pub hops: Vec<HopPlan>,
+    /// The current custody Circle is public. A caller requesting shielded
+    /// settlement must fail before reading keys, opening journals or routing.
+    #[serde(default)]
+    pub payment_privacy: PaymentPrivacy,
+    #[serde(default)]
+    pub bootstrap_privacy: BootstrapPrivacy,
+}
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentPrivacy {
+    #[default]
+    Public,
+    ShieldedRequired,
+}
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum BootstrapPrivacy {
+    #[default]
+    SystemDns,
+    PinnedIps,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -50,6 +71,10 @@ pub struct HopPlan {
     pub journal: PathBuf,
     pub receipt_key: PathBuf,
     pub interface_name: String,
+    #[serde(default)]
+    pub wireguard_pin: Option<SocketAddrV4>,
+    #[serde(default)]
+    pub control_pin: Option<SocketAddrV4>,
 }
 impl RoutePlan {
     pub fn load(path: &Path) -> Result<Self> {
@@ -69,11 +94,21 @@ impl RoutePlan {
     }
     pub fn options(self, mode: crate::JournalMode) -> Result<Options> {
         ensure!(
+            self.payment_privacy == PaymentPrivacy::Public,
+            "shielded route settlement is unavailable: the current Circle exposes payer, plan and purchases"
+        );
+        ensure!(
             (2..=octravpn_core::onion::MAX_HOPS).contains(&self.hops.len()),
             "a composite route requires two or three hops"
         );
         let mut hops = Vec::new();
+        let mut pins = Vec::new();
         for hop in self.hops {
+            let pin = match (hop.wireguard_pin, hop.control_pin) {
+                (Some(wireguard), Some(control)) => Some(RoutePins { wireguard, control }),
+                (None, None) if self.bootstrap_privacy == BootstrapPrivacy::SystemDns => None,
+                _ => anyhow::bail!("private bootstrap requires both operator IP pins at every hop"),
+            };
             let secret = hop
                 .receipt_key
                 .to_str()
@@ -85,10 +120,12 @@ impl RoutePlan {
                 interface_name: hop.interface_name,
                 mode,
             });
+            pins.push(pin);
         }
         Ok(Options {
             journal: self.journal,
             hops,
+            pins,
             mode,
         })
     }
@@ -100,7 +137,17 @@ impl RoutePlan {
 pub struct Options {
     pub journal: PathBuf,
     pub hops: Vec<PaymentOptions>,
+    /// A complete per-hop pin avoids all operator hostname lookups.
+    pub pins: Vec<Option<RoutePins>>,
     pub mode: crate::JournalMode,
+}
+
+/// Explicitly accepted network addresses; TLS and WireGuard still authenticate
+/// the operator's original hostname/key rather than trusting the IP alone.
+#[derive(Clone, Copy, Debug)]
+pub struct RoutePins {
+    pub wireguard: SocketAddrV4,
+    pub control: SocketAddrV4,
 }
 
 /// Owned bounded route and live hop tasks. Opening installs host routes; unlike
@@ -117,11 +164,18 @@ impl Client {
         validate(&options)?;
         let mtus = mtu::route_mtus(options.hops.len())?;
         let mut pins = Vec::new();
-        for hop in &options.hops {
-            pins.push(Pins {
-                wireguard: PaidRouteGuard::resolve_public_peer(&hop.plan.wireguard_endpoint)
-                    .await?,
-                control: resolve_control(&hop.plan.origin()?).await?,
+        for (hop, accepted) in options.hops.iter().zip(&options.pins) {
+            pins.push(if let Some(pin) = accepted {
+                Pins {
+                    wireguard: pin.wireguard,
+                    control: pin.control,
+                }
+            } else {
+                Pins {
+                    wireguard: PaidRouteGuard::resolve_public_peer(&hop.plan.wireguard_endpoint)
+                        .await?,
+                    control: resolve_control(&hop.plan.origin()?).await?,
+                }
             });
         }
         validate_pins(&pins)?;
@@ -158,7 +212,9 @@ impl Client {
         for (index, prepared) in prepared.into_iter().enumerate() {
             client.journal.check().await?;
             if let Some(previous) = client.interfaces.last().cloned() {
-                client.routes.next(&previous, pins[index].wireguard)?;
+                client
+                    .routes
+                    .next(&previous, pins[index].wireguard, pins[index].control)?;
             }
             let connection = if client.workers.is_empty() {
                 prepared.open().await?
@@ -265,13 +321,20 @@ fn validate(options: &Options) -> Result<()> {
         (2..=octravpn_core::onion::MAX_HOPS).contains(&options.hops.len()),
         "a composite route requires two or three hops"
     );
+    ensure!(
+        options.pins.len() == options.hops.len(),
+        "composite route pin count differs from hop count"
+    );
     let mut paths = BTreeSet::from([absolute(&options.journal)?]);
     let mut names = BTreeSet::new();
     let mut sessions = BTreeSet::new();
     let mut addresses = BTreeSet::new();
     let mut keys = BTreeSet::new();
-    for hop in &options.hops {
-        hop.plan.origin()?;
+    for (hop, accepted) in options.hops.iter().zip(&options.pins) {
+        let origin = hop.plan.origin()?;
+        if let Some(pin) = accepted {
+            validate_route_pin(&hop.plan, &origin, *pin)?;
+        }
         ensure!(
             hop.mode == options.mode,
             "mixed journal create/resume modes are forbidden"
@@ -308,20 +371,67 @@ fn validate(options: &Options) -> Result<()> {
     }
     Ok(())
 }
-fn validate_pins(pins: &[Pins]) -> Result<()> {
-    let mut peers = BTreeSet::new();
-    for pin in pins {
+fn validate_route_pin(
+    plan: &crate::AcceptedPlan,
+    origin: &reqwest::Url,
+    pin: RoutePins,
+) -> Result<()> {
+    ensure!(
+        ip_tunnel::public_ipv4(*pin.wireguard.ip()) && pin.wireguard.port() != 0,
+        "WireGuard pin requires a public IPv4 endpoint"
+    );
+    let raw = plan
+        .wireguard_endpoint
+        .trim()
+        .strip_prefix("wg://")
+        .unwrap_or(plan.wireguard_endpoint.trim());
+    let endpoint = reqwest::Url::parse(&format!("udp://{raw}"))?;
+    ensure!(
+        endpoint.port() == Some(pin.wireguard.port()),
+        "WireGuard pin port differs from accepted endpoint"
+    );
+    if let Some(host) = endpoint
+        .host_str()
+        .and_then(|host| host.parse::<Ipv4Addr>().ok())
+    {
         ensure!(
-            peers.insert(*pin.wireguard.ip()),
-            "operator endpoint IPs must be distinct"
+            host == *pin.wireguard.ip(),
+            "WireGuard pin IP differs from accepted endpoint"
         );
     }
-    for pin in &pins[1..] {
+    ensure!(
+        origin.port_or_known_default() == Some(pin.control.port()),
+        "control pin port differs from accepted origin"
+    );
+    let local = matches!(origin.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    ensure!(
+        (local && pin.control.ip().is_loopback())
+            || (!local && ip_tunnel::public_ipv4(*pin.control.ip())),
+        "control pin address differs from accepted origin policy"
+    );
+    if let Some(host) = origin
+        .host_str()
+        .and_then(|host| host.parse::<Ipv4Addr>().ok())
+    {
         ensure!(
-            pins.iter()
-                .all(|control| control.control.ip() != pin.wireguard.ip()),
-            "downstream endpoint overlaps a direct control IP exception"
+            host == *pin.control.ip(),
+            "control pin IP differs from accepted origin"
         );
+    }
+    Ok(())
+}
+fn validate_pins(pins: &[Pins]) -> Result<()> {
+    let mut owners = BTreeMap::new();
+    for (index, pin) in pins.iter().enumerate() {
+        for ip in [*pin.wireguard.ip(), *pin.control.ip()] {
+            if ip.is_loopback() {
+                continue;
+            }
+            ensure!(
+                owners.insert(ip, index).is_none_or(|owner| owner == index),
+                "two route hops share an endpoint IP"
+            );
+        }
     }
     Ok(())
 }

@@ -2,10 +2,12 @@
 
 ## What is OctraVPN?
 
-A decentralized VPN that runs on the Octra blockchain. Validators
-register as VPN nodes with an OCT bond; clients open multi-hop
-sessions, route traffic, and pay per-MB with private settlement on
-chain. See `README.md` for the full pitch.
+A VPN with Octra-backed operator bonds, offers and prepaid OCT traffic
+purchases. The current Circle payment application exposes payer, plan and
+purchase data publicly. An explicit Linux client can compose two or three
+paid tunnels; automatic operator selection and shielded route settlement are
+not deployed. See `docs/architecture/operator-route-network.md` for the
+current boundary.
 
 ## How is this different from Tor / Mysterium / Sentinel / Orchid?
 
@@ -15,7 +17,7 @@ chain. See `README.md` for the full pitch.
 | **Mysterium** | MYST | Single-hop | Operator-trust | Reputation only |
 | **Sentinel** | DVPN | Single-hop | Operator-trust | None on-chain |
 | **Orchid** | OXT | Multi-hop via probabilistic nanopayments | Operator-trust + economic | None on-chain |
-| **OctraVPN** | **OCT only** | 1–3-hop onion | Cryptographic (Pedersen route commits) + economic (bond) | **On-chain double-sign + no-show + offline slashing** |
+| **OctraVPN (current prepaid Circle)** | **OCT only** | Explicit 1–3 paid tunnels | Encrypted carriage; public payment metadata | Bonded-operator signed-receipt equivocation |
 
 The single-token (OCT-only) design is deliberate — see
 `docs/economics.md` § 4 for why. The on-chain slashing with
@@ -37,28 +39,15 @@ front-running surface. See `docs/economics.md` § 4.2.
 
 ## Is OctraVPN actually private?
 
-For an active session:
-
-- **Client identity** is shielded: each session uses an ephemeral
-  session pubkey; your wallet pubkey is never associated with the
-  session on chain.
-- **Validator identity per session** is shielded by Pedersen
-  commitments to the validator's address.
-- **Per-session amount** is revealed at settlement (signed
-  plaintext `bytes_used`). Per-validator accumulated earnings stay
-  private inside a Pedersen accumulator until claimed.
-- **Payment destinations** are unlinkable via stealth outputs.
-- **Tunnel contents** are WireGuard-Noise-encrypted hop-to-hop.
-- **Multi-hop onion encryption** ensures no single hop sees both
-  predecessor and successor.
-
-What's *not* shielded:
-
-- The exit node sees the plaintext destination IP/host (inherent
-  to any VPN — see `docs/threat-model.md`).
-- A network observer with global visibility can correlate the WG
-  handshake between client and entry hop (mitigated by pluggable
-  transports — v2 milestone).
+In the current prepaid Circle, payer addresses, operator offers, plan links,
+funding and purchases are public. The tunnel encrypts packets between its
+authenticated endpoints. In an explicit nested route, downstream control and
+WireGuard traffic go through the preceding paid tunnel, but the entry sees the
+client IP and the final exit sees the destination IP and port. End-to-end
+application content still needs HTTPS or equivalent encryption. An observer
+can correlate traffic by timing and size. A `shielded_required` route refuses
+to start while there is no verified shielded settlement adapter; it does not
+fall back to public settlement.
 
 ## What's the cost?
 

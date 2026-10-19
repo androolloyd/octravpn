@@ -1,0 +1,14 @@
+{
+  "schema": "octranet_operator_profile_v1",
+  "network": "octra-devnet-9871-cluster",
+  "name": "octra.to",
+  "operator": "oct1JBUrYbeTQazQ39LQn4ZjnPLHfDpLGXouqon1jZhJfYP",
+  "payment_circle": "oct4qzVq1RsPQnnoYpbXNuqjHYpPPs2LPdDK2inWZDwYCoP",
+  "offer": 0,
+  "tariff_circle": "oct8zCTzCkDYwHUWYYtHyPavaCakS2W1du6dw34S3tV5oyf",
+  "tariff_path": "/offers/6dbf15ffc4b5db0c2b50170661b79191f2b34c15839bd0c5cfe85769c7ac61ae/tariff.json",
+  "portal_circle": "octC9XpV4K4LJWFzc16zvaS1Rk3z8nyiqS7xwswH84Tca7E",
+  "site": "https://octra.to",
+  "enrollment": "invite_only_pending_public_control",
+  "exit": "bounded_devnet_test_only"
+}

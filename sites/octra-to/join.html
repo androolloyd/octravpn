@@ -15,8 +15,8 @@
   <main class="wrap subpage">
     <p class="eyebrow"><span class="signal"></span> PUBLIC DEVNET / TESTER GUIDE</p>
     <h1>Your path in.<br><em>On your terms.</em></h1>
-    <p class="lede narrow">The devnet onboarding Circle is published. Joining a network still requires an operator-issued HTTPS login server and a private, usually single-use enrollment key. Open self-service signup is not available yet.</p>
-    <div class="status-ribbon"><strong>Published</strong><span>Circle assets on public devnet</span><strong>To join</strong><span>Get an operator-issued invitation</span></div>
+    <p class="lede narrow">octra.to is a bonded VPN operator on public devnet with a sealed prepaid offer. Joining still requires an operator-issued HTTPS login server and private, usually single-use enrollment key. Open self-service signup is not available yet.</p>
+    <div class="status-ribbon"><strong>Offer</strong><span>1,000 OU per MiB · devnet · class 0</span><strong>To join</strong><span>Get an operator-issued invitation</span></div>
     <div class="guide-grid">
       <div class="guide-main">
         <section class="guide-step">
@@ -43,7 +43,7 @@
         <section class="guide-step">
           <span class="step-num">04 / BUY FINITE TRAFFIC</span>
           <h2>Fund locally. Review the rate.</h2>
-          <p>Ask your operator for an accepted prepaid plan with its exact tariff and a funded devnet OCT wallet. Review the offered bytes and OCT cost before the local client signs. For a stock Tailscale device, the client uses your public <code>nodekey:</code> identity, private receipt key and a durable journal:</p>
+          <p>Our published payment Circle is <code>oct4qzVq1RsPQnnoYpbXNuqjHYpPPs2LPdDK2inWZDwYCoP</code>, offer <code>0</code>, owned by <code>oct1JBUrYbeTQazQ39LQn4ZjnPLHfDpLGXouqon1jZhJfYP</code>. Its sealed default rate is <strong>1,000 OU per MiB</strong> (0.001 OCT/MiB). Verify these facts against canonical devnet state before accepting a plan; rates can change with notice. The local client uses your public <code>nodekey:</code> identity, private receipt key and a durable journal:</p>
           <pre><code>octravpn stock-payments \
   --plan accepted-plan.json \
   --journal /private/path/plan-journal \
@@ -60,7 +60,7 @@
       </div>
       <aside class="guide-aside">
         <div class="aside-card"><span class="eyebrow">KEEP THIS PRIVATE</span><h3>Your wallet stays yours.</h3><p>Never paste wallet secrets, receipt keys or enrollment credentials into a Circle page. The site is read-only. Funding and signing happen in the local client.</p></div>
-        <div class="aside-card light"><span class="eyebrow">BEFORE YOU START</span><h3>Ask for four things.</h3><ol><li>HTTPS login server</li><li>Private enrollment key</li><li>Published tariff and plan</li><li>Operator support contact</li></ol><p>Until the operator can provide all four, you can inspect this public Circle but cannot finish joining from this page alone.</p></div>
+        <div class="aside-card light"><span class="eyebrow">BEFORE YOU START</span><h3>Ask for four things.</h3><ol><li>HTTPS login server</li><li>Private enrollment key</li><li>Published tariff and plan</li><li>Operator support contact</li></ol><p>Until we can provide all four, you can inspect this public Circle but cannot finish joining from this page alone.</p><a href="operators.html">Prefer your own node? Start here →</a></div>
       </aside>
     </div>
   </main>
