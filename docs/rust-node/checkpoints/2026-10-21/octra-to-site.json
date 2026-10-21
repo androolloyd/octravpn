@@ -1,0 +1,102 @@
+{
+  "observed_at_utc": "2026-10-21T08:16:02.315669+00:00",
+  "status": "six portal assets canonical and byte-verified; public HTTPS gateway awaits fresh observer",
+  "circle": "octC9XpV4K4LJWFzc16zvaS1Rk3z8nyiqS7xwswH84Tca7E",
+  "owner": "oct8Tdgu4RLbSGah1fVoVHW4T4cLFDmsoKhTyVD8gCndNFm",
+  "updates": [
+    {
+      "circle": "octC9XpV4K4LJWFzc16zvaS1Rk3z8nyiqS7xwswH84Tca7E",
+      "path": "/index.html",
+      "sha256": "2fbea09a95a9067fec3618f5ee0dd211847f5b78f777c2c886017a41da08e89c",
+      "bytes": 5169,
+      "nonce": 539,
+      "fee_ou": 10000,
+      "possible_submission": true,
+      "tx_hash": "f622865795ada11a113ef10efc573c8ad1069f25acad2962c9eb8b073d071233",
+      "canonical": true
+    },
+    {
+      "circle": "octC9XpV4K4LJWFzc16zvaS1Rk3z8nyiqS7xwswH84Tca7E",
+      "path": "/join.html",
+      "sha256": "99266df22ce83ee9b2f9b31b40dafbacea991c49e3c0323dd7c01d0fe0231a4f",
+      "bytes": 5541,
+      "nonce": 540,
+      "fee_ou": 10000,
+      "possible_submission": true,
+      "tx_hash": "0421d04f0cc3c480887aab76d4f4ec565bba67002ce96919f0d70907e20d732c",
+      "canonical": true
+    },
+    {
+      "circle": "octC9XpV4K4LJWFzc16zvaS1Rk3z8nyiqS7xwswH84Tca7E",
+      "path": "/operators.html",
+      "sha256": "051c173bc9463ad61e75aeb1e8702604ad4cce02b981586aab590868beacd319",
+      "bytes": 9873,
+      "nonce": 541,
+      "fee_ou": 10000,
+      "possible_submission": true,
+      "tx_hash": "bbac7aa44735fcee4ce1970242ff1472b013312d703268e6525ad78db9faee86",
+      "canonical": true
+    }
+  ],
+  "all_assets": [
+    {
+      "path": "/index.html",
+      "bytes": 5169,
+      "sha256": "2fbea09a95a9067fec3618f5ee0dd211847f5b78f777c2c886017a41da08e89c",
+      "canonical": true
+    },
+    {
+      "path": "/join.html",
+      "bytes": 5541,
+      "sha256": "99266df22ce83ee9b2f9b31b40dafbacea991c49e3c0323dd7c01d0fe0231a4f",
+      "canonical": true
+    },
+    {
+      "path": "/browse.html",
+      "bytes": 4432,
+      "sha256": "84888d9f9dfec3d09d1081aa40c9868d3961f218ca4da2febb9090c2ea00e7f1",
+      "canonical": true
+    },
+    {
+      "path": "/operators.html",
+      "bytes": 9873,
+      "sha256": "051c173bc9463ad61e75aeb1e8702604ad4cce02b981586aab590868beacd319",
+      "canonical": true
+    },
+    {
+      "path": "/style.css",
+      "bytes": 12397,
+      "sha256": "29a6a7c2df6928a8dd5d264152f24cfbbd511457eaf684327378c0a5ab1b83f6",
+      "canonical": true
+    },
+    {
+      "path": "/logo.svg",
+      "bytes": 310,
+      "sha256": "65b678c50556b02b205df9d3435bbfc1d8bebb3a79bba98b9c976eb697919262",
+      "canonical": true
+    }
+  ],
+  "total_declared_fee_ou": 30000,
+  "rejected_low_fee_attempt": {
+    "rpc_code": 113,
+    "minimum_fee_ou": 10000,
+    "rejected_before_admission": true,
+    "nonce_unchanged": true
+  },
+  "trusted_tls": true,
+  "public_dns_ipv4": "143.110.222.241",
+  "https_join_status": 503,
+  "boundary": {
+    "observed_at_utc": "2026-10-21T08:16:02.231968+00:00",
+    "trusted_tls": true,
+    "blocked_paths": {
+      "/rpc": 404,
+      "/app": 404,
+      "/circles/blocked/index.html": 404
+    },
+    "private_control_http_status": 404,
+    "alpha_live": false
+  },
+  "public_alpha_qualified": false,
+  "private_paid_ingress_active": false
+}
