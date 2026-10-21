@@ -98,6 +98,7 @@ pub struct Publisher<A> {
     store: Arc<CanonicalStore>,
     authority: A,
     audits: audit_cache::AuditCache,
+    stored_audits: audit_cache::AuditCache,
 }
 
 /// Diagnostic counts for one complete retained-history audit. Reuse still
@@ -151,6 +152,7 @@ impl<A: ValidatorHistory> Publisher<A> {
             store,
             authority,
             audits: audit_cache::AuditCache::default(),
+            stored_audits: audit_cache::AuditCache::default(),
         };
         publisher.audit().await?;
         Ok(publisher)
@@ -372,12 +374,17 @@ impl<A: ValidatorHistory> Publisher<A> {
     }
 
     async fn audit_record(&self, sequence: Sequence) -> Result<bool> {
-        let retained = self.retained_record(sequence).await?;
+        let stored = self.store.audit_record(sequence).await?;
         // A digest never replaces fresh selected-path/relief authentication.
         // Use this exact authority both in the key and on a cache miss.
-        let rules = self
-            .rules(&retained.base, retained.head.cursor.epoch.0)
-            .await?;
+        let rules = self.rules(&stored.base, stored.head.cursor.epoch.0).await?;
+        let stored_key = audit_cache::stored_key(self.store.chain(), &stored, &rules);
+        if self.stored_audits.contains(sequence, &stored_key) {
+            return Ok(true);
+        }
+        // Never reread a different row after computing the key: the successful
+        // authentication must cover exactly the captured bytes being cached.
+        let retained = self.decode_audit_record(stored)?;
         let key = audit_cache::Inputs {
             chain: self.store.chain(),
             base: &retained.base,
@@ -391,12 +398,52 @@ impl<A: ValidatorHistory> Publisher<A> {
         }
         .key();
         if self.audits.contains(sequence, &key) {
+            self.stored_audits.insert(sequence, stored_key);
             return Ok(true);
         }
         self.authenticate_with_rules(retained.evidence(), rules)?;
         // Never remember failed, cancelled or incomplete authentication.
         self.audits.insert(sequence, key);
+        self.stored_audits.insert(sequence, stored_key);
         Ok(false)
+    }
+
+    fn decode_audit_record(&self, stored: canonical::AuditRecord) -> Result<RetainedRecord> {
+        let canonical::AuditRecord {
+            base,
+            head,
+            certificate,
+            receipts,
+            proposal,
+            reward,
+            events,
+        } = stored;
+        let finalized = decode(&certificate)?;
+        if head.cursor.epoch.0 != next_epoch(&base, &finalized)? {
+            return Err(invalid("retained epoch differs from finality"));
+        }
+        if proposal != finalized.proposal_id {
+            return Err(invalid("retained reward proposal differs from finality"));
+        }
+        let mut reader = octra_node_protocol::oce1::Reader::new(&reward);
+        let reward = octra_node_protocol::consensus::reward::get(&mut reader).map_err(invalid)?;
+        reader.finish().map_err(invalid)?;
+        let epoch = Arc::new(CommittedEpoch {
+            chain: self.store.chain().clone(),
+            cursor: head.cursor,
+            parent_root: base.cursor.state_root,
+            events: serde_json::from_slice(&events).map_err(invalid)?,
+        });
+        Ok(RetainedRecord {
+            base,
+            head,
+            epoch,
+            certificate,
+            finalized,
+            receipts: serde_json::from_slice(&receipts).map_err(invalid)?,
+            proposal,
+            reward,
+        })
     }
 
     async fn authenticate(

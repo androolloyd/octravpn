@@ -1,17 +1,27 @@
 # Rust node qualification status
 
-The [final funded two-hop matrices](checkpoints/2026-10-21/private-funded-multihop.json)
-pass actual private funding, nested traffic, restart, provider outage, finite
-exhaustion, ExEx agreement and independent encrypted-journal accounting. Both
-isolated runs have verified cleanup. The final full Linux suite passes 257 tests (three privileged fixtures are
-separate gates), with strict default/private lint. Its 8 GiB proof-generation
-limit peaked at 7,110,733,824 bytes with no OOM kills; the initial 6 GiB OOM
-attempt remains recorded.
+The [current audit-cache candidate](checkpoints/2026-10-21/audit-record-cache.json)
+passes both funded two-hop matrices, all 257 ordinary Linux node tests, 17
+signed-finality/cache regressions and strict runtime/default/private lint. Each
+matrix verifies actual private funding, nested traffic, restart, provider outage,
+finite exhaustion, ExEx agreement and independent encrypted-journal accounting;
+owned cleanup is verified. The 8 GiB suite limit peaked at 5,992,402,944 bytes
+with no OOM kills. Earlier fixture-environment failures remain recorded.
 
-The public devnet operator remains closed pending approved paid ingress and an
-actual funded public traffic/restart/withdrawal canary. It uses one operator;
-local two-hop qualification does not establish a public multi-operator network.
-See the [private alpha guide](../operators/devnet-private-alpha.md).
+Resume auditing now rereads exact persisted evidence before reusing successfully
+authenticated work. It freshly resolves historical authority and relief on every
+record; cache misses authenticate the same captured bytes. Cold startup, root
+quarantine, quorum and serving freshness remain mandatory. The generated-fixture
+speedup does not establish sustained public-network serving.
+
+The closed nonvoting devnet replacement is restoring the original state and
+wallets. The exact restricted cloud UDP rule is approved and saved. Local ingress
+activation and an actual funded public traffic/restart/withdrawal canary remain
+launch gates. One public operator does not establish a public multi-operator
+network. See the [private alpha guide](../operators/devnet-private-alpha.md).
+
+The [previous qualification](checkpoints/2026-10-21/private-funded-multihop.json)
+retains its frozen binary hashes, results and initial resource-limit failure.
 
 ## Earlier qualification records
 

@@ -12,7 +12,7 @@ commission**.
 
 > **Devnet alpha candidate.** Funded private two-hop traffic, recovery,
 > exhaustion and accounting pass in isolated Linux kernels. The public operator
-> is staged; approved ingress and the funded public canary are still required
+> is staged; restricted ingress activation and the funded public canary are still required
 > before inviting testers. Mainnet is not qualified.
 
 ## What it does

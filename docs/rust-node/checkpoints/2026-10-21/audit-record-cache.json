@@ -1,0 +1,102 @@
+{
+  "observed_at_utc": "2026-10-21T13:08:34.890395+00:00",
+  "status": "both funded matrices, full node suite and audit regressions passed; public serving and funded canary pending",
+  "consensus_changes": false,
+  "problem": "Repeated resume audits decode roughly 6.7 GB of retained archive events even after successful in-process authentication. This competes with live import and interrupts fresh serving.",
+  "change": "Capture retained heads, finality, receipt/reward blobs and ExEx bytes in one SQL statement. Hash their exact bytes before decoding. Reuse only bounded process-local successful entries with identical full historical authority and policy. On a miss, decode and authenticate the same captured bytes.",
+  "preserved": [
+    "Every resume rereads the complete retained prefix",
+    "Every record freshly resolves authenticated selected-path authority and relief",
+    "Outbox sequence, epoch, root and parent bindings are checked before reuse",
+    "Cold startup has no cached successes",
+    "Failed, cancelled and incomplete authentication cannot create a success",
+    "Exports still independently authenticate finality; the audit cache grants no RPC capability",
+    "Quorum, execution, root quarantine, service freshness and payment gates are unchanged"
+  ],
+  "candidate": {
+    "image": "sha256:4fef27f8da49767e26ed8bd1cc0ac203c1043ab964541bc46cbe9f2327ce1a0f",
+    "public_wrapper_image": "sha256:d9630a74e2c74340bc8d4eeba65a9ff46163a8ffba40e0c2f84fbbc37a6a3b47",
+    "native_binary_sha256": "6cf580a2ff551efaa28c1e085c33b0a40f0104537367b754718098738e70f6a7",
+    "test_binary_sha256": "f565a7d616aeeb873c8ea587032e671cb690d6712c7a9cf763a3de9efc73055c",
+    "frozen_manifest_sha256": "a191f8491ad2585657a6257dab0155b6627c2b2902a85df6788b93cdec4baecb"
+  },
+  "linux_audit_regressions": {
+    "passed": 17,
+    "failed": 0,
+    "signed_finality_tests": 8,
+    "cache_tests": 9,
+    "log_sha256": "060283fa50191217abe96c628114f2079d84b9b8c1b6a4d76d4afae6a0a09d98",
+    "fixture_timing": {
+      "epochs": 128,
+      "cold_ms": 46.143725,
+      "warm_ms": 18.599756,
+      "scope": "Generated signed transaction fixture; not a public-network throughput measurement"
+    }
+  },
+  "strict_lint": {
+    "runtime_all_targets": "passed",
+    "node_private_all_targets": "passed",
+    "node_default_all_targets": "passed"
+  },
+  "funded_matrices": [
+    {
+      "exhaustion_hop": 0,
+      "qualified": true,
+      "transport_qualified": true,
+      "independent_accounting_qualified": true,
+      "cleanup_verified": true,
+      "report_sha256": "0b42356ab1cf2671031f33fad42c4a4ee10e45cf7e68081f110469a931acfd2f"
+    },
+    {
+      "exhaustion_hop": 1,
+      "qualified": true,
+      "transport_qualified": true,
+      "independent_accounting_qualified": true,
+      "cleanup_verified": true,
+      "report_sha256": "a0c8cb404b69693044d67c9f7864f6bd99057486ce40c798d97acf4f799fa857"
+    }
+  ],
+  "full_linux_node_suite": {
+    "status": "passed",
+    "passed": 257,
+    "failed": 0,
+    "ignored": 3,
+    "seconds": 535.35,
+    "memory_limit_bytes": 8589934592,
+    "memory_peak_bytes": 5992402944,
+    "oom_kills": 0,
+    "frozen_sources_unchanged": true,
+    "test_runtime_image": "sha256:1728d6b02fec9e7839207e8f86dc883d005c7050789c0fc08b6de4cfa78c4eb3",
+    "log_sha256": "b55e33d52c9c2d114789c233449e2a03e3a2003f3370faa89f7bf73c6aa66c11"
+  },
+  "public_funded_canary": {
+    "qualified": false,
+    "signed_transactions": 0,
+    "spent_ou": 0
+  },
+  "public_serving": {
+    "qualified": false,
+    "status": "closed candidate cold startup pending"
+  },
+  "runner_environment": "The final test-only image adds the official local /bin/kill utility. Docker --init reaps adopted children. Executable temporary storage, staging capacity, frozen read-only source fixtures and an isolated writable output satisfy the actual fixture requirements. Earlier failed environment attempts remain local. Production node binary and 8 GiB suite memory limit are unchanged.",
+  "evidence": "out/private-funded-multihop-20261020/linux-v32",
+  "earlier_runner_attempts": [
+    {
+      "kind": "missing executable temporary storage and fixture inputs",
+      "log_sha256": "4d7fb6870355ccb199950f220eaf8e9aee67c7a0e932cad98da3438e6a092b37"
+    },
+    {
+      "kind": "missing nested output mountpoint; test process did not start",
+      "log_sha256": "6ed38424cefb29242ca104b88faf0496cdbc4577173c5aadab411765a0be781e"
+    },
+    {
+      "kind": "minimal runtime lacks /bin/kill required by three test assertions",
+      "log_sha256": "4078531174ecf7ac5d49dd2365ec6215a4b0054e1d1e13b35d09a48950a3cc29"
+    },
+    {
+      "kind": "Python PID 1 did not reap a confirmed dead orphan; run stopped after known fixture failure",
+      "log_sha256": "07090488421f458a9e3fe730680dee8f70aef1df78cad450aea811e23140a349"
+    }
+  ],
+  "website_scope": "Five final portal source/bundle files differ from the frozen executable test context. They are not embedded in the node binary; their canonical publication is qualified separately in octra-to-site.json. Current executable source inputs match the frozen candidate."
+}

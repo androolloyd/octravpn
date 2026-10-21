@@ -18,6 +18,21 @@ use crate::canonical::Head;
 pub(super) type Digest = [u8; 32];
 const CAPACITY: usize = 32_768;
 
+pub(super) fn stored_key(
+    chain: &ChainIdentity,
+    record: &crate::canonical::AuditRecord,
+    rules: &EpochRules,
+) -> Digest {
+    let mut transcript = Transcript(Sha256::new());
+    transcript.bytes(b"octra:stored-finality-audit:v1\0");
+    transcript.chain(chain);
+    transcript.head(&record.base);
+    transcript.head(&record.head);
+    transcript.bytes(&record.fingerprint());
+    transcript.rules(rules);
+    transcript.0.finalize().into()
+}
+
 pub(super) struct Inputs<'a> {
     pub chain: &'a ChainIdentity,
     pub base: &'a Head,
@@ -487,6 +502,45 @@ mod tests {
         assert_eq!(original, fixture.key(), "determinism: {name}");
         mutate(&mut fixture);
         assert_ne!(original, fixture.key(), "unbound input: {name}");
+    }
+
+    #[test]
+    fn stored_key_binds_every_captured_blob_head_and_resolved_rule() {
+        let fixture = Fixture::new();
+        let record = || crate::canonical::AuditRecord {
+            base: fixture.base.clone(),
+            head: fixture.head.clone(),
+            certificate: vec![1],
+            receipts: vec![2],
+            proposal: vec![3],
+            reward: vec![4],
+            events: vec![5],
+        };
+        let key = |record: &crate::canonical::AuditRecord, rules: &EpochRules| {
+            stored_key(&fixture.chain, record, rules)
+        };
+        let original = key(&record(), &fixture.rules);
+        let mutations: [fn(&mut crate::canonical::AuditRecord); 7] = [
+            |r| r.certificate.push(0),
+            |r| r.receipts.push(0),
+            |r| r.proposal.push(0),
+            |r| r.reward.push(0),
+            |r| r.events.push(0),
+            |r| r.base.message.push(0),
+            |r| r.head.message.push(0),
+        ];
+        for mutate in mutations {
+            let mut changed = record();
+            mutate(&mut changed);
+            assert_ne!(original, key(&changed, &fixture.rules));
+        }
+        let mut rules = Fixture::new().rules;
+        rules.validators.quorum_weight += 1;
+        assert_ne!(original, key(&record(), &rules));
+        let mut left = record();
+        left.events = vec![4, 5];
+        left.reward = vec![];
+        assert_ne!(original, key(&left, &fixture.rules));
     }
 
     macro_rules! changes {

@@ -766,6 +766,59 @@ async fn warm_audit_rejects_modified_proposal_reward_and_outbox_without_head_mov
             .unwrap();
         assert_eq!(publisher.audit_report().await.unwrap().reused, 3);
     }
+    // A warm byte-level hit still checks every outbox cursor binding and every
+    // retained evidence blob. These mutations leave the current head intact.
+    for (query, original_query, changed) in [
+        (
+            "UPDATE node_epochs SET certificate=? WHERE sequence=1",
+            "SELECT certificate FROM node_epochs WHERE sequence=1",
+            vec![0],
+        ),
+        (
+            "UPDATE node_consensus_receipts SET receipts=? WHERE sequence=1",
+            "SELECT receipts FROM node_consensus_receipts WHERE sequence=1",
+            b"not JSON".to_vec(),
+        ),
+        (
+            "UPDATE exex_committed_epoch SET parent_root=? WHERE sequence='0000000000000001'",
+            "SELECT parent_root FROM exex_committed_epoch WHERE sequence='0000000000000001'",
+            vec![99; 32],
+        ),
+        (
+            "UPDATE exex_committed_epoch SET root=? WHERE sequence='0000000000000001'",
+            "SELECT root FROM exex_committed_epoch WHERE sequence='0000000000000001'",
+            vec![99; 32],
+        ),
+    ] {
+        let original: Vec<u8> = sqlx::query_scalar(original_query)
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        sqlx::query(query).bind(changed).execute(&db).await.unwrap();
+        assert_eq!(store.head().await.unwrap(), head);
+        assert!(publisher.audit().await.is_err(), "{query}");
+        sqlx::query(query)
+            .bind(original)
+            .execute(&db)
+            .await
+            .unwrap();
+        assert_eq!(publisher.audit_report().await.unwrap().reused, 3);
+    }
+    let epoch: String = sqlx::query_scalar(
+        "SELECT epoch FROM exex_committed_epoch WHERE sequence='0000000000000001'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE exex_committed_epoch SET epoch='0000000000000000' WHERE sequence='0000000000000001'")
+        .execute(&db).await.unwrap();
+    assert!(publisher.audit().await.is_err());
+    sqlx::query("UPDATE exex_committed_epoch SET epoch=? WHERE sequence='0000000000000001'")
+        .bind(epoch)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert_eq!(publisher.audit_report().await.unwrap().reused, 3);
 }
 
 #[tokio::test]

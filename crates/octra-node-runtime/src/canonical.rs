@@ -19,6 +19,8 @@ use sqlx::{
 };
 
 use crate::state_batch::{Snapshot, StateBatch, StoredObject};
+mod audit;
+pub(crate) use audit::AuditRecord;
 mod epoch_tags;
 mod epochs;
 pub use epoch_tags::{EpochTagRetention, EpochTagStats};
