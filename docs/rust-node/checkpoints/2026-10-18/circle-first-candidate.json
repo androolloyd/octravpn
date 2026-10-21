@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-18",
+  "scope": "Circle-first prepaid candidate using the configured public devnet chain-origin domain; seven-day-locked operator-equivocation award is locally verified, but no public transaction submitted or paid service enabled",
+  "network": {
+    "chain_id": "octra-devnet-9871-cluster",
+    "origin": {
+      "kind": "checkpoint",
+      "epoch": 1278039,
+      "state_root": "ab602f2a1956a9df087106a686ea36e654c819e62321ae6b4ed3cf61107676ee"
+    }
+  },
+  "application": "circle",
+  "domain": "1d3137c20fea3347de7dba6d90a0c7bea4da5ecd4f1f2e59e5b87b98e2f119ad",
+  "custody_cap_ou": 200000000,
+  "minimum_stake_ou": 100000000,
+  "core_source_sha256": "cbfa3350e4c432bcfcfef411702483aed2a999c4c377f294702c9a622223efc5",
+  "child_octb_sha256": "f871410b1ff7b4bba8f90653df83d34e5b4896f2b0fd505fae84359cef68e1c9",
+  "factory_octb_sha256": "75e957e998a13d7a50b2b7c9ec87dafdd060c6b0d0a0b13af39d5c1c0736e2aa",
+  "native_oracle": {
+    "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "case_count": 15,
+    "fixture_sha256": "54429e2c0091d75df378ce23595db0e951efcb5068164018480250c387988cf9"
+  },
+  "validation": {
+    "rust_payment_circle_tests": 51,
+    "cli_domain_source_test": 1,
+    "native_circle_replay_tests": 1,
+    "lean_guarded_reservation_and_bond_slash_model": "pass"
+  },
+  "aml_safety_report": {
+    "errors": 0,
+    "warnings": 4,
+    "remaining_error": null,
+    "verified": true
+  },
+  "public_paid_service_active": false,
+  "public_deployment_qualified": false
+}

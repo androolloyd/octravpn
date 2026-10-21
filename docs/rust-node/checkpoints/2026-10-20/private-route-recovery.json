@@ -1,0 +1,151 @@
+{
+  "status": "host, Linux socket/policy and single-hop paid kernel/restart/ExEx regression qualified; full private coordinator recovery pending",
+  "adopted_upstream": "d3e834919bd586e81f947d0dae91becc6c43c756",
+  "evidence": "out/private-route-recovery-20261020",
+  "source_manifest": "out/private-route-recovery-20261020/source-before.json",
+  "source_files": 1858,
+  "sources_unchanged": true,
+  "checks": [
+    {
+      "name": "strict",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "-p",
+        "octra-node",
+        "-p",
+        "octravpn-client",
+        "--features",
+        "octra-node/private-payments-experimental",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 12.85,
+      "log": "out/private-route-recovery-20261020/strict-v4.log"
+    },
+    {
+      "name": "normal-strict",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "-p",
+        "octra-node",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 0.67,
+      "log": "out/private-route-recovery-20261020/normal-strict-v4.log"
+    },
+    {
+      "name": "published",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--release",
+        "-p",
+        "octra-node",
+        "--features",
+        "private-payments-experimental",
+        "--lib",
+        "published::tests"
+      ],
+      "exit": 0,
+      "seconds": 70.87,
+      "log": "out/private-route-recovery-20261020/published-v4.log"
+    },
+    {
+      "name": "native-payments",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--release",
+        "-p",
+        "octra-node",
+        "--features",
+        "private-payments-experimental",
+        "--lib",
+        "vpn::payments"
+      ],
+      "exit": 0,
+      "seconds": 285.67,
+      "log": "out/private-route-recovery-20261020/native-payments-v4.log"
+    },
+    {
+      "name": "client",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "octravpn-client",
+        "--all-targets"
+      ],
+      "exit": 0,
+      "seconds": 64.26,
+      "log": "out/private-route-recovery-20261020/client-v4.log"
+    }
+  ],
+  "passed": {
+    "release_native_payments": 69,
+    "release_publication_quarantine": 10,
+    "client_tests": 378,
+    "client_benchmark_checks": 4
+  },
+  "implemented": [
+    "Resume-only launch configuration restores the original books and full sealed route before P2P startup",
+    "Armed entry selects paused P2P and starts alongside initialization; spending indexes resume only after a fresh publication",
+    "Offline private-route-consent command with exact interrupted-initialization resume and private file checks",
+    "Canonical settlement retains portable execution before client admission",
+    "Entry-only recovery authenticates exact settled native payment against retained certificate without creating fresh serving authority",
+    "Root quarantine invalidates recovery tickets permanently; new spending keeps the existing freshness gate",
+    "Replaying an older paid purchase preserves its later execution proof anchor",
+    "Operator income uses the same unlocked custody wallet and finite purchase consent"
+  ],
+  "pending": [
+    "Retained kernel-plan ownership and recovery; constructor still refuses stale route state",
+    "Combined full-process funded private multihop, exhaustion, carrier loss and ExEx qualification",
+    "Same-channel multiple traffic classes",
+    "Full public-network parity, sustained serving, stock-client integration and launch security/ceremony gates"
+  ],
+  "linux": {
+    "build_session": null,
+    "context_sources": 4935,
+    "kernel_scope_qualified": true,
+    "shielded_multihop_qualified": false,
+    "build_exit": 0,
+    "image": "sha256:4510de835c87443fa5776fce9884900a9a6e1dea8fda7a0866bec91d6a6b775e",
+    "kernel_scope_tests_passed": 3,
+    "kernel_scope_cleanup_verified": true,
+    "paid_kernel_regression_session": null,
+    "paid_kernel_regression_evidence": "out/private-route-recovery-20261020/linux/kernel-v1",
+    "paid_kernel_regression_qualified": true,
+    "paid_kernel_cases_passed": 2,
+    "paid_kernel_container_exits": [
+      0,
+      0
+    ],
+    "paid_kernel_cleanup_verified": true,
+    "test_sha256": "035214278993cabb1c74c8f58b6c6d9ccdd6a36c64780b1caa7edfdde9379ed3",
+    "canonical_and_exex_reopen": true
+  },
+  "new_consensus_change": false,
+  "deployed": false,
+  "launch_qualified": false,
+  "full_goal_complete": false,
+  "recorded_at_utc": "2026-10-20T09:18:39.748777+00:00"
+}

@@ -1,0 +1,165 @@
+{
+  "status": "Offline private payer/index initialization qualified on host and isolated Linux; full funded private multihop remains open",
+  "observed_at": "2026-10-20T13:08:25.849083+00:00",
+  "source_manifest": "out/private-offline-init-20261020/source-before.json",
+  "source_files": 3160,
+  "sources_unchanged_during_checks": true,
+  "host_checks": [
+    {
+      "name": "experimental-strict",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "-p",
+        "octra-node",
+        "-p",
+        "octravpn-client",
+        "--features",
+        "octra-node/private-payments-experimental",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 10.13,
+      "log": "out/private-offline-init-20261020/experimental-strict.log"
+    },
+    {
+      "name": "normal-strict",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "-p",
+        "octra-node",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 0.42,
+      "log": "out/private-offline-init-20261020/normal-strict.log"
+    },
+    {
+      "name": "native-payments",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--release",
+        "-p",
+        "octra-node",
+        "--features",
+        "private-payments-experimental",
+        "--lib"
+      ],
+      "exit": 0,
+      "seconds": 383.57,
+      "log": "out/private-offline-init-20261020/native-payments.log"
+    }
+  ],
+  "passed": {
+    "release_node_library_tests": 252,
+    "strict_host_configurations": 2
+  },
+  "implementation": [
+    "Read audited retained state of the exact owning node without publishing a serving lease",
+    "Create an empty-baseline index or authenticate optional public leaf hints against retained native root and both pool trees",
+    "Hold node publication ordering and check root-quarantine ticket during setup",
+    "Read index_seed only during explicit creation; existing stores and normal resume are never automatically reseeded",
+    "Keep fresh synchronization and current index required for spending, native signatures and client admission"
+  ],
+  "regression": [
+    "Actual signed-checkpoint store is closed/reopened before setup; no initial serving publication",
+    "Wrong owning node, absent empty baseline, wrong scope/epoch/root/leaf and root quarantine refuse before store creation",
+    "Index view, sync and normal resume remain unavailable while node is offline",
+    "Seal two distinct operator jobs and complete route consent with no native fee reservation or head advancement",
+    "Proving material is not parsed during initialization/consent; consent seals the existing key path",
+    "After real node resume, reopen initialized index and match canonical pool roots"
+  ],
+  "linux": {
+    "image_id": "sha256:3c3b7429a69fed8910096db756c3bb12ebcd7e36c92d2e0d359264201b6bf365",
+    "source_files": 4948,
+    "source_context_manifest": "out/private-offline-init-20261020/linux/source-context.json",
+    "source_context_unchanged": true,
+    "checks": {
+      "native-test.log": {
+        "passed": 1,
+        "seconds": 306.73
+      },
+      "native-control.log": {
+        "passed": 1,
+        "seconds": 319.57
+      }
+    },
+    "scope": "canonical signed-QC private payments, pinned HTTPS, real WireGuard/TUN, isolated second kernel and client/operator restart; no public-network or multi-hop claim",
+    "container_exits": [
+      0,
+      0
+    ],
+    "owned_containers_removed": true,
+    "owned_volumes_removed": true,
+    "exex_reopen": {
+      "archive_files": 85,
+      "canonical_and_checkpoint_reopened": true,
+      "checkpoint": {
+        "epoch": 85,
+        "sequence": 85,
+        "state_root": [
+          168,
+          213,
+          188,
+          227,
+          176,
+          221,
+          119,
+          190,
+          251,
+          168,
+          61,
+          14,
+          35,
+          185,
+          155,
+          24,
+          111,
+          211,
+          171,
+          15,
+          30,
+          218,
+          111,
+          248,
+          78,
+          215,
+          80,
+          101,
+          103,
+          243,
+          84,
+          70
+        ]
+      },
+      "purchase_transactions": 2,
+      "retained_epochs_verified": 85,
+      "sink_files_unchanged": true
+    },
+    "evidence": "out/private-offline-init-20261020/linux/kernel-result.json"
+  },
+  "new_authority_or_consensus_changes": false,
+  "launch_qualified": false,
+  "full_goal_complete": false,
+  "remaining": [
+    "Genuinely funded private multihop with authenticated local-node sync over the paid prefix and cold recovery",
+    "Remaining host-exit packet enforcement, onboarding and sustained public service",
+    "Public shielded qualification, production cryptographic setup and independent review",
+    "Remaining adopted-upstream behavioral parity gates"
+  ],
+  "evidence": "out/private-offline-init-20261020/qualification.json"
+}

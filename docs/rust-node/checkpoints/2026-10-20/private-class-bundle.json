@@ -1,0 +1,189 @@
+{
+  "status": "Same-channel finite class bundles qualified on host and isolated Linux; funded private multihop and public launch remain unqualified",
+  "observed_at": "2026-10-20T12:10:53.111953+00:00",
+  "source_files": 3157,
+  "source_manifest": "out/private-class-bundle-20261020/source-before.json",
+  "sources_unchanged_during_checks": true,
+  "host_checks": [
+    {
+      "name": "experimental-strict",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "-p",
+        "octra-node",
+        "-p",
+        "octravpn-client",
+        "--features",
+        "octra-node/private-payments-experimental",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 10.74,
+      "log": "out/private-class-bundle-20261020/experimental-strict.log"
+    },
+    {
+      "name": "normal-strict",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "-p",
+        "octra-node",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 0.41,
+      "log": "out/private-class-bundle-20261020/normal-strict.log"
+    },
+    {
+      "name": "native-payments",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--release",
+        "-p",
+        "octra-node",
+        "--features",
+        "private-payments-experimental",
+        "--lib"
+      ],
+      "exit": 0,
+      "seconds": 381.29,
+      "log": "out/private-class-bundle-20261020/native-payments.log"
+    }
+  ],
+  "passed": {
+    "release_node_library_tests": 252,
+    "strict_host_configurations": 2
+  },
+  "scope": [
+    "One Open/channel/receipt identity per finite purchase with separate per-class quote and receipt phases",
+    "Unique bounded classes and checked aggregate price ceiling; unchanged lifetime relayer fee authority",
+    "Client admission waits for every class to be canonically paid",
+    "All class credits revalidated on encrypted book reopen without another purchase",
+    "Retained entry recovery verifies every class proof and retains every quarantine ticket",
+    "Legacy single-class terms omit the additional field and accept missing/empty field"
+  ],
+  "regression": [
+    "Two real canonical class purchases on the same authenticated channel",
+    "Partial canonical payment cannot admit the accepted transport",
+    "Earlier operator-signed class quote cannot substitute for the second class",
+    "Ambiguous submission and lost receipt acknowledgement reuse their original requests and signatures",
+    "Forged receipt credit rejected before a successful reply is saved",
+    "Cold payer book reopen preserves class credits, fees and strictly advancing transport connection sequence",
+    "Root quarantine revokes every retained class permit, even after quarantine clears"
+  ],
+  "linux": {
+    "status": "passed",
+    "image_id": "sha256:d6215d378c3e11e0221130d4768fd08bdc8f522cbd9878da9faa8db49fce3015",
+    "source_files": 4946,
+    "source_context_manifest": "out/private-class-bundle-20261020/linux/source-context.json",
+    "source_context_unchanged": true,
+    "binary_verification": "out/private-class-bundle-20261020/linux/verification.json",
+    "checks": {
+      "native-test.log": {
+        "passed": 1,
+        "seconds": 300.48
+      },
+      "native-control.log": {
+        "passed": 1,
+        "seconds": 323.8
+      }
+    },
+    "scope": "canonical signed-QC private payments, pinned HTTPS, real WireGuard/TUN, isolated second kernel and client/operator restart; no public-network or multi-hop claim",
+    "container_exits": [
+      0,
+      0
+    ],
+    "owned_containers_removed": true,
+    "owned_volumes_removed": true,
+    "exex_reopen": {
+      "archive_files": 85,
+      "canonical_and_checkpoint_reopened": true,
+      "checkpoint": {
+        "epoch": 85,
+        "sequence": 85,
+        "state_root": [
+          43,
+          38,
+          151,
+          19,
+          50,
+          206,
+          5,
+          87,
+          99,
+          221,
+          149,
+          168,
+          69,
+          206,
+          22,
+          212,
+          51,
+          227,
+          79,
+          205,
+          117,
+          67,
+          155,
+          104,
+          43,
+          179,
+          21,
+          99,
+          219,
+          170,
+          200,
+          41
+        ]
+      },
+      "purchase_transactions": 2,
+      "retained_epochs_verified": 85,
+      "sink_files_unchanged": true
+    },
+    "evidence": "out/private-class-bundle-20261020/linux/kernel-result.json"
+  },
+  "public_observer": {
+    "evidence": "out/private-class-bundle-20261020/observer-latest.json",
+    "observed_at": "2026-10-20T12:08:51.143873+00:00",
+    "container": "octra-devnet-observer-cursor-20261020",
+    "exit": 0,
+    "operator": {
+      "chain_id": "octra-devnet-9871-cluster",
+      "epoch": 1723019,
+      "peers": 26,
+      "pending": 0,
+      "serving": false,
+      "state_root": "543ae8fd4a9234573c00cbf09a2165080acd57c744982e14e379f0220b201a5e",
+      "suspension_reason": "auditing canonical history",
+      "vpn_program": "oct4qzVq1RsPQnnoYpbXNuqjHYpPPs2LPdDK2inWZDwYCoP",
+      "vpn_settlement": "configured"
+    },
+    "independent_reference_unavailable": "HTTP 403 from established devnet RPC; no current-tip equality claim"
+  },
+  "no_consensus_changes": true,
+  "production_launch_qualified": false,
+  "full_goal_complete": false,
+  "host_and_context_unchanged_through_linux": true,
+  "remaining": [
+    "Genuinely funded private multihop through paid predecessors with authenticated chain sync and full cold recovery",
+    "Offline consent/index initialization and remaining standalone host-exit enforcement",
+    "Sustained current-head public observer service and full onboarding/DNS/TLS qualification",
+    "Production proving-key setup, independent security review and public shielded-payment qualification",
+    "Remaining adopted-upstream behavioral parity census gates"
+  ],
+  "evidence": "out/private-class-bundle-20261020/qualification.json"
+}

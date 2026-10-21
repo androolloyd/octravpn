@@ -13,8 +13,13 @@ octra-node-protocol = { path = "../octra-node-protocol" }
 octra-browser = { path = "../octra-browser" }
 octra-exex = { path = "../octra-exex" }
 octra-hfhe = { path = "../octra-hfhe" }
+octra-private-payments-experimental = { path = "../../experimental/private-payments", optional = true }
 octravpn-node = { path = "../octravpn-node" }
 octravpn-core = { path = "../octravpn-core" }
+octravpn-client = { path = "../octravpn-client", optional = true }
+ark-bn254 = { version = "=0.5.0", optional = true }
+ark-groth16 = { version = "=0.5.0", optional = true }
+ark-serialize = { version = "=0.5.0", optional = true }
 anyhow.workspace = true
 base64.workspace = true
 num-bigint = "0.4"
@@ -38,11 +43,17 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc
 tempfile.workspace = true
 tower = { version = "0.5", features = ["util"] }
 ed25519-dalek.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs", "process"] }
 
 [dev-dependencies]
+octravpn-client = { path = "../octravpn-client" }
+ark-bn254 = "=0.5.0"
+ark-groth16 = "=0.5.0"
 boringtun.workspace = true
 rcgen = "0.13"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
@@ -52,3 +63,14 @@ workspace = true
 
 [features]
 test-helpers = ["octra-node-runtime/test-helpers"]
+private-payments-experimental = ["dep:octra-private-payments-experimental", "dep:sqlx", "dep:octravpn-client", "dep:ark-bn254", "dep:ark-groth16", "dep:ark-serialize"]
+# Privileged isolated Linux qualification only; changes test provisioning.
+private-kernel-qualification = ["private-payments-experimental"]
+
+[[example]]
+name = "devnet_private_pool"
+required-features = ["private-payments-experimental"]
+
+[[example]]
+name = "devnet_private_proof"
+required-features = ["private-payments-experimental"]

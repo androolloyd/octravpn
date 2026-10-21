@@ -4,12 +4,17 @@ use octra_node_protocol::network::{
     endpoint::Endpoint,
     frame::Frame,
     handshake,
+    peer_record::{self, Added, Record, Registry},
     session::{self, Connection, LocalNode, Peer, Timeouts},
-    swarm::{Activation, Config, Handler, MessageFuture, Swarm},
+    swarm::{Activation, Config, Handler, MessageFuture, Outcome, Phase, Swarm},
     swarm_policy,
 };
 use rand::rngs::OsRng;
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -19,10 +24,21 @@ use tokio::{
 const WAIT: Duration = Duration::from_secs(5);
 #[path = "network_swarm/diagnostics.rs"]
 mod diagnostics;
+#[path = "network_swarm/scope.rs"]
+mod scope;
 struct Inbox(mpsc::UnboundedSender<(Vec<u8>, Frame)>);
 impl Handler for Inbox {
     fn message(&self, peer: Peer, frame: Frame) -> MessageFuture {
         let _ = self.0.send((peer.hello().node_id.clone(), frame));
+        Box::pin(async { Ok(()) })
+    }
+}
+struct Connections(mpsc::UnboundedSender<Vec<u8>>);
+impl Handler for Connections {
+    fn connected(&self, peer: Peer) {
+        let _ = self.0.send(peer.hello().node_id.clone());
+    }
+    fn message(&self, _peer: Peer, _frame: Frame) -> MessageFuture {
         Box::pin(async { Ok(()) })
     }
 }
@@ -31,6 +47,23 @@ fn key(n: u8) -> SigningKey {
 }
 fn public(n: u8) -> Vec<u8> {
     key(n).verifying_key().to_bytes().to_vec()
+}
+fn signed_record(n: u8, timestamp: i64) -> Record {
+    let mut record = Record {
+        chain_id: b"swarm-test".to_vec(),
+        node_id: vec![],
+        node_address: b"record-peer".to_vec(),
+        public_key: vec![],
+        binary_hash: vec![2; 32],
+        config_hash: vec![1; 32],
+        host: b"127.0.0.1".to_vec(),
+        port: 9000,
+        features: vec![],
+        timestamp,
+        signature: vec![],
+    };
+    record.sign(&key(n)).unwrap();
+    record
 }
 fn config(port: u16, allowed: Vec<Vec<u8>>, bootstrap: Vec<Endpoint>, profiles: bool) -> Config {
     Config {
@@ -253,6 +286,194 @@ async fn handshake_keys_do_not_select_scheduled_or_unknown_validators() {
         at.await.unwrap();
         bt.await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn membership_cutover_closes_retired_peers_when_local_becomes_observer() {
+    let listener = listener().await;
+    let address = listener.local_addr().unwrap();
+    let swarm = Swarm::new(config(address.port(), vec![], vec![], false), key(1)).unwrap();
+    swarm.set_validators(vec![public(1), public(2)]).unwrap();
+    let (task, _) = start(&swarm, listener);
+    let _client = client(2, address, b"swarm-test").await.unwrap();
+    until(|| swarm.peers().len() == 1).await;
+    let retired = swarm.peers()[0].clone();
+
+    swarm.set_validators(vec![public(3)]).unwrap();
+    assert!(swarm.peers().is_empty());
+    assert!(!retired.is_connected());
+    assert!(
+        !swarm
+            .send_to(
+                &retired.hello().node_id,
+                Frame {
+                    message: 3,
+                    payload: vec![],
+                },
+            )
+            .await
+    );
+    swarm.stop();
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn dead_peer_slot_cannot_bypass_observer_capacity() {
+    let listener = listener().await;
+    let address = listener.local_addr().unwrap();
+    let swarm = Swarm::new(config(address.port(), vec![], vec![], false), key(1)).unwrap();
+    swarm.set_validators(vec![public(1)]).unwrap();
+    let (connected_tx, mut connected_rx) = mpsc::unbounded_channel();
+    let running = swarm.clone();
+    let task = tokio::spawn(async move {
+        running
+            .run(listener, Arc::new(Connections(connected_tx)))
+            .await
+            .unwrap();
+    });
+    let mut clients = Vec::new();
+    for n in 2..10 {
+        clients.push(client(n, address, b"swarm-test").await.unwrap());
+        tokio::time::timeout(WAIT, connected_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    let retired_id = handshake::node_id(&public(2));
+    let retired = swarm
+        .peers()
+        .into_iter()
+        .find(|peer| peer.hello().node_id == retired_id)
+        .unwrap();
+    retired.close();
+    clients.push(client(10, address, b"swarm-test").await.unwrap());
+    tokio::time::timeout(WAIT, connected_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    clients.push(client(2, address, b"swarm-test").await.unwrap());
+    until(|| {
+        swarm
+            .connection_diagnostics()
+            .outcomes
+            .iter()
+            .filter(|row| row.phase == Phase::Admission && row.outcome == Outcome::Capacity)
+            .map(|row| row.count)
+            .sum::<u64>()
+            > 0
+    })
+    .await;
+    assert_eq!(clients.len(), 10);
+    assert_eq!(swarm.peers().len(), 8);
+    swarm.stop();
+    task.await.unwrap();
+}
+
+#[test]
+fn peer_registry_caps_new_records_but_allows_refresh_and_expiry() {
+    let mut registry = Registry::with_capacity(300.0, 4, 2);
+    let first = signed_record(1, 1000);
+    let second = signed_record(2, 1000);
+    let third = signed_record(3, 1000);
+    assert_eq!(registry.add(1000.0, first.clone()).unwrap(), Added::New);
+    assert_eq!(registry.add(1000.0, second).unwrap(), Added::New);
+    assert_eq!(
+        registry.add(1000.0, third).unwrap_err().as_bytes(),
+        b"registry_capacity"
+    );
+    assert_eq!(registry.add(1000.0, first).unwrap(), Added::Refreshed);
+    assert_eq!(
+        registry.add(1301.0, signed_record(3, 1301)).unwrap(),
+        Added::New
+    );
+    assert_eq!(registry.values(1301.0).count(), 1);
+}
+
+#[tokio::test]
+async fn relayed_peer_records_follow_active_validators() {
+    let al = listener().await;
+    let bl = listener().await;
+    let a = Swarm::new(
+        config(al.local_addr().unwrap().port(), vec![], vec![], false),
+        key(1),
+    )
+    .unwrap();
+    let b = Swarm::new(
+        config(
+            bl.local_addr().unwrap().port(),
+            vec![],
+            vec![endpoint(al.local_addr().unwrap().port())],
+            false,
+        ),
+        key(2),
+    )
+    .unwrap();
+    a.set_validators(vec![public(1), public(2)]).unwrap();
+    b.set_validators(vec![public(1), public(2)]).unwrap();
+    let (at, _) = start(&a, al);
+    let (bt, _) = start(&b, bl);
+    until(|| a.peers().len() == 1 && b.peers().len() == 1).await;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let outsider = signed_record(3, timestamp);
+    let prior_rejections = a.diagnostics().relayed_records.rejected;
+    assert!(
+        b.send_to(
+            a.node_id(),
+            Frame {
+                message: 0x11,
+                payload: peer_record::encode_list(std::slice::from_ref(&outsider)).unwrap(),
+            }
+        )
+        .await
+    );
+    until(|| a.diagnostics().relayed_records.rejected > prior_rejections).await;
+    assert!(!a.records().iter().any(|r| r.node_id == outsider.node_id));
+
+    let active = signed_record(2, timestamp);
+    let prior_admissions = {
+        let relayed = a.diagnostics().relayed_records;
+        relayed.accepted + relayed.unchanged
+    };
+    assert!(
+        b.send_to(
+            a.node_id(),
+            Frame {
+                message: 0x11,
+                payload: peer_record::encode_list(std::slice::from_ref(&active)).unwrap(),
+            }
+        )
+        .await
+    );
+    until(|| {
+        let relayed = a.diagnostics().relayed_records;
+        relayed.accepted + relayed.unchanged > prior_admissions
+    })
+    .await;
+    assert!(a.records().iter().any(|r| r.node_id == active.node_id));
+
+    a.set_validators(vec![public(1)]).unwrap();
+    assert!(a.records().is_empty());
+    let retired = signed_record(2, timestamp);
+    let prior_rejections = a.diagnostics().relayed_records.rejected;
+    assert!(
+        b.send_to(
+            a.node_id(),
+            Frame {
+                message: 0x11,
+                payload: peer_record::encode_list(std::slice::from_ref(&retired)).unwrap(),
+            }
+        )
+        .await
+    );
+    until(|| a.diagnostics().relayed_records.rejected > prior_rejections).await;
+    assert!(!a.records().iter().any(|r| r.node_id == retired.node_id));
+    a.stop();
+    b.stop();
+    at.await.unwrap();
+    bt.await.unwrap();
 }
 
 #[tokio::test]

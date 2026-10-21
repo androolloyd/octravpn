@@ -1,0 +1,62 @@
+{
+  "observed_at_utc": "2026-10-21T01:27:33.115347+00:00",
+  "status": "30 private tests and 256 integrated host tests pass; immutable Linux funded rerun active",
+  "consensus_changes": false,
+  "before": [
+    {
+      "case": "matrix-hop0-v12",
+      "canonical_pool_exchanges": 1,
+      "deposit_reconciled": true,
+      "terminal_node_error": "Error: private invoice is not currently purchasable",
+      "pool_hashes": [
+        "07a3bb86f8694da0fc2a7a811d24546b5a24bf9a0a8fcc3b6a0c1edc9c0cc01a"
+      ]
+    },
+    {
+      "case": "matrix-hop1-v12",
+      "canonical_pool_exchanges": 1,
+      "deposit_reconciled": true,
+      "terminal_node_error": "Error: private invoice is not currently purchasable",
+      "pool_hashes": [
+        "8d455ac7bfd3737ff644b0be97142c84d3739b5b666c3168e13edc8bdb7f1413"
+      ]
+    }
+  ],
+  "mechanism": "Only after all consent, rate notice and both signature checks pass, a future quote yields typed NotYetValid. The finite runner retries the same durable control request as Syncing without note or fee reservation. Expiry is unchanged; other failures propagate.",
+  "security_regression": "Future valid quotes wait; forged signatures, changed limits, activation/notice violations and expired quotes fail. Canonical runner checks unchanged fee reservations and pending transactions across a valid future and forged future reply.",
+  "private_package_tests_passed": 30,
+  "strict": {
+    "strict-experimental": {
+      "exit_code": 0,
+      "elapsed_seconds": 27.08
+    },
+    "strict-default": {
+      "exit_code": 0,
+      "elapsed_seconds": 0.42
+    },
+    "node-tests": {
+      "exit_code": 0,
+      "elapsed_seconds": 546.7
+    }
+  },
+  "linux_funded_qualified": false,
+  "public_alpha_qualified": false,
+  "full_goal_complete": false,
+  "source_sha256": {
+    "experimental/private-payments/src/invoice.rs": "b0bdcba13397c2d63895a0f56260e7cce4de6878ca2dedcc9ef25bb91a9d4428",
+    "experimental/private-payments/src/invoice/tests.rs": "74c45a20eee0bb128aa654e576bb6e3a126ba977f6d95080a4ce436febc826b0",
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner.rs": "702beaa668165253108fa1b28e1ffde155496973402c9a01c1d234cceb2d9fea",
+    "crates/octra-node/src/vpn/payments/shielded/runner_tests.rs": "63c844b080d8e0049b466492ba163aa9e191c49017003697d6197fd0b3177dff"
+  },
+  "evidence": "out/private-funded-multihop-20261020",
+  "integrated_node_tests_passed": 256,
+  "linux_image": "sha256:5b1a984b1385e43e3ca2bd3343418f56e7d3f7a3bc86403ff27106e56b14a6c9",
+  "linux_node_tests": {
+    "passed": 256,
+    "failed": 0,
+    "ignored": 3,
+    "source_unchanged": true
+  },
+  "funded_profiles_qualified": false,
+  "follow_up": "Entry class payments and entry TUN reached in v13; downstream SQL acquisition failed. Other profile stopped on canonical-history audit admission. Local typed-view correction passes strict builds and 11 publication tests; funded rerun remains required."
+}

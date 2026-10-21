@@ -1,6 +1,7 @@
 //! Nested exits share the existing exclusive route namespace. Every downstream
 //! peer and non-loopback control IP has a persistent /32 blackhole beneath its
 //! paid carrier route. Only the entry may use a physical management exception.
+use super::packet::Guard;
 use super::{
     json_array, reject_stale, require_ipv6_guard_capability, require_physical_public_path,
     verify_lock_metadata, Route, Runner, System, BLOCK_METRIC, PAID_METRIC, PROTO,
@@ -12,11 +13,23 @@ use std::{
     fs::File,
     net::{Ipv4Addr, SocketAddrV4},
 };
+#[cfg(all(test, target_os = "linux"))]
+#[path = "multi_kernel.rs"]
+mod kernel;
+#[path = "multi_recovery.rs"]
+mod recovery;
 
 pub(in crate::paid_routes) struct Lease {
     _lock: File,
     routes: Vec<Route>,
     downstream: BTreeSet<Ipv4Addr>,
+    priority: u32,
+    chain_routes: Vec<Route>,
+    chain_interface: Option<String>,
+    pending: Vec<Route>,
+    network: Option<crate::paid_routes::Network>,
+    restored: Option<recovery::Recovery>,
+    guard: Guard,
 }
 impl Lease {
     pub(in crate::paid_routes) fn arm(
@@ -24,7 +37,27 @@ impl Lease {
         controls: &[SocketAddrV4],
         peers: &[SocketAddrV4],
         interfaces: &[String],
+        chain: bool,
     ) -> Result<Self> {
+        let mut lease = Self::reserve(entry, controls, peers, interfaces, chain, 0, None)?;
+        lease.activate()?;
+        Ok(lease)
+    }
+    pub(in crate::paid_routes) fn reserve(
+        entry: SocketAddrV4,
+        controls: &[SocketAddrV4],
+        peers: &[SocketAddrV4],
+        interfaces: &[String],
+        chain: bool,
+        mark: u32,
+        previous: Option<&crate::paid_routes::Network>,
+    ) -> Result<Self> {
+        super::require_host_capabilities()?;
+        ensure!(
+            !chain || mark != 0,
+            "chain policy requires a privileged socket mark"
+        );
+        let priority = if chain { 2 } else { 1 };
         let lock = File::from(openat(
             CWD,
             "/run/octravpn-paid-exit.lock",
@@ -35,6 +68,34 @@ impl Lease {
         flock(&lock, FlockOperation::NonBlockingLockExclusive)
             .context("another paid route lease is active")?;
         let runner = System;
+        let (_, downstream) = route_endpoints(entry, controls, peers)?;
+        if chain {
+            if let Some(previous) = previous {
+                if let Some(restored) = recovery::reserve(
+                    &runner,
+                    previous,
+                    entry,
+                    controls,
+                    peers,
+                    interfaces,
+                    mark,
+                    downstream.clone(),
+                )? {
+                    return Ok(Self {
+                        _lock: lock,
+                        routes: Vec::new(),
+                        downstream,
+                        priority,
+                        chain_routes: Vec::new(),
+                        chain_interface: None,
+                        pending: Vec::new(),
+                        network: Some(previous.clone()),
+                        guard: restored.packet_guard(),
+                        restored: Some(restored),
+                    });
+                }
+            }
+        }
         reject_stale(&runner)?;
         for family in ["-4", "-6"] {
             let rules = json_array(&runner.run(&[
@@ -44,11 +105,19 @@ impl Lease {
                 "show".into(),
             ])?)?;
             ensure!(
+                !rules.iter().any(|rule| rule["table"].as_u64() == Some(186)
+                    || rule["table"].as_str() == Some("186")
+                    || (chain
+                        && (rule["table"].as_u64() == Some(185)
+                            || rule["table"].as_str() == Some("185")))),
+                "composite routing table already has a policy owner"
+            );
+            ensure!(
                 rules
                     .iter()
                     .filter(|rule| rule["priority"]
                         .as_u64()
-                        .is_some_and(|priority| priority <= 1))
+                        .is_some_and(|p| p <= u64::from(priority)))
                     .all(standard_local_rule),
                 "higher-precedence foreign policy rule prevents a safe composite route"
             );
@@ -64,7 +133,10 @@ impl Lease {
                 !routes
                     .iter()
                     .any(|route| route["table"].as_u64() == Some(186)
-                        || route["table"].as_str() == Some("186")),
+                        || route["table"].as_str() == Some("186")
+                        || (chain
+                            && (route["table"].as_u64() == Some(185)
+                                || route["table"].as_str() == Some("185")))),
                 "composite routing table is already in use"
             );
         }
@@ -86,14 +158,56 @@ impl Lease {
         for ip in management {
             direct.push(physical(&runner, ip, interfaces)?);
         }
+        let bypasses = recovery::bypasses(&direct, &links)?;
+        let guard = Guard::new(
+            entry,
+            controls,
+            peers,
+            interfaces,
+            chain.then_some(mark),
+            &bypasses,
+        )?;
+        guard.reserve(false)?;
+        let network = chain
+            .then(|| recovery::plan(entry, controls, peers, interfaces, mark, bypasses))
+            .transpose()?;
         let mut routes = blockers(&downstream);
         routes.extend(direct);
-        let mut lease = Self {
+        Ok(Self {
             _lock: lock,
             routes: Vec::new(),
             downstream,
-        };
-        install_with(&runner, &mut lease.routes, routes)?;
+            priority,
+            chain_routes: Vec::new(),
+            chain_interface: None,
+            pending: routes,
+            network,
+            restored: None,
+            guard,
+        })
+    }
+    pub(in crate::paid_routes) fn activate(&mut self) -> Result<()> {
+        ensure!(
+            self.routes.is_empty() && (!self.pending.is_empty() || self.restored.is_some()),
+            "composite policy is already active"
+        );
+        let runner = System;
+        if let Some(restored) = &self.restored {
+            let (routes, chain) = restored.activate(&runner)?;
+            self.routes = routes;
+            self.chain_routes = chain;
+            self.restored = None;
+            return Ok(());
+        }
+        self.guard.install(false)?;
+        let routes = std::mem::take(&mut self.pending);
+        install_with(&runner, &mut self.routes, routes)?;
+        if self.priority == 2 {
+            for route in recovery::chain_blockers() {
+                route.call(&runner, "add")?;
+                self.chain_routes.push(route);
+            }
+        }
         // These rules precede ordinary/Tailscale route tables, after the
         // kernel local table. Once installed, carrier removal cannot reveal
         // a lower-priority physical route to a downstream operator.
@@ -104,13 +218,66 @@ impl Lease {
                     "rule".into(),
                     "add".into(),
                     "priority".into(),
-                    "1".into(),
+                    self.priority.to_string(),
                     "lookup".into(),
                     "186".into(),
                 ])
                 .context("composite policy activation failed; blocking routes retained")?;
         }
-        Ok(lease)
+        Ok(())
+    }
+    pub(in crate::paid_routes) fn network(&self) -> Result<crate::paid_routes::Network> {
+        self.network
+            .clone()
+            .context("route has no coordinated kernel plan")
+    }
+
+    pub(in crate::paid_routes) fn chain(&mut self, entry: &crate::Interface) -> Result<()> {
+        self.guard.check()?;
+        ensure!(
+            self.priority == 2 && self.chain_interface.is_none(),
+            "chain policy is absent or already active"
+        );
+        super::require_address(&System, &entry.name, false)?;
+        let mark = self.network()?.socket_mark();
+        for prefix in ["0.0.0.0/1", "128.0.0.0/1"] {
+            let mut route = via_interface(prefix, entry);
+            *route.args.last_mut().context("chain route table missing")? = "185".into();
+            route.call(&System, "add")?;
+            self.chain_routes.push(route);
+        }
+        for family in ["-6", "-4"] {
+            System.run(&[
+                family.into(),
+                "rule".into(),
+                "add".into(),
+                "priority".into(),
+                "1".into(),
+                "fwmark".into(),
+                format!("0x{mark:08x}/0xffffffff"),
+                "oif".into(),
+                entry.name.clone(),
+                "lookup".into(),
+                "185".into(),
+            ])?;
+        }
+        self.chain_interface = Some(entry.name.clone());
+        let rows = json_array(&System.run(&[
+            "-4".into(),
+            "-j".into(),
+            "route".into(),
+            "get".into(),
+            "1.1.1.1".into(),
+            "mark".into(),
+            mark.to_string(),
+            "oif".into(),
+            entry.name.clone(),
+        ])?)?;
+        ensure!(
+            rows.first().and_then(|row| row["dev"].as_str()) == Some(entry.name.as_str()),
+            "trusted chain policy selected an unexpected interface"
+        );
+        Ok(())
     }
 
     pub(in crate::paid_routes) fn next(
@@ -119,6 +286,7 @@ impl Lease {
         peer: SocketAddrV4,
         control: SocketAddrV4,
     ) -> Result<()> {
+        self.guard.check()?;
         ensure!(
             self.downstream.contains(peer.ip()),
             "unaccepted downstream endpoint"
@@ -138,6 +306,7 @@ impl Lease {
     }
 
     pub(in crate::paid_routes) fn finish(&mut self, exit: &crate::Interface) -> Result<()> {
+        self.guard.check()?;
         super::require_address(&System, &exit.name, false)?;
         for prefix in ["0.0.0.0/1", "128.0.0.0/1"] {
             let route = via_interface(prefix, exit);
@@ -150,19 +319,34 @@ impl Lease {
     }
 
     pub(in crate::paid_routes) fn disconnect(self) -> Result<()> {
+        self.guard.check()?;
         disconnect_with(&System, &self.routes)?;
+        disconnect_with(&System, &self.chain_routes)?;
+        if self.chain_interface.is_some() {
+            for family in ["-4", "-6"] {
+                System.run(&[
+                    family.into(),
+                    "rule".into(),
+                    "del".into(),
+                    "priority".into(),
+                    "1".into(),
+                    "lookup".into(),
+                    "185".into(),
+                ])?;
+            }
+        }
         for family in ["-4", "-6"] {
             System.run(&[
                 family.into(),
                 "rule".into(),
                 "del".into(),
                 "priority".into(),
-                "1".into(),
+                self.priority.to_string(),
                 "lookup".into(),
                 "186".into(),
             ])?;
         }
-        Ok(())
+        self.guard.remove()
     }
 }
 
@@ -226,7 +410,8 @@ fn install_with(
 }
 fn standard_local_rule(rule: &serde_json::Value) -> bool {
     rule["priority"].as_u64() == Some(0)
-        && (rule["table"].as_str() == Some("local") || rule["table"].as_u64() == Some(255))
+        && (matches!(rule["table"].as_str(), Some("local" | "255"))
+            || rule["table"].as_u64() == Some(255))
         && rule["src"].as_str().is_none_or(|src| src == "all")
         && rule["dst"].as_str().is_none_or(|dst| dst == "all")
         && rule.as_object().is_some_and(|fields| {
@@ -347,16 +532,23 @@ fn disconnect_with(runner: &impl Runner, routes: &[Route]) -> Result<()> {
     // expected, but never hide failures removing management or blocking routes.
     for route in routes.iter().rev() {
         if route.args.iter().any(|arg| arg == "src") {
-            let current = json_array(&runner.run(&[
-                route.family.into(),
-                "-j".into(),
-                "route".into(),
-                "show".into(),
-                "table".into(),
-                "186".into(),
-                "proto".into(),
-                PROTO.into(),
-            ])?)?;
+            let current = json_array(
+                &runner.run(&[
+                    route.family.into(),
+                    "-j".into(),
+                    "route".into(),
+                    "show".into(),
+                    "table".into(),
+                    route
+                        .args
+                        .windows(2)
+                        .find(|pair| pair[0] == "table")
+                        .map_or("186", |pair| pair[1].as_str())
+                        .into(),
+                    "proto".into(),
+                    PROTO.into(),
+                ])?,
+            )?;
             let prefix = &route.args[0];
             let dev = &route.args[2];
             if !current.iter().any(|row| {

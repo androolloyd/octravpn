@@ -100,6 +100,11 @@ impl CanonicalAssets {
         &self.state
     }
 
+    /// The authenticated retained head bound to this immutable tree.
+    pub fn head(&self) -> &Head {
+        &self.head
+    }
+
     pub fn identity(&self) -> &SnapshotIdentity {
         &self.identity
     }
@@ -116,6 +121,18 @@ impl CanonicalAssets {
     /// canonical browser provenance through this API.
     pub async fn capture(store: &CanonicalStore) -> Result<Self, Error> {
         let (head, state) = store.snapshot().await.map_err(unavailable)?;
+        Self::bound(store.reader(), head, state.snapshot())
+    }
+
+    /// Capture an authenticated retained tree for historical application rules.
+    /// Reader::snapshot_at verifies the head and all immutable tree objects;
+    /// caller-supplied epoch/root fields cannot create canonical provenance.
+    pub async fn at(reader: Reader, head: Head) -> Result<Self, Error> {
+        let state = reader.snapshot_at(&head).await.map_err(unavailable)?;
+        Self::bound(reader, head, state)
+    }
+
+    fn bound(reader: Reader, head: Head, state: Snapshot) -> Result<Self, Error> {
         if state.get(&[b"meta", b"last_epoch"]).and_then(parse_int64)
             != i64::try_from(head.cursor.epoch.0).ok()
         {
@@ -124,16 +141,16 @@ impl CanonicalAssets {
             ));
         }
         Ok(Self {
-            state: state.snapshot(),
+            state,
             identity: SnapshotIdentity {
-                chain_id: store.chain().chain_id.clone(),
-                origin: store.chain().origin,
+                chain_id: reader.chain().chain_id.clone(),
+                origin: reader.chain().origin,
                 epoch: head.cursor.epoch.0,
                 state_root: hex::encode(head.cursor.state_root.0),
                 ledger_root: head.ledger_root.clone(),
                 irmin_commit: head.irmin_commit.clone(),
             },
-            reader: store.reader(),
+            reader,
             head,
         })
     }
@@ -160,6 +177,9 @@ impl CanonicalAssets {
             return Err(Error::Unavailable(
                 "Circle fixture genesis anchor differs".into(),
             ));
+        }
+        if graph.has_proven_application_opt_in() {
+            return Ok(());
         }
         let genesis = self.reader.head_for_epoch(0).await.map_err(unavailable)?;
         if genesis.cursor.sequence.0 != 0 || genesis.cursor.state_root != state_root {

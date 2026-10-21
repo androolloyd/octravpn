@@ -1,0 +1,134 @@
+{
+  "status": "Queue fix qualified and deployed; retained observer cold restore complete, peered and advancing, public paid serving still unqualified",
+  "adopted_upstream": "d3e834919bd586e81f947d0dae91becc6c43c756",
+  "evidence": "out/pending-cursor-20261020",
+  "source_manifest": "out/pending-cursor-20261020/source-before.json",
+  "source_files": 1862,
+  "sources_unchanged_during_host_checks": true,
+  "checks": [
+    {
+      "name": "experimental-strict",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "-p",
+        "octra-node",
+        "-p",
+        "octravpn-client",
+        "--features",
+        "octra-node/private-payments-experimental",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 13.94,
+      "log": "out/pending-cursor-20261020/experimental-strict.log"
+    },
+    {
+      "name": "normal-strict",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "-p",
+        "octra-node",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 6.75,
+      "log": "out/pending-cursor-20261020/normal-strict.log"
+    },
+    {
+      "name": "native-payments",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--release",
+        "-p",
+        "octra-node",
+        "--features",
+        "private-payments-experimental",
+        "--lib"
+      ],
+      "exit": 0,
+      "seconds": 368.65,
+      "log": "out/pending-cursor-20261020/native-payments.log"
+    }
+  ],
+  "passed": {
+    "release_node_library_tests": 252,
+    "strict_host_configurations": 2
+  },
+  "fix": [
+    "Canonical post-commit cleanup keeps the newest already authenticated durable queue cursor while applying historical processed-hash removals",
+    "Cleanup checks its record epoch/root against the supplied cursor; mismatches fail before queue mutation",
+    "Ordinary admission still requires its exact current draft lease; Disk.save monotonicity and root conflict checks remain unchanged"
+  ],
+  "regression": [
+    "Real signed Circle RPC intake, canonical execution and signed QCs advance past a delayed cleanup",
+    "A newer proposal capture persists the newer head before the historical callback removes the earlier committed transaction",
+    "Stale draft and mismatched record-root negative controls leave the WAL and pending transactions unchanged",
+    "All original queue handles close before each reopen; valid remaining work survives and final cleanup reopens empty"
+  ],
+  "public_runtime": {
+    "container": "octra-devnet-observer-cursor-20261020",
+    "state": "Running; RPC available, peered and advancing; admission suspended for canonical history audit",
+    "prior_exit_evidence": "out/private-packet-guard-20261020/public-observer-terminal.json",
+    "container_id": "21cd88f7dcc6ae2e4bb4939d30a1b72dbfbda2e6f6247f1a4f59daffa3c3a6ef",
+    "same_identity_config_keys_ports_and_plan": true,
+    "state_reset": false,
+    "observation": "out/pending-cursor-20261020/adoption/observation.json",
+    "adoption": "out/pending-cursor-20261020/adoption/adoption.json",
+    "rollback": "out/pending-cursor-20261020/backup-state.json",
+    "old_container_preserved": "octra-devnet-paid-candidate-20261020",
+    "cold_start_completed": true,
+    "latest_observation": "out/private-class-bundle-20261020/observer-latest.json",
+    "observed_at": "2026-10-20T12:08:51.143873+00:00",
+    "observed_status": {
+      "chain_id": "octra-devnet-9871-cluster",
+      "epoch": 1723019,
+      "peers": 26,
+      "pending": 0,
+      "serving": false,
+      "state_root": "543ae8fd4a9234573c00cbf09a2165080acd57c744982e14e379f0220b201a5e",
+      "suspension_reason": "auditing canonical history",
+      "vpn_program": "oct4qzVq1RsPQnnoYpbXNuqjHYpPPs2LPdDK2inWZDwYCoP",
+      "vpn_settlement": "configured"
+    },
+    "current_head_and_sustained_paid_qualification": false
+  },
+  "linux_candidate": {
+    "scope": "Previously deployed frozen snapshot with only two production queue files and the regression changed",
+    "source_manifest": "out/pending-cursor-20261020/observer/source-context.json",
+    "live_build_session": null,
+    "qualification_complete": true,
+    "deployed": true,
+    "image": "sha256:a8f3cc24f925630c6031252ba6da429732f89bc6a6cf903842cec9dd7d1cdf1f",
+    "qualification": "out/pending-cursor-20261020/observer/qualification.json",
+    "library_tests_passed": 240,
+    "service_tests_passed": 36,
+    "ignored_service_tests": [
+      "gateway::canonical_gateway_chromium_fixture: separate isolated runner required"
+    ]
+  },
+  "pending": [
+    "Complete retained-state cold startup and authenticated public-head catch-up",
+    "Sustained driver, paid service and Circle availability without another purchase",
+    "Full funded private multihop, shared channel classes, standalone host packet enforcement and remaining launch gates"
+  ],
+  "new_consensus_change": false,
+  "new_payment_authority": false,
+  "launch_qualified": false,
+  "full_goal_complete": false,
+  "recorded_at_utc": "2026-10-20T11:21:53.449216+00:00"
+}

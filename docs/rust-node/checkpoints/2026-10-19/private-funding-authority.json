@@ -1,0 +1,137 @@
+{
+  "schema": "octra_private_funding_authority_v1",
+  "observed_at_utc": "2026-10-19T16:05:41.371947+00:00",
+  "feature": "private-payments-experimental",
+  "consensus_changes": false,
+  "release_enabled": false,
+  "full_rust_node_complete": false,
+  "public_network_qualified": false,
+  "live_shielded_traffic_qualified": false,
+  "secret_wallet_recovery_qualified": false,
+  "paid_meter_credit_journal_implemented": false,
+  "native_full_epoch_qualified": false,
+  "canonical_bft_node_funding_qualified": true,
+  "canonical_node_reopen_qualified": true,
+  "scope": "Rust Node/Native execution with actual signed local QCs and reopened canonical/ExEx stores; immutable Circle pool funding established from canonical note roots, not VM receipt text. This is not public network, secret wallet, meter or kernel qualification.",
+  "source_sha256": {
+    "Cargo.toml": "7e55763b676bdb61bfc065d6ba52b9eb41bc0571bfbbe10f5d83a6769ef18ede",
+    "Cargo.lock": "27c8bc5404d587ebf79ee1bf793faebc89c417c78ea60c4baf6cdc0a8138dc22",
+    "crates/octra-node/Cargo.toml": "014274c7c3a32a55549baff642826646baeeaed949035991639edb4ef0fade61",
+    "crates/octra-node/src/published.rs": "a46f513b986855a66cd2dea6f1248672acb1719f27a89af92ea80e51692bd68b",
+    "crates/octra-node/src/lib.rs": "c0b2df1e95a16ea37a222a7f0c5cec4d8f594b7cdd7c069e13525c89a22456c5",
+    "crates/octra-node/src/vpn/payments.rs": "ccbe35670427872d9c2cb525ba4b8f1e70df5cd3229258a181880337a0a1c9d4",
+    "crates/octra-node/src/vpn/payments/offers.rs": "697c85e7df266fc2b32b03444e7b0abec8fc26262193bd12bcd7285f3ab38e20",
+    "crates/octra-node/src/vpn/payments/shielded.rs": "4f9648910a0c7a733ee7bc98d6ad6d735acd17363389fa4c5500e9a97ee60be2",
+    "crates/octra-node/src/vpn/payments/shielded_tests.rs": "8352bf136f2b375820b74c2adb77b2df200df95dd613f277dd515f28b62ba10f",
+    "crates/octra-node/src/vpn/payments/tests.rs": "26ca5b1a52bec58c2da00911c5a97ca33076a8d569e0976006a9abbe1b57bb28",
+    "crates/octra-node/src/vpn/payments/canonical_tests.rs": "d6146af19ac70205b0f79cf0a994402441c020c2941208647ec5011c80e2a388",
+    "crates/octra-node-runtime/src/circle_assets.rs": "c87a50afe17109a3ea6bcce06adb42ce1df25eeb37771edc94e5bc57c1248103",
+    "crates/octra-node-runtime/src/finality/history.rs": "a2db1cef5821722e76b3d0d3b340702b2c4f6428cd85c4cc41f9408e32c051c2",
+    "crates/octra-node-runtime/src/canonical/reader.rs": "8622a675c907882a13d86adf9b7b7f54c02ea2b69f06e2bef78553bb6606aa63",
+    "crates/octra-node-runtime/src/circle_view.rs": "3f22a4463b7cef9a702e16498732c9183dc0f58e472739b747e8e6118dbd41a6",
+    "docs/architecture/shielded-circle-payments.md": "d511ea7e3481eb711c826414ff2dcf71b8b9bb19b4bbd7794393c6fca5bef1b5"
+  },
+  "experimental_source_sha256": {
+    ".gitignore": "306fd52e74fca6746e12acc750f232de15e71da917756a1270d74c91f5eb7368",
+    "Cargo.lock": "8d00f0f4e191d78c8d2a7c2613c8296ab5111bb273d785e47e5c92d3302a4e7d",
+    "Cargo.toml": "fba88b63a4020fc49995b8c935cc793a2d862eb28758320f9ced52dbfb0ebd5e",
+    "README.md": "055f8f1e8282da2cfc8441f68c8704c66c11280b0f7b0eab4af5f3d5ec1bd67a",
+    "program/shielded-pool-factory.aml": "c579c470a57f484b375eaded05793a5beb4ce6e32b530b36e1ccf32e11a0791f",
+    "program/shielded-pool.aml.in": "230a046c370fad7c4aa6ef83694ce504a830df032ab873c6b35f53eb21d4b834",
+    "proofs/Pool.lean": "f92d4c145548baf0f18991ca0c51b666a3057d4cb95113c737285465c347d7f5",
+    "src/commitment.rs": "058283a2f8f4363b5a82eb884600fae5716e72cc1fe36385927521898819dcbd",
+    "src/invoice/tests.rs": "b66553bc8cca73be835218934bd59fed0592d0826ee31472d07daf6230853735",
+    "src/invoice.rs": "f520597bd737e983d6ddbbee748d3a4482cf282933c265b909d7e6c462c3ae17",
+    "src/lib.rs": "ad102eaa42ff432364314319ad2f5252d4cd982ec60459b25846fba3b410e4d0",
+    "src/native_stealth/tests.rs": "cb69bbc89e802795463646397cee63371a90fbd06042e14db853759b1f7fb75d",
+    "src/native_stealth.rs": "a1bdb6e2a29775e8fadfdf54493ef371b89cd23a22c067bb77f789c51af9de40",
+    "src/pool/app.rs": "bce99997993736dfd88d82c0489e7356448244cc18a71691410b858e13c282e2",
+    "src/pool/call.rs": "68dd9b7f3b3fbde9d2bdac74d2925708fb523c8b62184ccc145030260d5de44e",
+    "src/pool/circuit.rs": "50e3b298c098239358a7c7d9d99a4f1eed80b135c4ac2478a737fb4085263139",
+    "src/pool/envelope.rs": "bc812cf186c46b200e981bd27733286c0a91ab08007f31759f108f770c69d686",
+    "src/pool/hash.rs": "11fc77e170043b12e260ffd9a9c67c1d882996f87b73791c0124dd4080aa3ffa",
+    "src/pool/mod.rs": "7bfbd09c63d31914abe18cc93b1cc4516d4854ffbd8baa41698ba35a6e80716e",
+    "src/pool/purchase.rs": "df3a307b9691c89db65b8ff310e8166b57c79ef0dca54f7df109c68d3068a429",
+    "src/pool/tests.rs": "eb749ae00e023ad3ebde787abff0cd1c223d8ed580954be1cc5ad7c14b14a9a9",
+    "src/pool/tree.rs": "9c69865a2b9ff4e0c34758f585e49de783c8cb234dcb51deb7d49b5e9a0dda39",
+    "src/pool/wire.rs": "59dc4f8020e67c400d0061dab89da9880c9b270e288badac370ae3b194c2d470",
+    "src/proposal/tests.rs": "6d43b8a7336516b31d5a496ee2dcffdef4d27353631536a080c05f9d2397323f",
+    "src/proposal.rs": "5892b8ad4a69ce834726b9721c44c7b10fe19864331e3af007f2027df560a9cd",
+    "tests/native-commitments.json": "236687bf7908d2c7173b2f7e522cfc78def53833c57e8699ce9bcae155f57b87",
+    "tests/native-stealth.json": "6fc476d09903e6f7dc97f9d99f1496fb18d6eef6c1e9354f2a285837273e917c",
+    "tests/pool_circle.rs": "3630b8349ef5b62a00aa4037f22befd04525e43657216d7d2339bc826d2cadde",
+    "tools/native-stealth-fixtures.py": "76e0ef14c6e9c4f63f4dc5461b49c858c1a9c86f8c9cca9f5c13ecea9b013dff",
+    "tools/native-stealth-oracle.cpp": "8f422f39c86a42005d3e322ff0800aef0b7739f2ec428a2e75303aa793bb5b3f",
+    "tools/pool-native-fixtures.py": "a85578266fb0f22bf5356f355ad24ee68fb6c5ee452c07b08600f4fc4dda3800"
+  },
+  "tests": {
+    "node_library_with_feature": 238,
+    "pool_unit": 24,
+    "pool_circle_integration": 1,
+    "native_proof_cases": 120,
+    "failed": 0,
+    "ignored": 0,
+    "strict_node_all_targets_clippy": "passed",
+    "strict_pool_all_targets_clippy": "passed",
+    "default_node_all_targets_check": "passed"
+  },
+  "proof_parameters": {
+    "note_depth": 32,
+    "spent_depth": 254,
+    "public_inputs": 17,
+    "call_context": "v2 includes native deposit and withdrawal amounts",
+    "native_app_emitter_equal": true,
+    "native_factory_emitter_equal": true
+  },
+  "native": {
+    "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "runtime_files_checked": 1158,
+    "builder_image": "sha256:e61194220c65f9f0b8034a4816fb15d47dfe7dda8ece1087d9850b6d838bae95",
+    "source_instrumentation": {}
+  },
+  "ark_relations": {
+    "version": "0.5.1",
+    "root_patch": "tracing callback/dependency only; constraint files byte-equal to published crate",
+    "constraint_sha256": {
+      "constraint_system.rs": "44a49ab6366a70dcc60f1b7a67b224e32b3b4b211d42180f1d5cf686f23fff71",
+      "impl_lc.rs": "2e995941280e184469364c66a0178b67a6f36fdaffec07af09a8aaf404c954b3",
+      "mod.rs": "9ea1937bfcc567aa952e96a9c31cebd53f80f5d8629c0e58ce4047041e5d5a6c",
+      "error.rs": "a5c680f162cffce9e060473c0b78ae5eb3de981dd83d3ca2e485a67b6c0924e3"
+    }
+  },
+  "evidence_sha256": {
+    "out/private-authority-20261019/node-feature-tests-v2.log": "6df94efc97170a3b7d48229dd71a83fabb5626bd3900e63848c06fc6edba3880",
+    "out/private-authority-20261019/pool-tests.log": "93d1a3d5450ca83313ee510a0a6ef787f7716861838cfde122753e9570e401a6",
+    "out/private-authority-20261019/node-clippy-v2.log": "ed4beea129b120990f72b2d7bcf07f2e5c56ded526f009fb9eaa6787a5bb53b4",
+    "out/private-authority-20261019/pool-clippy.log": "71464314a15c205edbbadd55d2d07c85366ef680d0dc556d35a13149b36c32ed",
+    "out/private-authority-20261019/default-check.log": "6f350f84903d69b63ee75eba9fe88b3a8b311caede528b2c38fd6c1664061e70",
+    "out/private-authority-20261019/pool-v4.json": "e9ada9b7aa83551ea8fc4820a453cbdaaedad702bef7e91b4120c2733af2315d",
+    "out/private-authority-20261019/native-pool-v4.json": "d2215f4f3e25f3ccdac089cfce7409f3426493ac9c180883140d251e67e7efa8"
+  },
+  "implemented": [
+    "Shared canonical directory projection for public plans and private offers without public payer state",
+    "Revocable standalone offer capability with public tariff policy and exact rate-notice/bond boundaries",
+    "Historical canonical asset capability rejects caller-invented heads",
+    "Source-derived immutable pool/factory code, accepted VK, parent ownership, native custody and anchored historical execution rules",
+    "New-note interval and canonical Merkle inclusion authenticate private note ownership, price, consent and original purchase time",
+    "Native-flow-bound note context prevents public deposit substitution for shielded internal payment",
+    "Stable per-note credit identity survives spent income, quote expiry and canonical-store reopening; new publication, suspension and unstake revoke live authority"
+  ],
+  "remaining": [
+    "Encrypted private wallet, keys, invoices, quote reservations and crash recovery",
+    "Durable global credit consumption and per-class purchased-byte accounting, then private node/client meter and control integration",
+    "Zero-price grants and self-carried traffic without dummy paid notes",
+    "Concurrent root scheduling/retries and funded private multi-node/kernel/restart qualification",
+    "Public devnet/mainnet and alternate host qualification, production ceremony and adversarial cryptographic review"
+  ],
+  "limits": "Funding identity is not a durable consumed-credit record or a delivery proof. Test setup keys are ephemeral and never exported. Current released route mode still rejects shielded_required before keys/journals. No deployment or GitHub push was performed in this stage.",
+  "macos_build_env": {
+    "DEVELOPER_DIR": "/Library/Developer/CommandLineTools",
+    "SDKROOT": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+    "note": "Command-scoped existing toolchain; no global Xcode setting or license acceptance changed"
+  },
+  "prior_test_failure": {
+    "log": "out/private-authority-20261019/node-feature-tests.log",
+    "cause": "Reopen test retained stopped Node Arc, correctly holding writer lease. Fixed test drops old owner; production lock behavior unchanged."
+  }
+}

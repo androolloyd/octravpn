@@ -19,6 +19,10 @@ use tokio::sync::watch;
 const PUBLICATION_READ_GRACE: Duration = Duration::from_secs(15);
 pub(crate) const PUBLICATION_REASON: &str = "publishing canonical epoch";
 
+/// No current service view. Callers may wait without accepting an old view;
+/// errors from staged work and root quarantine remain separate failures.
+pub(crate) use octravpn_core::payments::Unavailable;
+
 /// One immutable, published tree. Application adapters must validate their code
 /// pin and all authorization/funding fields against this same tree.
 #[derive(Clone)]
@@ -36,6 +40,60 @@ impl Committed {
     pub fn provenance(&self) -> Provenance {
         use octra_browser::AssetResolver;
         self.assets.provenance()
+    }
+}
+
+/// Exact service publication for application adapters. Validate funding against
+/// committed(), then guard the final nonblocking handoff with with_current().
+/// This lease grants no execution, signing or consensus authority.
+#[derive(Clone)]
+pub struct SnapshotLease {
+    shared: Arc<Shared>,
+    serving: Arc<Serving>,
+}
+impl SnapshotLease {
+    pub(crate) fn capture(shared: Arc<Shared>) -> Result<Self> {
+        let serving = shared.current()?;
+        Ok(Self { shared, serving })
+    }
+    /// A revoked/busy publication retries admission; errors from current staged
+    /// work remain fatal. The action must be nonblocking and perform no proof IO.
+    pub(crate) fn admit<T>(&self, action: impl FnOnce() -> Result<T>) -> Result<Option<T>> {
+        match self
+            .shared
+            .with_current(self.committed().head(), &self.serving.revocation, || {
+                Ok(action())
+            }) {
+            Ok(result) => result.map(Some),
+            Err(_) => Ok(None),
+        }
+    }
+    pub fn committed(&self) -> &Committed {
+        &self.serving.committed
+    }
+    pub fn age(&self) -> Duration {
+        self.serving.observed_at.elapsed()
+    }
+    /// Advisory fast check. Every handoff still needs with_current(). The caller
+    /// must supply its application freshness policy; same-head resume cannot
+    /// renew the original canonical observation time.
+    pub fn is_live(&self, max_age: Duration) -> bool {
+        !self.serving.revocation.is_revoked() && self.age() < max_age
+    }
+    /// Holds the publication guard through one nonblocking operation. No await,
+    /// proof work or disk I/O may occur inside the closure.
+    pub fn with_current<T>(
+        &self,
+        max_age: Duration,
+        action: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        self.shared
+            .with_current(self.committed().head(), &self.serving.revocation, || {
+                if self.age() >= max_age {
+                    return Err(Unavailable::new("service snapshot lease expired").into());
+                }
+                action()
+            })
     }
 }
 
@@ -108,7 +166,7 @@ impl Shared {
         state
             .serving
             .clone()
-            .ok_or_else(|| anyhow::anyhow!("{}", state.reason()))
+            .ok_or_else(|| Unavailable::new(state.reason()).into())
     }
     /// Public assets belong to an immutable committed root. Keep that root
     /// readable briefly while its successor is published; never reuse it for
@@ -188,6 +246,21 @@ impl Shared {
                 .root_ticket
                 .clone(),
         )
+    }
+    /// Guard historical proof verification without publishing a serving view.
+    /// This supplies no freshness, admission, transaction or signing authority.
+    #[cfg(any(test, feature = "private-payments-experimental"))]
+    pub(crate) fn with_root_ticket<T>(
+        &self,
+        ticket: &RootQuarantineTicket,
+        action: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        let state = self.0.lock().expect("service state lock");
+        anyhow::ensure!(
+            state.root_conflict.is_none() && Arc::ptr_eq(&ticket.0, &state.root_ticket),
+            "retained proof invalidated by root quarantine"
+        );
+        action()
     }
     pub(crate) fn root_quarantined(&self) -> bool {
         self.0
@@ -279,19 +352,21 @@ impl Shared {
         revocation: &Revocation,
         action: impl FnOnce() -> Result<T>,
     ) -> Result<T> {
-        let state = self
-            .0
-            .try_lock()
-            .map_err(|_| anyhow::anyhow!("canonical view busy"))?;
-        anyhow::ensure!(
-            state.root_conflict.is_none()
-                && !revocation.is_revoked()
-                && state
-                    .serving
-                    .as_ref()
-                    .is_some_and(|s| s.committed.head() == parent),
-            "proposal snapshot was revoked"
-        );
+        let state = self.0.try_lock().map_err(|error| match error {
+            std::sync::TryLockError::WouldBlock => {
+                anyhow::Error::new(Unavailable::new("canonical view busy"))
+            }
+            std::sync::TryLockError::Poisoned(_) => anyhow::anyhow!("canonical view lock poisoned"),
+        })?;
+        anyhow::ensure!(state.root_conflict.is_none(), "{}", state.reason());
+        if revocation.is_revoked()
+            || !state
+                .serving
+                .as_ref()
+                .is_some_and(|s| s.committed.head() == parent)
+        {
+            return Err(Unavailable::new("proposal snapshot was revoked").into());
+        }
         action()
     }
 
@@ -381,6 +456,170 @@ mod tests {
             assert!(self.shared.install(&ticket, self.serving()));
             self.shared.current().unwrap()
         }
+    }
+
+    fn leased_publication(fixture: &Fixture) -> Arc<Shared> {
+        let shared = Arc::new(Shared::new());
+        let (ticket, _) = shared.suspend("lease fixture ready");
+        assert!(shared.install(&ticket, fixture.serving()));
+        shared
+    }
+
+    #[tokio::test]
+    async fn unavailable_views_do_not_reclassify_work_errors_or_root_quarantine() {
+        let fixture = Fixture::new().await;
+        let shared = leased_publication(&fixture);
+        let lease = SnapshotLease::capture(shared.clone()).unwrap();
+        let work = lease
+            .with_current(Duration::from_secs(120), || -> Result<()> {
+                anyhow::bail!("corrupt staged financial record")
+            })
+            .unwrap_err();
+        assert!(!work.is::<Unavailable>());
+        let (ticket, _) = shared.suspend("auditing canonical history");
+        assert!(SnapshotLease::capture(shared.clone())
+            .err()
+            .unwrap()
+            .is::<Unavailable>());
+        assert!(lease
+            .with_current(Duration::from_secs(120), || Ok(()))
+            .unwrap_err()
+            .is::<Unavailable>());
+        assert!(shared.install(&ticket, fixture.serving()));
+        assert!(SnapshotLease::capture(shared.clone()).is_ok());
+        shared.quarantine_root(&fixture.head, "authenticated root conflict");
+        assert!(!SnapshotLease::capture(shared)
+            .err()
+            .unwrap()
+            .is::<Unavailable>());
+        assert!(!lease
+            .with_current(Duration::from_secs(120), || Ok(()))
+            .unwrap_err()
+            .is::<Unavailable>());
+    }
+
+    #[tokio::test]
+    async fn retained_proof_ticket_does_not_publish_and_never_survives_quarantine() {
+        let fixture = Fixture::new().await;
+        let ticket = fixture.shared.root_quarantine_ticket();
+        fixture.shared.with_root_ticket(&ticket, || Ok(())).unwrap();
+        assert!(fixture.shared.current().is_err());
+        fixture
+            .shared
+            .quarantine_root(&fixture.head, "catchup_apply_failed:invalid");
+        assert!(fixture.shared.with_root_ticket(&ticket, || Ok(())).is_err());
+        let blocked = fixture.shared.root_quarantine_ticket();
+        assert!(fixture
+            .shared
+            .with_root_ticket(&blocked, || Ok(()))
+            .is_err());
+        assert!(fixture.shared.complete_catchup(&blocked));
+        assert!(fixture.shared.with_root_ticket(&ticket, || Ok(())).is_err());
+        assert!(fixture
+            .shared
+            .with_root_ticket(&blocked, || Ok(()))
+            .is_err());
+        fixture
+            .shared
+            .with_root_ticket(&fixture.shared.root_quarantine_ticket(), || Ok(()))
+            .unwrap();
+        assert!(fixture.shared.current().is_err());
+    }
+
+    #[tokio::test]
+    async fn service_lease_refuses_before_publication_and_enforces_freshness() {
+        assert!(SnapshotLease::capture(Arc::new(Shared::new())).is_err());
+        let fixture = Fixture::new().await;
+        let shared = leased_publication(&fixture);
+        let lease = SnapshotLease::capture(shared).unwrap();
+        assert_eq!(lease.committed().head(), &fixture.head);
+        assert!(lease.is_live(Duration::from_secs(60)));
+        assert!(!lease.is_live(Duration::ZERO));
+        let mut called = false;
+        assert!(lease
+            .with_current(Duration::ZERO, || {
+                called = true;
+                Ok(())
+            })
+            .unwrap_err()
+            .is::<Unavailable>());
+        assert!(!called);
+        assert_eq!(
+            lease
+                .with_current(Duration::from_secs(60), || Ok(7))
+                .unwrap(),
+            7
+        );
+    }
+
+    #[tokio::test]
+    async fn service_lease_cannot_resurrect_after_same_head_resume_or_renew_freshness() {
+        let fixture = Fixture::new().await;
+        let shared = leased_publication(&fixture);
+        let lease = SnapshotLease::capture(shared.clone()).unwrap();
+        let (ticket, _) = shared.suspend("fixture suspension");
+        assert!(!lease.is_live(Duration::from_secs(60)));
+        assert!(shared.install(&ticket, fixture.serving()));
+        let fresh = SnapshotLease::capture(shared).unwrap();
+        assert_eq!(fresh.committed().head(), lease.committed().head());
+        assert_eq!(fresh.serving.observed_at, lease.serving.observed_at);
+        assert!(fresh.is_live(Duration::from_secs(60)));
+        let mut called = false;
+        assert!(lease
+            .with_current(Duration::from_secs(60), || {
+                called = true;
+                Ok(())
+            })
+            .is_err());
+        assert!(!called);
+    }
+
+    #[tokio::test]
+    async fn service_lease_retries_stale_generation_but_preserves_current_faults() {
+        let fixture = Fixture::new().await;
+        let shared = leased_publication(&fixture);
+        let lease = SnapshotLease::capture(shared.clone()).unwrap();
+        let staged: Result<()> = Err(anyhow::anyhow!("staged generation failed"));
+        let (ticket, _) = shared.suspend("quarantine during async generation build");
+        let mut called = false;
+        assert!(lease
+            .admit(|| {
+                called = true;
+                staged
+            })
+            .unwrap()
+            .is_none());
+        assert!(!called);
+        assert!(shared.install(&ticket, fixture.serving()));
+        let fresh = SnapshotLease::capture(shared).unwrap();
+        assert_eq!(fresh.admit(|| Ok(7)).unwrap(), Some(7));
+        let fault = fresh
+            .admit(|| Err::<(), _>(anyhow::anyhow!("current journal corruption")))
+            .unwrap_err();
+        assert_eq!(fault.to_string(), "current journal corruption");
+    }
+
+    #[tokio::test]
+    async fn service_lease_has_no_gateway_publication_grace_or_quarantine_bypass() {
+        let fixture = Fixture::new().await;
+        let shared = leased_publication(&fixture);
+        let lease = SnapshotLease::capture(shared.clone()).unwrap();
+        let (ticket, _) = shared.suspend(PUBLICATION_REASON);
+        assert!(shared.gateway_view().is_ok());
+        assert!(SnapshotLease::capture(shared.clone()).is_err());
+        assert!(!lease.is_live(Duration::from_secs(60)));
+        assert!(shared.install(&ticket, fixture.serving()));
+        let lease = SnapshotLease::capture(shared.clone()).unwrap();
+        shared.quarantine_root(&fixture.head, "authenticated root conflict");
+        assert!(SnapshotLease::capture(shared).is_err());
+        let mut called = false;
+        assert!(lease
+            .with_current(Duration::from_secs(60), || {
+                called = true;
+                Ok(())
+            })
+            .is_err());
+        assert!(!called);
     }
 
     #[tokio::test]

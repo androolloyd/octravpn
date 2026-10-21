@@ -17,7 +17,6 @@ use octra_node_protocol::{
 };
 use octra_node_runtime::{
     account_store,
-    canonical::CanonicalStore,
     circle::CircleRuntime,
     epoch_footer,
     state_batch::StateBatch,
@@ -32,6 +31,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::watch;
+mod recovery;
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,6 +51,9 @@ pub struct Genesis {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub genesis: Genesis,
+    /// Independently configured authority for an already imported checkpoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint_trust: Option<crate::bootstrap::Network>,
     pub data: PathBuf,
     pub key: PathBuf,
     pub faucet: PathBuf,
@@ -74,6 +79,15 @@ pub struct Config {
     pub vpn: Option<crate::vpn::Config>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payments: Option<crate::vpn::payments::ServiceConfig>,
+    #[cfg(feature = "private-payments-experimental")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shielded: Option<crate::vpn::payments::shielded::startup::Config>,
+    #[cfg(feature = "private-payments-experimental")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payer: Option<crate::vpn::payments::shielded::payer::startup::Config>,
+    #[cfg(feature = "private-payments-experimental")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private_route: Option<crate::vpn::payments::shielded::payer::startup::route::Config>,
     pub peers: Vec<SocketAddr>,
 }
 fn default_voting() -> bool {
@@ -240,6 +254,7 @@ pub async fn init_with_applications(
         let socket = |offset| SocketAddr::from(([127, 0, 0, 1], port + offset));
         let config = Config {
             genesis: genesis.clone(),
+            checkpoint_trust: None,
             data: data.clone(),
             key: key_path,
             faucet: faucet_path.clone(),
@@ -256,6 +271,12 @@ pub async fn init_with_applications(
             voting: true,
             vpn: None,
             payments: None,
+            #[cfg(feature = "private-payments-experimental")]
+            shielded: None,
+            #[cfg(feature = "private-payments-experimental")]
+            payer: None,
+            #[cfg(feature = "private-payments-experimental")]
+            private_route: None,
             peers: peers.iter().copied().filter(|p| p != &peers[i]).collect(),
         };
         let file = data.join("config.json");
@@ -269,9 +290,27 @@ pub async fn init_with_applications(
     Ok(configs)
 }
 pub fn read(path: &Path) -> Result<Config> {
-    let mut config: Config = serde_json::from_slice(&std::fs::read(path)?)?;
+    let mut config: Config =
+        serde_json::from_slice(&crate::bootstrap::read_limited(path, 1024 * 1024)?)?;
     let source = std::fs::canonicalize(path)?;
     let parent = source.parent().context("configuration directory")?;
+    #[cfg(feature = "private-payments-experimental")]
+    if let Some(private) = &mut config.shielded {
+        private.resolve_paths(parent);
+    }
+    #[cfg(feature = "private-payments-experimental")]
+    if let Some(payer) = &mut config.payer {
+        payer.resolve_paths(parent);
+    }
+    #[cfg(feature = "private-payments-experimental")]
+    if let Some(route) = &mut config.private_route {
+        route.resolve_paths(parent);
+    }
+    for file in [&mut config.data, &mut config.key, &mut config.faucet] {
+        if file.is_relative() {
+            *file = parent.join(&*file);
+        }
+    }
     if let Some(portal) = &mut config.stock_portal {
         portal.resolve_paths(parent);
     }
@@ -294,11 +333,49 @@ pub fn read(path: &Path) -> Result<Config> {
 }
 pub use crate::identity::read as read_key;
 
+fn validate_sockets(config: &Config) -> Result<()> {
+    for socket in [
+        config.p2p,
+        config.rpc,
+        config.browser,
+        config.control,
+        config.tunnel,
+    ] {
+        ensure!(
+            socket.ip().is_loopback(),
+            "local devnet listeners must bind loopback"
+        );
+    }
+    #[cfg(feature = "private-payments-experimental")]
+    let remote_observer = !config.voting
+        && config.genesis.activated_applications
+        && config
+            .genesis
+            .chain
+            .chain_id
+            .starts_with("octra-rust-local-")
+        && (config.payer.is_some() || config.private_route.is_some());
+    #[cfg(not(feature = "private-payments-experimental"))]
+    let remote_observer = false;
+    // A retained nonvoting private client may live in another namespace. Its
+    // peers still use native authentication and the original genesis authority.
+    // Service listeners and all ordinary/local validator peers stay loopback.
+    for peer in &config.peers {
+        ensure!(
+            peer.ip().is_loopback() || remote_observer,
+            "remote local-devnet peers require an opted-in private observer"
+        );
+    }
+    Ok(())
+}
+
 pub async fn run(
     config: Config,
     runtime: CircleRuntime,
     shutdown: watch::Receiver<bool>,
 ) -> Result<()> {
+    #[cfg(feature = "private-payments-experimental")]
+    validate_shielded(&config)?;
     crate::launch::require_crypto(&runtime)?;
     ensure!(
         config
@@ -308,47 +385,13 @@ pub async fn run(
             .starts_with("octra-rust-local-"),
         "this launcher only supports isolated local devnets"
     );
-    for socket in [
-        config.p2p,
-        config.rpc,
-        config.browser,
-        config.control,
-        config.tunnel,
-    ]
-    .into_iter()
-    .chain(config.peers.iter().copied())
-    {
-        ensure!(
-            socket.ip().is_loopback(),
-            "local devnet sockets must bind loopback"
-        );
-    }
-    let initial = state(&config.genesis)?;
-    ensure!(
-        root(&initial)?
-            == config
-                .genesis
-                .chain
-                .genesis_root()
-                .context("local devnet requires genesis origin")?,
-        "genesis commitment differs"
-    );
+    validate_sockets(&config)?;
     let key = read_key(&config.key)?;
+    let (store, graph) = recovery::open(&config).await?;
     let journal = JournalOwner::open(&config.data)?;
-    let database = config.data.join("canonical.db");
-    let store = if database.exists() {
-        CanonicalStore::open(&database, &config.genesis.chain).await?
-    } else {
-        CanonicalStore::create(
-            &database,
-            config.genesis.chain.clone(),
-            initial.snapshot(),
-            0,
-        )
-        .await?
-    };
     let profile = Profile::from_values(Some(b"devnet_full_v1"), None, None);
     let protocol = Protocol::new(2)?;
+    let execution = execution(&config, graph, protocol);
     let environment = Environment {
         current: Some(config.genesis.validators.join(",").into_bytes()),
         ..Environment::default()
@@ -393,41 +436,7 @@ pub async fn run(
                 protocol,
                 genesis_time: Some(config.genesis.time),
             },
-            execution: executor::Config {
-                graph: if config.genesis.activated_applications {
-                    Graph::isolated_applications(
-                        config.genesis.chain.chain_id.as_bytes().to_vec(),
-                        None,
-                        config
-                            .genesis
-                            .chain
-                            .genesis_root()
-                            .context("local devnet requires genesis origin")?
-                            .0,
-                    )
-                    .map_err(anyhow::Error::msg)?
-                } else {
-                    Graph::new(config.genesis.chain.chain_id.as_bytes().to_vec(), None)
-                },
-                protocol,
-                profile,
-                payload: octra_node_protocol::transaction_payload::Limits::default(),
-                bundle: executor::Limits::new(100_000, 50_000_000, 10_000_000_000_u64.into()),
-                validators: octra_node_protocol::validator::policy::Policy::Inactive,
-                emission: epoch_footer::Policy {
-                    emission_guard: true,
-                    schedule: octra_node_protocol::emission::Schedule::Inactive,
-                    legacy_total: None,
-                },
-                sender_key_activation: Some(0),
-                private_result_activation: 0,
-                max_fhe: 32,
-                max_stealth: 32,
-                max_multi_exec_calls: 8,
-                ready_max_lag: 10,
-                pvac_dir: config.data.join("pvac"),
-                migration: None,
-            },
+            execution,
             runtime,
             compute: octra_node_protocol::resource_compute::provider::Config::from_inputs(
                 config.compute_provider,
@@ -435,6 +444,12 @@ pub async fn run(
             )?,
             vpn: config.vpn,
             payments: config.payments,
+            #[cfg(feature = "private-payments-experimental")]
+            shielded: config.shielded,
+            #[cfg(feature = "private-payments-experimental")]
+            private_payer: config.payer,
+            #[cfg(feature = "private-payments-experimental")]
+            private_route: config.private_route,
             voting: config.voting,
             minimum_peers: 2,
             health: octra_node_protocol::consensus::health::Config::default(),
@@ -446,4 +461,127 @@ pub async fn run(
         shutdown,
     ))
     .await
+}
+
+#[cfg(feature = "private-payments-experimental")]
+fn validate_shielded(config: &Config) -> Result<()> {
+    if config.shielded.is_some() || config.payer.is_some() || config.private_route.is_some() {
+        ensure!(
+            config.genesis.activated_applications
+                && config
+                    .genesis
+                    .chain
+                    .chain_id
+                    .starts_with("octra-rust-local-"),
+            "private wallet startup requires isolated application genesis"
+        );
+        ensure!(
+            config.vpn.is_none()
+                && config.payments.is_none()
+                && config.stock_portal.is_none()
+                && config.stock_circle_gateway.is_none()
+                && config
+                    .mesh
+                    .as_ref()
+                    .is_none_or(|mesh| mesh.stock_exit.is_none()),
+            "select private wallet service without another payment or stock-exit mode"
+        );
+    }
+    if let Some(private) = &config.shielded {
+        private.validate()?;
+    }
+    if let Some(payer) = &config.payer {
+        payer.validate()?;
+    }
+    if let Some(route) = &config.private_route {
+        route.validate()?;
+        ensure!(
+            config.payer.is_none(),
+            "select the route owner or standalone payer scheduler"
+        );
+    }
+    Ok(())
+}
+
+/// Explicit offline wallet initialization; no peer, voting or HTTP service.
+#[cfg(feature = "private-payments-experimental")]
+pub async fn init_private_wallet(config: Config, runtime: CircleRuntime) -> Result<PathBuf> {
+    Box::pin(private_wallet_action(
+        config,
+        runtime,
+        PrivateWalletAction::Operator,
+    ))
+    .await
+}
+#[cfg(feature = "private-payments-experimental")]
+pub use crate::vpn::payments::shielded::startup::Action as PrivateWalletAction;
+#[cfg(feature = "private-payments-experimental")]
+pub async fn private_wallet_action(
+    config: Config,
+    runtime: CircleRuntime,
+    action: PrivateWalletAction,
+) -> Result<PathBuf> {
+    use octra_node_runtime::validator_history::Authority;
+    use std::sync::Arc;
+    validate_shielded(&config)?;
+    crate::launch::require_crypto(&runtime)?;
+    let key = read_key(&config.key)?;
+    let (store, graph) = recovery::open(&config).await?;
+    let authority = Authority::new(
+        store.reader(),
+        Environment {
+            current: Some(config.genesis.validators.join(",").into_bytes()),
+            ..Environment::default()
+        },
+        ReceiptPolicy::new(
+            Some(b"0"),
+            &Profile::from_values(Some(b"devnet_full_v1"), None, None),
+            None,
+        ),
+        JournalOwner::open(&config.data)?,
+    );
+    let node = crate::Node::open(
+        store,
+        authority,
+        runtime,
+        Arc::new(octra_browser::application::UnavailableHost),
+        Arc::new(octra_exex::sqlite::SqliteCheckpoints::open(&config.data.join("exex.db")).await?),
+    )
+    .await?
+    .with_view_graph(graph)?;
+    let initialized = action
+        .apply(
+            &node,
+            &key,
+            config.shielded.as_ref(),
+            config.payer.as_ref(),
+            config.private_route.as_ref(),
+        )
+        .await;
+    node.shutdown().await?;
+    initialized
+}
+
+fn execution(config: &Config, graph: Graph, protocol: Protocol) -> executor::Config {
+    executor::Config {
+        graph,
+        protocol,
+        profile: Profile::from_values(Some(b"devnet_full_v1"), None, None),
+        payload: octra_node_protocol::transaction_payload::Limits::default(),
+        bundle: executor::Limits::new(100_000, 50_000_000, 10_000_000_000_u64.into()),
+        validators: octra_node_protocol::validator::policy::Policy::Inactive,
+        emission: epoch_footer::Policy {
+            emission_guard: true,
+            schedule: octra_node_protocol::emission::Schedule::Inactive,
+            legacy_total: None,
+        },
+        sender_key_activation: Some(0),
+        private_result_activation: 0,
+        max_fhe: 32,
+        max_stealth: 32,
+        max_multi_exec_calls: 8,
+        ready_max_lag: 10,
+        pvac_dir: config.data.join("pvac"),
+        migration: None,
+    }
 }

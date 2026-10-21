@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "observed_at_utc": "2026-10-19T19:30:37.383616+00:00",
+  "status": "LOCAL_PRIVATE_RELAYER_JOURNAL_QUALIFIED_RELEASE_GATED",
+  "base_commit": "db4861dce0ca80eb3afe29d908004191b64def56",
+  "working_tree": "Uncommitted experimental source; tested surfaces identified by hashes",
+  "feature": "private-payments-experimental",
+  "goal_complete": false,
+  "released_shielded_required_enabled": false,
+  "consensus_changed_this_stage": false,
+  "protocol_commission": 0,
+  "deployed": false,
+  "pushed": false,
+  "public_network_qualification": false,
+  "funded_private_kernel_route_qualified": false,
+  "implemented": [
+    "Version 2 compact fee counter and individually encrypted attempt records replace the original 16-element inline array",
+    "Caller-selected attempt budgets support 1 through 65536; new entry allocation is bounded across the wallet and existing declared fee budgets never reset",
+    "Authenticated original inline journals migrate atomically, preserving signatures, ordering, accepted limits, reserved fees and wallet identity",
+    "Native rows bind their relayer bank and sequence through scoped authenticated encryption; records validate signature, sender, pool, fee and exact parameter digest",
+    "Indexed entry counts reject missing metadata with retained attempts and missing attempt rows, preventing accidental budget recreation",
+    "Historical native_attempt lookup recovers a prior signed envelope without allocating another fee or nonce, including after wallet reopen",
+    "Signing and broadcasting explicitly reject prepared proofs whose notes/spent roots or count no longer match the authenticated current pool",
+    "One unconsumed live attempt prevents different operations or rebased parameters on the same relayer; exact retries retain the existing signed transaction",
+    "Expired attempts require another canonical head before replacement; reservations for prior attempts remain counted and the native nonce is reused only while unconsumed"
+  ],
+  "tests": {
+    "node_feature_library": 241,
+    "final_expanded_canonical_rerun": 1,
+    "failed": 0,
+    "ignored": 0,
+    "scope": "The complete 241-test suite passed against the final production implementation. The canonical test was then expanded with direct stale-broadcast/rebase negative controls and rerun; do not add the overlapping test counts.",
+    "strict_node_all_targets_clippy": "passed",
+    "normal_node_all_targets_check": "passed",
+    "git_diff_check": "passed"
+  },
+  "canonical_flow": {
+    "legacy_migrated_attempts": 4,
+    "legacy_preserved_declared_fee_reservations_ou": 20000000,
+    "post_16_relayers": {
+      "relayer_fixture_key": 14,
+      "configured_attempt_limit": 32,
+      "confirmed_native_transactions": 18,
+      "reserved_declared_fees_ou": 90000000
+    },
+    "expiry_relayer": {
+      "relayer_fixture_key": 13,
+      "signed_attempts": 3,
+      "expired_native_envelopes_rejected_by_intake": 2,
+      "confirmed_native_transactions": 1,
+      "reserved_declared_fees_ou": 15000000
+    },
+    "total_retained_signed_attempts": 25,
+    "total_confirmed_native_transactions_in_extended_flow_including_prior_phase": 23,
+    "total_declared_fee_reservations_ou": 125000000,
+    "newly_confirmed_native_withdrawals_this_phase": 19,
+    "new_relayer_contiguous_nonces_beyond_16": true,
+    "wallet_reopen_restores_first_and_seventeenth_attempts": true,
+    "missing_record_or_metadata_refused_without_reset": true,
+    "different_operation_live_nonce_refused_without_extra_fee": true,
+    "stale_signing_refused_before_fee_allocation": true,
+    "stale_broadcast_refused_before_queue_intake": true,
+    "rebase_preserves_output_slot": true,
+    "rebased_call_with_live_old_signature_still_refused": true,
+    "same_head_expired_replacement_refused": true,
+    "new_head_expired_replacement_same_nonce": true,
+    "old_expired_attempts_never_confirmed": true,
+    "final_own_available_ou": 2,
+    "public_peers": 0,
+    "scope": "Actual local native intake and signed BFT canonical execution, not a public-network or funded tunnel qualification."
+  },
+  "expiry_fixture": {
+    "method": "Test-only reconstruction of a valid native envelope with its timestamp 301 seconds earlier, re-signed by the same fixed local key.",
+    "production_clock_override": false,
+    "fabricated_canonical_records": false,
+    "actual_native_intake_expiry_refusal": true
+  },
+  "unchanged_crypto_and_aml": {
+    "reference": "docs/rust-node/checkpoints/2026-10-19/private-native-wallet.json",
+    "unchanged_sources_sha256": {
+      "program/shielded-pool-factory.aml": "c579c470a57f484b375eaded05793a5beb4ce6e32b530b36e1ccf32e11a0791f",
+      "program/shielded-pool.aml.in": "230a046c370fad7c4aa6ef83694ce504a830df032ab873c6b35f53eb21d4b834",
+      "proofs/Pool.lean": "f92d4c145548baf0f18991ca0c51b666a3057d4cb95113c737285465c347d7f5",
+      "src/pool/app.rs": "bce99997993736dfd88d82c0489e7356448244cc18a71691410b858e13c282e2",
+      "src/pool/circuit.rs": "50e3b298c098239358a7c7d9d99a4f1eed80b135c4ac2478a737fb4085263139",
+      "src/pool/envelope.rs": "bc812cf186c46b200e981bd27733286c0a91ab08007f31759f108f770c69d686",
+      "src/pool/hash.rs": "11fc77e170043b12e260ffd9a9c67c1d882996f87b73791c0124dd4080aa3ffa",
+      "src/pool/wire.rs": "59dc4f8020e67c400d0061dab89da9880c9b270e288badac370ae3b194c2d470"
+    },
+    "tree_sha256": "682447c87748f52c1b964e249b2329ec5f216b1882dddfefe35a8c5c773f897e",
+    "pool_tests_previously_passed": 28,
+    "pool_tests_rerun_this_stage": 0,
+    "native_oracle_cases_rerun_this_stage": 0
+  },
+  "limits": [
+    "Explicit original attempt limits remain honored after migration; removing the prototype hard ceiling does not silently increase existing accepted budgets",
+    "New allocations stop at 65536 stored attempt records across a wallet; archival/compaction and explicit budget rollover remain future work",
+    "Deletion of an entire authenticated history or privileged rollback of all wallet state still needs an external high-water mark; row-count checks are not a general rollback proof",
+    "A live native signature retains its nonce even if its private proof becomes stale; replacement still requires nonce consumption or timestamp expiry plus another head",
+    "Operator-income custody handoff, multiple operator payer views, automatic routed-client scheduling/recovery and broader native host adapters remain unfinished",
+    "Public onboarding abuse controls, private service-equivocation claims, zero-price grants and key backup tooling remain unfinished",
+    "Production circuit ceremony/cryptographic review and actual funded private kernel/multi-node/ExEx qualification remain required",
+    "Released shielded_required stays refused; no full node parity, public deployment or physical delivery claim follows from these tests",
+    "No new formal theorem is claimed for this Rust journal change; pool AML and cryptographic sources are unchanged"
+  ],
+  "source_sha256": {
+    "Cargo.toml": "7e55763b676bdb61bfc065d6ba52b9eb41bc0571bfbbe10f5d83a6769ef18ede",
+    "Cargo.lock": "76d8d9cdd1b1aaca10293e92f7950209e4508ee5bf9e93e1151e1123f931913f",
+    "crates/octra-node/Cargo.toml": "e73dd7aa5597cb8f949c2b2e53ea82b3bfdc90913e0ba171129a7c373789a149",
+    "crates/octra-node/src/vpn/payments/shielded/payer/native.rs": "59b0cb0b09b2c029127955c99d7bb12fabcc1e1973ad82656da8ca714e14a5ac",
+    "crates/octra-node/src/vpn/payments/shielded/payer/native/journal.rs": "e9a8ecd97054ff039e36178da4e2aa2221863c07d80a7fd0087ee30b11178848",
+    "crates/octra-node/src/vpn/payments/shielded/native_journal_tests.rs": "bc45c2dddd571fa3b8eac69414319a124bc7dbe1c98a5e7b5fd74dcc439293e0",
+    "crates/octra-node/src/vpn/payments/shielded/movement_tests.rs": "d3c43182c3b8213029e1d71cb8c1fafd47993238278b31d3400d01434ac29ece",
+    "crates/octra-node/src/vpn/payments/shielded_tests.rs": "96095973402ffe2f2c33ef14261baa0224bf8f2ed9d160b73281da28a6b6959a",
+    "crates/octra-node/src/vpn/payments/shielded/storage.rs": "5c3945c735a29edcb5fb7b76b8c001c7ce966ce82a361234b3470c9350d0e3fa",
+    "crates/octra-node/src/vpn/payments/shielded/payer/ledger.rs": "d6aa2ec023e9d8c19dc6e005507658fbdba7626004240b2aa1de9f1d2629fa78",
+    "crates/octra-node/src/vpn/payments/shielded/payer/movement.rs": "ff0f42337887cc9468527c56f926bfbf1f16abc7ee5fcb5677619739c1f07cb4",
+    "crates/octra-node/src/vpn/payments/shielded/payer/purchase.rs": "2223bf844ba8006b9f29bce445809055ed8b9cda7ae53f0dc7c4d091729c51d0",
+    "crates/octra-node/src/vpn/payments/shielded.rs": "b7a58c0b05b7a9ebc573bf911c31b1bec18178ac33ce91f3d10e0506b6ad4388"
+  },
+  "evidence_sha256": {
+    "out/private-relayer-journal-20261019/canonical-final.log": "fdb2cb0a0df19921dd10d674765f1694c5510ce4b360a31b45986203f415ca4f",
+    "out/private-relayer-journal-20261019/clippy-final.log": "3303dd12f08bac40005e2517ba19a906799caf9580736c885da35c094dcb0013",
+    "out/private-relayer-journal-20261019/clippy.log": "cebc2ba45da818423130b16b224d4613f80b91b80fa599ce0816d3a7f7fd32f2",
+    "out/private-relayer-journal-20261019/default-check.log": "bf76131ffa8f0198753a5fd679ff62def90b66eff57c2d28550855494d614bc2",
+    "out/private-relayer-journal-20261019/node-tests.log": "074d69b82e5a443e36bbb8a947cd860637709ed38a84f7aa10b52c79dd18ec94",
+    "out/private-relayer-journal-20261019/source.json": "30009fd42676369faa9d7951b442d7fce800a75fa728e28578e8b8729837310c"
+  },
+  "build_environment": {
+    "DEVELOPER_DIR": "/Library/Developer/CommandLineTools",
+    "SDKROOT": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+    "global_settings_changed": false
+  },
+  "next_gate": "Integrate canonical operator-income custody and multiple operator payer views, then a funded private routed client with encrypted recovery, no-bypass kernel checks and ExEx qualification"
+}

@@ -22,7 +22,7 @@ fn overhead() -> Result<usize> {
     )?;
     Ok(tunnel_frame::encode(&SessionId::from_u64(1), &onion)?.len())
 }
-pub(super) fn route_mtus(count: usize) -> Result<Vec<u16>> {
+pub(crate) fn route_mtus(count: usize) -> Result<Vec<u16>> {
     ensure!(
         (2..=octravpn_core::onion::MAX_HOPS).contains(&count),
         "invalid composite hop count"

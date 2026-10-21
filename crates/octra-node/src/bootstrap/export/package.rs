@@ -75,7 +75,7 @@ pub async fn prepare(
     let finality = anchor::Anchor::decode(&encoded)?;
     let active = finality.derive(authority.trust().validators)?;
     let epoch = u64::try_from(finality.finalize.epoch_id)?;
-    let (store, migration) = authority.reopen_with_migration(directory).await?;
+    let (store, migration) = super::open_source(authority, directory).await?;
     let capture = async {
         let sequence = store
             .sequence_for_epoch(epoch)

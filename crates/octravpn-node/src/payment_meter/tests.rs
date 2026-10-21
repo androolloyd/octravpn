@@ -196,6 +196,86 @@ async fn no_packet_before_purchase_and_signature_alone_never_unlocks_capacity() 
 }
 
 #[tokio::test]
+async fn encrypted_meter_retains_prepaid_floors_and_uncertainty_without_plaintext_fallback() {
+    use octravpn_core::sealed::Key;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("private");
+    let tariff = tariff();
+    let key = Key::from_bytes([71; 32]);
+    let meter = Meter::open_private(
+        path.clone(),
+        binding(&tariff),
+        tariff.clone(),
+        10,
+        vec![0, 0],
+        key.clone(),
+        false,
+    )
+    .await
+    .unwrap();
+    assert!(meter.reserve_class(0, 1).await.is_err());
+    meter.reconcile(vec![100, 0]).await.unwrap();
+    meter
+        .reserve_class(0, 60)
+        .await
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    drop(meter.reserve_class(0, 40).await.unwrap());
+    dropped_ticket_finished(&meter).await;
+    let before = meter.snapshot().unwrap();
+    assert_eq!(before.uncertain_totals, [40, 0]);
+    let ciphertext = std::fs::read(path.join("meter.json")).unwrap();
+    assert!(ciphertext.starts_with(b"OVPNSE01"));
+    for text in [
+        b"manifest_hash".as_slice(),
+        b"purchased",
+        binding(&tariff).payer.as_bytes(),
+    ] {
+        assert!(!ciphertext.windows(text.len()).any(|part| part == text));
+    }
+    drop(meter);
+    assert!(Meter::resume(
+        path.clone(),
+        binding(&tariff),
+        tariff.clone(),
+        10,
+        vec![100, 0]
+    )
+    .await
+    .is_err());
+    assert!(Meter::open_private(
+        path.clone(),
+        binding(&tariff),
+        tariff.clone(),
+        10,
+        vec![100, 0],
+        Key::from_bytes([72; 32]),
+        true
+    )
+    .await
+    .is_err());
+    assert!(Meter::open_private(
+        path.clone(),
+        binding(&tariff),
+        tariff.clone(),
+        10,
+        vec![99, 0],
+        key.clone(),
+        true
+    )
+    .await
+    .is_err());
+    assert_eq!(std::fs::read(path.join("meter.json")).unwrap(), ciphertext);
+    let resumed = Meter::open_private(path, binding(&tariff), tariff, 10, vec![100, 0], key, true)
+        .await
+        .unwrap();
+    assert_eq!(resumed.snapshot().unwrap(), before);
+    assert!(resumed.reserve_class(0, 1).await.is_err());
+}
+
+#[tokio::test]
 async fn prepaid_consumption_survives_rotation_restart_and_larger_purchase() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("plan");

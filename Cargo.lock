@@ -2935,6 +2935,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "light-poseidon"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47a1ccadd0bb5a32c196da536fd72c59183de24a055f6bf0513bf845fefab862"
+dependencies = [
+ "ark-bn254",
+ "ark-ff",
+ "num-bigint",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3528,6 +3540,9 @@ name = "octra-node"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ark-bn254",
+ "ark-groth16",
+ "ark-serialize",
  "async-trait",
  "axum 0.7.9",
  "base64",
@@ -3545,6 +3560,8 @@ dependencies = [
  "octra-hfhe",
  "octra-node-protocol",
  "octra-node-runtime",
+ "octra-private-payments-experimental",
+ "octravpn-client",
  "octravpn-core",
  "octravpn-node",
  "rand 0.8.6",
@@ -3559,6 +3576,8 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower",
+ "tracing",
+ "tracing-subscriber",
  "x25519-dalek",
  "zeroize",
 ]
@@ -3580,6 +3599,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "socket2 0.6.3",
  "thiserror 1.0.69",
  "tokio",
  "zeroize",
@@ -3608,6 +3628,7 @@ dependencies = [
  "octra-lmdb",
  "octra-node-protocol",
  "octra_circle_wasm_host",
+ "octravpn-core",
  "rustix",
  "serde",
  "serde_json",
@@ -3617,6 +3638,32 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "zeroize",
+]
+
+[[package]]
+name = "octra-private-payments-experimental"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ark-bn254",
+ "ark-ec",
+ "ark-ff",
+ "ark-groth16",
+ "ark-r1cs-std",
+ "ark-relations",
+ "aws-lc-rs",
+ "base64",
+ "bs58",
+ "ed25519-dalek",
+ "light-poseidon",
+ "octra-hfhe",
+ "rand 0.8.6",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "tracing",
+ "x25519-dalek",
  "zeroize",
 ]
 
@@ -3747,9 +3794,11 @@ dependencies = [
  "predicates",
  "proptest",
  "rand 0.8.6",
+ "rcgen 0.13.2",
  "reqwest",
  "rpassword",
  "rustix",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",
@@ -3757,6 +3806,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-rustls",
  "toml",
  "tower",
  "tracing",

@@ -94,6 +94,10 @@ impl Pending {
         apply: impl FnOnce(&mut Pool) -> Result<T>,
     ) -> Result<T> {
         let mut state = self.lock()?;
+        let cursor = match (&state.disk, draft) {
+            (Some(disk), None) => disk.cleanup_cursor(cursor)?,
+            _ => cursor,
+        };
         let result = match draft {
             Some(draft) => draft
                 .with_current(|| Ok(apply(&mut state.pool)))
@@ -329,6 +333,11 @@ impl Pending {
         record: &octra_node_protocol::consensus::CatchupEpochRecord,
         cursor: Cursor,
     ) -> Result<()> {
+        anyhow::ensure!(
+            u64::try_from(record.epoch_id)? == cursor.epoch.0
+                && record.state_root.as_slice() == cursor.state_root.0,
+            "canonical queue record and cursor differ"
+        );
         let hashes = processed(record)?;
         self.mutate(None, cursor, |pool| {
             pool.remove_processed(&hashes);

@@ -370,11 +370,28 @@ impl Chain {
             0,
         );
     }
+    pub(crate) fn register_operator_key(&mut self, who: u8, key_id: u8, generation: u64) {
+        let message = format!(
+            "Octranet operator key v1|{DOMAIN}|{}|{}|{generation}",
+            self.program,
+            address(who)
+        );
+        self.ok(
+            who,
+            "register_operator_receipt_key",
+            json!([
+                STANDARD.encode(key(key_id).verifying_key().as_bytes()),
+                sign(key_id, &message)
+            ]),
+            0,
+        );
+    }
     pub(crate) fn funded_plan(&mut self) {
         self.funded_plan_for_manifest(MANIFEST);
     }
     pub(crate) fn funded_plan_for_manifest(&mut self, manifest: &str) {
         self.ok(11, "bond_operator", json!([]), STAKE);
+        self.register_operator_key(11, 11, 1);
         self.register(1);
         self.ok(12, "fund", json!([address(12)]), FUND);
         self.ok(11, "create_offer", json!([manifest]), 0);

@@ -8,6 +8,7 @@ use std::{
 };
 
 use super::OpenMode;
+use octravpn_core::sealed::{Protection, OVERHEAD};
 
 const STATE: &str = "state.json";
 const LOCK: &str = "writer.lock";
@@ -97,6 +98,7 @@ pub(crate) struct Store {
     lock: File,
     lock_identity: Stamp,
     state_identity: Option<Stamp>,
+    protection: Option<Protection>,
     #[cfg(test)]
     fail_next: bool,
     #[cfg(test)]
@@ -104,6 +106,16 @@ pub(crate) struct Store {
 }
 impl Store {
     pub(crate) fn open(path: &Path, mode: OpenMode) -> Result<Self> {
+        Self::open_mode(path, mode, None)
+    }
+    pub(crate) fn open_private(
+        path: &Path,
+        mode: OpenMode,
+        protection: Protection,
+    ) -> Result<Self> {
+        Self::open_mode(path, mode, Some(protection))
+    }
+    fn open_mode(path: &Path, mode: OpenMode, protection: Option<Protection>) -> Result<Self> {
         if mode == OpenMode::Create {
             let mut builder = fs::DirBuilder::new();
             #[cfg(unix)]
@@ -148,6 +160,7 @@ impl Store {
             lock,
             lock_identity,
             state_identity: None,
+            protection,
             #[cfg(test)]
             fail_next: false,
             #[cfg(test)]
@@ -203,16 +216,15 @@ impl Store {
             .context("payment journal state missing; refusing a live-plan reset")?;
         let metadata = file.metadata()?;
         private(&metadata, Some(&directory), false)?;
+        let limit = MAX_BYTES + self.protection.as_ref().map_or(0, |_| OVERHEAD);
         ensure!(
-            metadata.len() <= MAX_BYTES as u64,
+            metadata.len() <= limit as u64,
             "payment journal state exceeds bound"
         );
         let mut bytes = Vec::new();
-        (&mut file)
-            .take(MAX_BYTES as u64 + 1)
-            .read_to_end(&mut bytes)?;
+        (&mut file).take(limit as u64 + 1).read_to_end(&mut bytes)?;
         ensure!(
-            bytes.len() as u64 == metadata.len() && bytes.len() <= MAX_BYTES,
+            bytes.len() as u64 == metadata.len() && bytes.len() <= limit,
             "payment journal state changed while reading"
         );
         ensure!(
@@ -220,7 +232,11 @@ impl Store {
             "payment journal state changed while reading"
         );
         self.state_identity = Some(stamp(&metadata));
-        Ok(bytes)
+        if let Some(protection) = &self.protection {
+            Ok(protection.open(&bytes)?.to_vec())
+        } else {
+            Ok(bytes)
+        }
     }
 
     pub(crate) fn commit(&mut self, bytes: &[u8]) -> Result<()> {
@@ -233,6 +249,12 @@ impl Store {
             bytes.len() <= MAX_BYTES,
             "payment journal state exceeds bound"
         );
+        let sealed = self
+            .protection
+            .as_ref()
+            .map(|p| p.seal(bytes))
+            .transpose()?;
+        let bytes = sealed.as_deref().unwrap_or(bytes);
         let directory = self.paths()?;
         let destination = self.path.join(STATE);
         match (self.state_identity, fs::symlink_metadata(&destination)) {

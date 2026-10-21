@@ -35,9 +35,11 @@ fn plan() -> AcceptedPlan {
             manifest_hash: tariff.hash_hex().unwrap(),
         },
         tariff,
+        operator_generation: 1,
         original_budget_ou: 10_000,
         prepaid_bytes: vec![1024],
         control_url: "http://127.0.0.1:9/".into(),
+        control_ca_pem: None,
         wireguard_endpoint: "127.0.0.1:51820".into(),
     }
 }
@@ -54,7 +56,7 @@ fn options(plan: AcceptedPlan, journal: PathBuf, mode: JournalMode) -> PaymentOp
 #[tokio::test]
 async fn malformed_public_inputs_fail_before_journal_or_network_side_effects() {
     let directory = tempfile::tempdir().unwrap();
-    for invalid in 0..10 {
+    for invalid in 0..15 {
         let mut accepted = plan();
         match invalid {
             0 => accepted.binding.manifest_hash = "cd".repeat(32),
@@ -66,7 +68,23 @@ async fn malformed_public_inputs_fail_before_journal_or_network_side_effects() {
             6 => accepted.binding.generation = 0,
             7 => accepted.prepaid_bytes = vec![],
             8 => accepted.prepaid_bytes = vec![0],
-            _ => accepted.prepaid_bytes = vec![u64::MAX],
+            9 => accepted.prepaid_bytes = vec![u64::MAX],
+            10 => accepted.control_ca_pem = Some("invalid-root".into()),
+            11 => {
+                accepted.control_url = "https://example.test/".into();
+                accepted.control_ca_pem = Some("invalid-root".into());
+            }
+            12 => {
+                accepted.control_url = "https://example.test/".into();
+                accepted.control_ca_pem = Some("x".repeat(16_385));
+            }
+            _ => {
+                accepted.control_url = "https://example.test/".into();
+                accepted.control_ca_pem = Some(
+                    "-----BEGIN CERTIFICATE-----\neA==\n-----END CERTIFICATE-----\n"
+                        .repeat(if invalid == 13 { 1 } else { 2 }),
+                );
+            }
         }
         let path = directory.path().join(format!("plan-{invalid}"));
         let error = tokio::time::timeout(

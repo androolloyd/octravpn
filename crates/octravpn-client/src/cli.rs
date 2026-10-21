@@ -37,6 +37,9 @@ enum Cmd {
         tun_name: String,
         #[arg(long)]
         resume: bool,
+        /// Reopen the same prepaid journal after temporary operator refusal.
+        #[arg(long)]
+        reconnect: bool,
     },
     /// Run an explicitly accepted two/three-operator nested prepaid route (Linux).
     MultiPayments {
@@ -57,6 +60,11 @@ enum Cmd {
         node_key: String,
         #[arg(long)]
         resume: bool,
+    },
+    /// Export a verified operator equivocation from a stopped payment journal.
+    ServiceEvidence {
+        #[arg(long)]
+        journal: std::path::PathBuf,
     },
     /// Print derived addresses/pubkeys for the current wallet.
     Identity,
@@ -327,36 +335,28 @@ pub async fn run() -> Result<()> {
 
     // Config-less subcommands handled first.
     match &cli.cmd {
+        Cmd::ServiceEvidence { journal } => {
+            let evidence = crate::payments::service_evidence(journal)?;
+            println!("{}", serde_json::to_string_pretty(&evidence)?);
+            return Ok(());
+        }
         Cmd::Payments {
             plan,
             journal,
             receipt_key,
             tun_name,
             resume,
+            reconnect,
         } => {
-            let client = Box::pin(crate::PaymentClient::open(crate::PaymentOptions {
-                plan: crate::AcceptedPlan::load(plan)?,
-                journal: journal.clone(),
-                receipt_key: Arc::new(crate::wallet::load_keypair(receipt_key)?),
-                interface_name: tun_name.clone(),
-                mode: if *resume {
-                    crate::JournalMode::Resume
-                } else {
-                    crate::JournalMode::Create
-                },
-            }))
-            .await?;
-            let interface = client.interface();
-            eprintln!(
-                "Octranet interface {} address {}; provision explicit routes to paid destinations",
-                interface.name, interface.address
-            );
-            Box::pin(client.run(async {
-                tokio::signal::ctrl_c().await?;
-                Ok(())
-            }))
-            .await?;
-            return Ok(());
+            return Box::pin(run_payments_command(
+                plan,
+                journal,
+                receipt_key,
+                tun_name,
+                *resume,
+                *reconnect,
+            ))
+            .await;
         }
         Cmd::MultiPayments { route, resume } => {
             let mode = if *resume {
@@ -595,6 +595,7 @@ pub async fn run() -> Result<()> {
         | Cmd::Payments { .. }
         | Cmd::MultiPayments { .. }
         | Cmd::StockPayments { .. }
+        | Cmd::ServiceEvidence { .. }
         | Cmd::Keygen { .. }
         | Cmd::Doctor
         | Cmd::BugReport { .. }
@@ -605,6 +606,78 @@ pub async fn run() -> Result<()> {
         | Cmd::Portal { .. }
         | Cmd::Onboard { .. } => unreachable!(),
     }
+}
+
+async fn run_payments_command(
+    plan_path: &std::path::Path,
+    journal: &std::path::Path,
+    receipt_key: &str,
+    tun_name: &str,
+    resume: bool,
+    reconnect: bool,
+) -> Result<()> {
+    let plan = crate::AcceptedPlan::load(plan_path)?;
+    let key = Arc::new(crate::wallet::load_keypair(receipt_key)?);
+    let mut mode = if resume {
+        crate::JournalMode::Resume
+    } else {
+        crate::JournalMode::Create
+    };
+    let mut delay = 1_u64;
+    let mut interrupt = Box::pin(tokio::signal::ctrl_c());
+    loop {
+        let open = tokio::select! {
+            signal = &mut interrupt => return signal.map_err(Into::into),
+            result = crate::PaymentClient::open(crate::PaymentOptions {
+                plan: plan.clone(),
+                journal: journal.to_path_buf(),
+                receipt_key: key.clone(),
+                interface_name: tun_name.to_owned(),
+                mode,
+            }) => result,
+        };
+        let result = match open {
+            Ok(client) => {
+                let interface = client.interface();
+                eprintln!(
+                    "Octranet interface {} address {}; provision explicit routes to paid destinations",
+                    interface.name, interface.address
+                );
+                Box::pin(client.run(async { (&mut interrupt).await.map_err(Into::into) }))
+                    .await
+                    .map(|_| ())
+            }
+            Err(error) => Err(error),
+        };
+        match result {
+            Ok(()) => return Ok(()),
+            Err(error) if reconnect && payment_retryable(&error) => {
+                // The failed Client is dropped before reopening. Its TUN and
+                // packet driver are gone; Resume reuses the original journal
+                // and cannot authorize a larger byte purchase.
+                eprintln!("Octranet paid connection paused; retrying in {delay}s: {error}");
+                mode = crate::JournalMode::Resume;
+                tokio::select! {
+                    signal = &mut interrupt => return signal.map_err(Into::into),
+                    () = tokio::time::sleep(std::time::Duration::from_secs(delay)) => {},
+                }
+                delay = (delay * 2).min(30);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn payment_retryable(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<reqwest::Error>().is_some_and(|error| {
+        error.is_connect()
+            || error.is_timeout()
+            || error.is_request()
+            || error.is_body()
+            || error
+                .status()
+                .is_some_and(|status| matches!(status.as_u16(), 403 | 429 | 500 | 502 | 503 | 504))
+    })
 }
 
 fn forwarding_mode(
@@ -622,4 +695,26 @@ fn forwarding_mode(
             target,
         })
     })
+}
+
+#[cfg(test)]
+mod reconnect_tests {
+    use super::payment_retryable;
+
+    #[tokio::test]
+    async fn closed_control_connection_is_retryable() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (connection, _) = listener.accept().await.unwrap();
+            drop(connection);
+        });
+        let error = reqwest::Client::new()
+            .get(format!("http://{address}/payments/connect"))
+            .send()
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+        assert!(payment_retryable(&error.into()));
+    }
 }

@@ -1,0 +1,33 @@
+{
+  "observed_at_utc": "2026-10-21T03:35:43.352015+00:00",
+  "status": "host qualification passed; frozen funded Linux qualification running",
+  "consensus_changes": false,
+  "production_setup_qualified": false,
+  "public_alpha_qualified": false,
+  "publicly_deployed": false,
+  "changes": [
+    "Typed temporary publication unavailability is HTTP 503; authentication, retirement and accounting refusal remain fatal",
+    "Private admission reuses the original signed connection within a bounded deadline",
+    "Running status monitoring retries transient transport/control failures without extending the original canonical-clock deadline",
+    "Only advancing authenticated canonical time can renew admission; retries never create a purchase or authorize new capacity"
+  ],
+  "tests": {
+    "client_library_passed": 364,
+    "vpn_node_library_passed": 586,
+    "publication_passed": 11,
+    "failed": 0,
+    "strict_private": "passed",
+    "strict_default": "passed"
+  },
+  "evidence": "out/private-funded-multihop-20261020",
+  "frozen_linux_image": "sha256:6eab048dc6152a74e12343af165fcc42574e1eed9c7c708f853f7c465e9431fd",
+  "source_sha256": {
+    "crates/octravpn-core/src/payments.rs": "a35c99887f20a3cfbca36936748dc66dea7ef4e3f78e9ebbcca331ca7e1196c5",
+    "crates/octra-node/src/published.rs": "1981205260e96b94532062a6ad877bc4c0f3e30cd315d3c68853b0997e028c16",
+    "crates/octravpn-node/src/payments.rs": "e651e0b709bc9e39726c74c198346ef06d446dbd44ea32e6016d68b008f7ea0f",
+    "crates/octravpn-node/src/payments/service.rs": "dcf283420b6bc11888805783a8fca09cb8728c7690a905b9474fb7a14fdcaffa",
+    "crates/octravpn-client/src/private_control.rs": "ad15fac12240fa1a21a9a942d39de14ba291071e6385f4097c674e512a7b8077",
+    "crates/octravpn-client/src/private_runner/monitor.rs": "4b4e416f98173878b207e0885bb739230cd99bad8ca8d130fe5c303c88682c8d",
+    "crates/octravpn-client/src/private_runner/tests/recovery.rs": "182ced4f19be5141e1988e6a5606428ceb19f34afa42273d55b7cd786d7b90ed"
+  }
+}

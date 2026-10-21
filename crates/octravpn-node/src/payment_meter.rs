@@ -25,6 +25,14 @@ const MAX_PENDING: usize = 1024;
 
 pub use octravpn_core::payments::PlanBinding as Binding;
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "Serde callback takes a reference"
+)]
+const fn is_zero(value: &u64) -> bool {
+    *value == 0
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Snapshot {
     /// Actual confirmed delivery only; purchased bytes never imply delivery.
@@ -151,6 +159,7 @@ impl Meter {
             original_budget_ou,
             canonical_totals,
             false,
+            None,
         )
         .await
     }
@@ -170,6 +179,30 @@ impl Meter {
             original_budget_ou,
             canonical_totals,
             true,
+            None,
+        )
+        .await
+    }
+
+    /// Private plans retain the same prepaid reservation/recovery rules, while
+    /// encrypting the entire durable record with a separately held wallet key.
+    pub async fn open_private(
+        directory: PathBuf,
+        binding: Binding,
+        tariff: Tariff,
+        original_budget_ou: u64,
+        canonical_totals: Vec<u64>,
+        key: octravpn_core::sealed::Key,
+        existing_only: bool,
+    ) -> Result<Arc<Self>> {
+        Self::open_mode(
+            directory,
+            binding,
+            tariff,
+            original_budget_ou,
+            canonical_totals,
+            existing_only,
+            Some(key),
         )
         .await
     }
@@ -181,6 +214,7 @@ impl Meter {
         original_budget_ou: u64,
         canonical_totals: Vec<u64>,
         existing_only: bool,
+        key: Option<octravpn_core::sealed::Key>,
     ) -> Result<Arc<Self>> {
         tokio::task::spawn_blocking(move || {
             Self::open_sync(
@@ -190,6 +224,7 @@ impl Meter {
                 original_budget_ou,
                 &canonical_totals,
                 existing_only,
+                key,
             )
         })
         .await?
@@ -201,6 +236,7 @@ impl Meter {
         budget_ou: u64,
         canonical: &[u64],
         existing_only: bool,
+        key: Option<octravpn_core::sealed::Key>,
     ) -> Result<Arc<Self>> {
         binding.validate()?;
         let tariff_hash = tariff.hash_hex()?;
@@ -209,7 +245,19 @@ impl Meter {
             "meter tariff does not match accepted manifest"
         );
         Budget::new(tariff.clone(), budget_ou, canonical.to_vec())?;
-        let (disk, saved) = if existing_only {
+        let (disk, saved) = if let Some(key) = key {
+            use sha2::{Digest, Sha256};
+            let context = serde_json::to_vec(&(1_u8, &binding, &tariff_hash, budget_ou))?;
+            let scope: [u8; 32] = Sha256::digest(&context).into();
+            Disk::private(
+                directory,
+                existing_only,
+                octravpn_core::sealed::Protection::new(
+                    key.derive(b"payment meter", &scope)?,
+                    scope,
+                ),
+            )?
+        } else if existing_only {
             Disk::resume(directory)?
         } else {
             Disk::open(directory)?
@@ -243,6 +291,8 @@ impl Meter {
                 purchased: canonical.to_vec(),
                 uncertain: vec![0; canonical.len()],
                 pending: vec![0; canonical.len()],
+                service_sequence: 0,
+                service_totals: Vec::new(),
                 connect: None,
                 transport: crate::stock::Transport::Framed,
                 authorizations: vec![None; canonical.len()],
@@ -251,6 +301,17 @@ impl Meter {
         ensure!(
             record.authorizations.len() == canonical.len(),
             "meter authorization shape differs"
+        );
+        ensure!(
+            (record.service_sequence == 0 && record.service_totals.is_empty())
+                || (record.service_sequence > 0
+                    && record.service_totals.len() == record.committed.len()
+                    && record
+                        .service_totals
+                        .iter()
+                        .zip(&record.committed)
+                        .all(|(signed, committed)| signed <= committed)),
+            "meter service statement history differs"
         );
         if let Some(connect) = &record.connect {
             match &record.transport {
@@ -342,6 +403,30 @@ impl Meter {
         let result = self.published.read().clone();
         self.available()?;
         Ok(result)
+    }
+
+    /// Freeze a delivery snapshot under the journal writer. Repeated polls of
+    /// unchanged counters reuse one slot; a changed counter advances the slot
+    /// durably before its statement can be signed or returned to a client.
+    pub fn service_snapshot(&self) -> Result<(u64, Snapshot)> {
+        let mut state = self.writer.lock();
+        self.available()?;
+        if state.record.service_sequence == 0
+            || state.record.service_totals != state.record.committed
+        {
+            let mut record = state.record.clone();
+            record.service_sequence = record
+                .service_sequence
+                .checked_add(1)
+                .context("service statement sequence exhausted")?;
+            record.service_totals.clone_from(&record.committed);
+            self.persist(&record)?;
+            state.record = record;
+        }
+        Ok((
+            state.record.service_sequence,
+            snapshot(&state.record, &state.capacity, &self.tariff)?,
+        ))
     }
 
     pub fn connect_is_current(&self, connect: &SignedConnect) -> bool {

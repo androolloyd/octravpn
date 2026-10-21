@@ -21,6 +21,11 @@ program OctranetPayments {
     operator_unlock: map[address]uint
     operator_generation: map[address]uint
     operator_stopped: map[address]map[uint]uint
+    operator_receipt_key: map[address]string
+    operator_slashed: map[address]map[uint]uint
+    slash_beneficiary: map[address]map[uint]address
+    slash_award: map[address]map[uint]uint
+    slash_award_unlock: map[address]map[uint]uint
     offer_count: uint
     offer_owner: map[uint]address
     offer_generation: map[uint]uint
@@ -71,6 +76,9 @@ program OctranetPayments {
   event OperatorBonded(operator: address, amount: uint)
   event OperatorUnstakeRequested(operator: address, deadline_ms: uint)
   event OperatorUnstaked(operator: address, amount: uint)
+  event OperatorReceiptKeyRegistered(operator: address, generation: uint)
+  event OperatorSlashed(operator: address, payer: address, plan: uint, amount: uint, unlock_ms: uint)
+  event SlashAwardWithdrawn(operator: address, payer: address, generation: uint, amount: uint)
 
   constructor(domain: string, max_locked_value: uint, min_operator_stake: uint) {
     require_digest(domain)
@@ -108,10 +116,27 @@ program OctranetPayments {
     if self.operator_stake[caller] == 0 {
       require(self.operator_generation[caller] < MAX_UINT, "operator generation exhausted")
       self.operator_generation[caller] = self.operator_generation[caller] + 1
+      self.operator_receipt_key[caller] = ""
     }
     self.operator_stake[caller] = self.operator_stake[caller] + value
     self.locked_value = self.locked_value + value
     emit OperatorBonded(caller, value)
+    return true
+  }
+
+  // The wallet controlling this stake pins one non-repudiation key for its
+  // entire bond generation. Rebonding requires fresh proof of possession.
+  fn register_operator_receipt_key(receipt_key: string, signature: string): bool {
+    require(self.operator_stake[caller] > 0 && self.operator_unlock[caller] == 0, "operator unavailable")
+    require(self.operator_receipt_key[caller] == "", "operator key already pinned")
+    require(len(receipt_key) == 44 && len(signature) == 88, "invalid operator key or signature")
+    let message = concat("Octranet operator key v1|", self.domain)
+    message = concat(message, concat("|", self_addr))
+    message = concat(message, concat("|", caller))
+    message = concat(message, concat("|", to_string(self.operator_generation[caller])))
+    require(ed25519_ok(receipt_key, message, signature), "operator key possession failed")
+    self.operator_receipt_key[caller] = receipt_key
+    emit OperatorReceiptKeyRegistered(caller, self.operator_generation[caller])
     return true
   }
 
@@ -138,6 +163,75 @@ program OctranetPayments {
     self.locked_value = self.locked_value - amount
     require(transfer(caller, amount), "unstake transfer failed")
     emit OperatorUnstaked(caller, amount)
+    return amount
+  }
+
+  // Only same-slot, different-byte statements signed by this plan's bonded
+  // operator prove equivocation. A payer purchase or failed network probe does
+  // not. The affected payer owns the locked award; one slash closes the generation.
+  private fn service_message(plan: uint, traffic_class: uint, sequence: uint, total_bytes: uint): string {
+    let offer = self.plan_offer[plan]
+    let operator = self.offer_owner[offer]
+    let message = concat("Octranet service receipt v1|", self.domain)
+    message = concat(message, concat("|", self_addr))
+    message = concat(message, concat("|", operator))
+    message = concat(message, concat("|", to_string(self.offer_generation[offer])))
+    message = concat(message, concat("|", to_string(plan)))
+    message = concat(message, concat("|", self.plan_payer[plan]))
+    message = concat(message, concat("|", to_string(self.plan_generation[plan])))
+    message = concat(message, concat("|", to_string(offer)))
+    message = concat(message, concat("|", self.offer_manifest[offer]))
+    message = concat(message, concat("|", to_string(traffic_class)))
+    message = concat(message, concat("|", to_string(sequence)))
+    return concat(message, concat("|", to_string(total_bytes)))
+  }
+
+  nonreentrant fn slash_double_service_receipt(plan: uint, traffic_class: uint, sequence: uint, bytes_a: uint, sig_a: string, bytes_b: uint, sig_b: string): uint {
+    require_clock()
+    require(plan < self.plan_count, "plan not found")
+    let offer = self.plan_offer[plan]
+    require(traffic_class < self.offer_classes[offer] && sequence > 0, "invalid receipt slot")
+    require(bytes_a != bytes_b && len(sig_a) == 88 && len(sig_b) == 88, "receipts do not conflict")
+    let operator = self.offer_owner[offer]
+    let generation = self.offer_generation[offer]
+    require(generation == self.operator_generation[operator], "operator generation closed")
+    require(self.operator_stake[operator] > 0 && self.operator_slashed[operator][generation] == 0, "operator bond unavailable")
+    let key = self.operator_receipt_key[operator]
+    require(len(key) == 44, "operator key unavailable")
+    require(ed25519_ok(key, service_message(plan, traffic_class, sequence, bytes_a), sig_a), "first operator signature invalid")
+    require(ed25519_ok(key, service_message(plan, traffic_class, sequence, bytes_b), sig_b), "second operator signature invalid")
+    let amount = self.operator_stake[operator]
+    let payer = self.plan_payer[plan]
+    let unlock = self.operator_unlock[operator]
+    if unlock == 0 {
+      unlock = epoch_time + OPERATOR_UNSTAKE_MS
+    }
+    self.operator_slashed[operator][generation] = 1
+    self.operator_stake[operator] = 0
+    self.operator_unlock[operator] = 0
+    if self.operator_stopped[operator][generation] == 0 {
+      self.operator_stopped[operator][generation] = epoch_time
+    }
+    self.slash_beneficiary[operator][generation] = payer
+    self.slash_award[operator][generation] = amount
+    self.slash_award_unlock[operator][generation] = unlock
+    // Retain the liability in custody. Otherwise an operator could use an
+    // alternate payer wallet to self-slash and bypass the seven-day exit.
+    emit OperatorSlashed(operator, payer, plan, amount, unlock)
+    return amount
+  }
+
+  nonreentrant fn withdraw_slash_award(operator: address, generation: uint): uint {
+    require_clock()
+    require(generation > 0, "invalid slash generation")
+    require(self.slash_beneficiary[operator][generation] == caller, "not slash beneficiary")
+    let amount = self.slash_award[operator][generation]
+    require(amount > 0, "slash award unavailable")
+    require(epoch_time >= self.slash_award_unlock[operator][generation], "slash award locked")
+    self.slash_award[operator][generation] = 0
+    self.locked_value = self.locked_value - amount
+    require(transfer(caller, amount), "slash award transfer failed")
+    emit SlashAwardWithdrawn(operator, caller, generation, amount)
     return amount
   }
 
@@ -175,6 +269,7 @@ program OctranetPayments {
   // rates. Clients compare every rate below to that hash-pinned manifest.
   fn create_offer(manifest_hash: string): uint {
     require(operator_open(caller), "operator unavailable")
+    require(len(self.operator_receipt_key[caller]) == 44, "operator receipt key missing")
     require_digest(manifest_hash)
     require(self.offer_count < MAX_UINT, "offers exhausted")
     let id = self.offer_count
@@ -275,14 +370,24 @@ program OctranetPayments {
     require(operator_open(self.offer_owner[offer]), "operator unavailable")
     require(self.offer_generation[offer] == self.operator_generation[self.offer_owner[offer]], "operator generation closed")
     require(budget > 0, "budget unavailable")
+    require(self.reserved[caller] <= self.funds[caller], "channel reservation exceeds funds")
     let available = self.funds[caller] - self.reserved[caller]
     if budget > available {
       let needed = budget - available
       require(needed <= self.earnings[caller], "budget unavailable")
+      require(needed <= MAX_UINT - self.funds[caller], "channel balance exceeds uint64")
       self.earnings[caller] = self.earnings[caller] - needed
       self.funds[caller] = self.funds[caller] + needed
       emit EarningsAllocated(caller, needed)
     }
+    require(budget <= MAX_UINT - self.reserved[caller], "reservation exceeds uint64")
+    // Reserving from the post-allocation free balance is algebraically the
+    // same as reserved + budget, while each unsigned subtraction has a direct
+    // runtime guard that the native AML verifier can inspect.
+    let available_after = self.funds[caller] - self.reserved[caller]
+    require(available_after >= budget, "budget unavailable")
+    let remaining_after = available_after - budget
+    require(self.funds[caller] >= remaining_after, "reservation exceeds funds")
     require(self.plan_count < MAX_UINT, "plans exhausted")
     let id = self.plan_count
     self.plan_count = id + 1
@@ -293,7 +398,7 @@ program OctranetPayments {
     self.plan_budget[id] = budget
     self.plan_opened_ms[id] = epoch_time
     self.plan_remaining[id] = budget
-    self.reserved[caller] = self.reserved[caller] + budget
+    self.reserved[caller] = self.funds[caller] - remaining_after
     emit PlanOpened(id, caller, self.generation[caller], offer, budget)
     return id
   }
@@ -340,11 +445,14 @@ program OctranetPayments {
     require(len(signature) == 88, "invalid signature size")
     require(ed25519_ok(self.receipt_key[payer], usage_message(plan, traffic_class, sequence, total_bytes), signature), "invalid usage authorization")
     let rate = self.offer_rate[offer][traffic_class]
-    let cumulative = (total_bytes * rate + MIB - 1) / MIB
+    if rate > 0 {
+      require(total_bytes <= (MAX_UINT - (MIB - 1)) / rate, "charge intermediate exceeds uint64")
+    }
+    let cumulative: uint = (total_bytes * rate + MIB - 1) / MIB
     require(cumulative >= self.class_paid[plan][traffic_class] && cumulative <= MAX_UINT, "charge exceeds uint64")
-    let increment = cumulative - self.class_paid[plan][traffic_class]
-    require(increment <= self.plan_remaining[plan], "plan budget exhausted")
-    require(increment <= self.reserved[payer] && increment <= self.funds[payer], "account budget exhausted")
+    let increment: uint = cumulative - self.class_paid[plan][traffic_class]
+    require(self.plan_remaining[plan] >= increment, "plan budget exhausted")
+    require(self.reserved[payer] >= increment && self.funds[payer] >= increment, "account budget exhausted")
     if sequence > self.class_sequence[plan][traffic_class] {
       self.class_sequence[plan][traffic_class] = sequence
     }
@@ -354,6 +462,7 @@ program OctranetPayments {
     self.reserved[payer] = self.reserved[payer] - increment
     self.funds[payer] = self.funds[payer] - increment
     let operator = self.offer_owner[offer]
+    require(increment <= MAX_UINT - self.earnings[operator], "operator earnings exceed uint64")
     self.earnings[operator] = self.earnings[operator] + increment
     emit UsageCharged(plan, traffic_class, sequence, total_bytes, increment)
     return increment
@@ -369,6 +478,7 @@ program OctranetPayments {
     let stopped = self.operator_stopped[self.offer_owner[offer]][self.offer_generation[offer]]
     require(stopped > 0, "operator not stopped")
     let amount = self.plan_remaining[plan]
+    require(self.reserved[caller] >= amount, "plan reservation exceeds account reservation")
     self.plan_remaining[plan] = 0
     self.reserved[caller] = self.reserved[caller] - amount
     return amount
@@ -448,6 +558,11 @@ program OctranetPayments {
   view fn get_operator_unlock_ms(operator: address): uint { return self.operator_unlock[operator] }
   view fn get_operator_available(operator: address): bool { return operator_open(operator) }
   view fn get_operator_generation(operator: address): uint { return self.operator_generation[operator] }
+  view fn get_operator_receipt_key(operator: address): string { return self.operator_receipt_key[operator] }
+  view fn get_operator_slashed(operator: address, generation: uint): uint { return self.operator_slashed[operator][generation] }
+  view fn get_slash_beneficiary(operator: address, generation: uint): address { return self.slash_beneficiary[operator][generation] }
+  view fn get_slash_award(operator: address, generation: uint): uint { return self.slash_award[operator][generation] }
+  view fn get_slash_award_unlock_ms(operator: address, generation: uint): uint { return self.slash_award_unlock[operator][generation] }
   view fn get_operator_stopped_ms(operator: address, generation: uint): uint { return self.operator_stopped[operator][generation] }
   view fn get_operator_unstake_ms(): uint { return OPERATOR_UNSTAKE_MS }
   view fn get_user_exit_ms(): uint { return 0 }
@@ -553,5 +668,9 @@ program OctranetPayments {
   view fn get_usage_message(plan: uint, traffic_class: uint, sequence: uint, total_bytes: uint): string {
     require(plan < self.plan_count && traffic_class < self.offer_classes[self.plan_offer[plan]], "plan or class not found")
     return usage_message(plan, traffic_class, sequence, total_bytes)
+  }
+  view fn get_service_message(plan: uint, traffic_class: uint, sequence: uint, total_bytes: uint): string {
+    require(plan < self.plan_count && traffic_class < self.offer_classes[self.plan_offer[plan]] && sequence > 0, "invalid receipt slot")
+    return service_message(plan, traffic_class, sequence, total_bytes)
   }
 }

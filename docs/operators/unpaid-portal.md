@@ -16,10 +16,11 @@ Configure the gateway's existing loopback backend and exact HTTPS origin:
       "circle": "REPLACE_WITH_PORTAL_CIRCLE",
       "paths": [
         "/index.html",
+        "/join.html",
+        "/browse.html",
+        "/operators.html",
         "/style.css",
-        "/logo.svg",
-        "/offers.json",
-        "/funding.html"
+        "/logo.svg"
       ]
     }
   }
@@ -30,6 +31,10 @@ The Circle must publish those assets in canonical public state. The HTTPS
 reverse proxy supplies TLS and preserves the real Host header; forwarding
 headers never choose the gateway authority. The backend remains loopback-only.
 Do not configure `sites` together with `portal`: startup rejects that mixture.
+The repo's deployable [octra.to Circle bundle](../../sites/octra-to/README.md)
+uses this exact six-asset allowlist. Its stock-client paid Circle origin is
+separate from the free portal, so `/resolve` and arbitrary Circle paths remain
+unavailable before paid admission.
 
 `/` maps directly to the explicitly allowed `/index.html`. The allowlist is
 immutable for that running gateway, contains at most 128 distinct paths, and

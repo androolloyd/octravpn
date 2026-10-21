@@ -1,0 +1,119 @@
+{
+  "status": "host checks passed; real Linux routing isolation failed; packet enforcement required before launch",
+  "adopted_upstream": "d3e834919bd586e81f947d0dae91becc6c43c756",
+  "evidence": "out/private-socket-mark-20261020",
+  "source_manifest": "out/private-socket-mark-20261020/source-before.json",
+  "source_files": 1860,
+  "sources_unchanged": true,
+  "checks": [
+    {
+      "name": "experimental-strict",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "-p",
+        "octra-node",
+        "-p",
+        "octravpn-client",
+        "--features",
+        "octra-node/private-payments-experimental",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 33.59,
+      "log": "out/private-socket-mark-20261020/experimental-strict.log"
+    },
+    {
+      "name": "normal-strict",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "-p",
+        "octra-node",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 26.82,
+      "log": "out/private-socket-mark-20261020/normal-strict.log"
+    },
+    {
+      "name": "native-payments",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--release",
+        "-p",
+        "octra-node",
+        "--features",
+        "private-payments-experimental",
+        "--lib",
+        "vpn::payments"
+      ],
+      "exit": 0,
+      "seconds": 402.52,
+      "log": "out/private-socket-mark-20261020/native-payments.log"
+    },
+    {
+      "name": "client",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "octravpn-client",
+        "--all-targets"
+      ],
+      "exit": 0,
+      "seconds": 46.28,
+      "log": "out/private-socket-mark-20261020/client.log"
+    }
+  ],
+  "passed": {
+    "release_native_payments": 69,
+    "client_tests": 378,
+    "client_benchmark_checks": 4,
+    "linux_scope_tests": 4
+  },
+  "linux": {
+    "image": "sha256:7784f06eafdd24a3eca853634b62c2075272f3df41b3a21a8f1baf9d6dc53ddd",
+    "build_exit": 0,
+    "routing_isolation_qualified": false,
+    "scope_qualification": "out/private-socket-mark-20261020/linux/scope-qualification.json",
+    "scope_containers_removed_verified": true,
+    "probe_containers_removed_verified": true,
+    "real_unprivileged_udp_emitted": true,
+    "dummy_tx_packets_before": 1,
+    "dummy_tx_packets_after": 2,
+    "unreachable_policy_did_not_prevent_bound_interface_fallback": true
+  },
+  "implemented": [
+    "Nonzero privileged SO_MARK for native bound listeners, accepted sockets and dials",
+    "Encrypted route plan binds socket mark; recovery rejects differing marks and masks",
+    "Startup requires the complete original interface, mark and DNS pin scope"
+  ],
+  "pending": [
+    "Packet-level enforcement against forced-interface fallback; routing rules and blackholes alone are insufficient",
+    "Requalify retained kernel-plan recovery after packet enforcement",
+    "Full funded private multihop process restart, exhaustion, carrier loss and canonical/ExEx agreement",
+    "Same-channel multiple traffic classes",
+    "Sustained public devnet service, stock client onboarding, DNS/TLS and production cryptographic qualification"
+  ],
+  "new_consensus_change": false,
+  "deployed": false,
+  "launch_qualified": false,
+  "full_goal_complete": false,
+  "recorded_at_utc": "2026-10-20T10:05:45.729594+00:00"
+}

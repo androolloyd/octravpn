@@ -28,6 +28,8 @@ mod paid_routes;
 mod payment_runner;
 mod payments;
 mod portal;
+mod private_control;
+mod private_runner;
 mod runner;
 mod settle_state;
 mod settler;
@@ -43,9 +45,24 @@ pub use payment_runner::{
     StockClient, StockOptions, Summary as PaymentSummary,
 };
 pub use payments::OpenMode as JournalMode;
+pub use private_control::{Endpoint as PrivateEndpoint, PrivateControl};
+pub use private_runner::{
+    Client as PrivatePaymentClient, Options as PrivatePaymentOptions,
+    Pending as PendingPrivateClient, Plan as AcceptedPrivatePlan,
+    Prepared as PreparedPrivateClient, Summary as PrivatePaymentSummary,
+};
 
+pub use multihop::funded::{
+    Chain as PrivateRouteChain, Client as FundedPrivateRoute, Hop as PrivateRouteHop,
+    Journal as PrivateRouteJournal, Profile as PrivateRouteProfile,
+};
+pub use multihop::private::{
+    Client as MultiPrivatePaymentClient, HopPlan as MultiPrivateHopPlan,
+    Options as MultiPrivatePaymentOptions, RoutePlan as MultiPrivateRoutePlan,
+};
 pub use multihop::{
     BootstrapPrivacy as MultiBootstrapPrivacy, Client as MultiPaymentClient,
     HopPlan as MultiHopPlan, Options as MultiPaymentOptions, PaymentPrivacy as MultiPaymentPrivacy,
     RoutePins as MultiRoutePins, RoutePlan as MultiRoutePlan,
 };
+pub use paid_routes::Network as PrivateRouteNetwork;

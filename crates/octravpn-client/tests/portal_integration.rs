@@ -24,6 +24,7 @@ use axum::{routing::post, Json, Router};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64URL, Engine as _};
 use octravpn_core::circle::{encrypt_sealed_bytes, PaddingClass};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 #[tokio::test]
 async fn portal_walks_index_confirm_resolve_render() {
@@ -41,8 +42,8 @@ async fn portal_walks_index_confirm_resolve_render() {
                         "jsonrpc": "2.0",
                         "id": id,
                         "result": {
-                            "ciphertext_b64": b64,
-                            "plaintext_hash": "0".repeat(64),
+                            "bytes_b64": b64,
+                            "plaintext_hash": hex::encode(Sha256::digest(payload)),
                             "key_id": "default",
                         }
                     }))

@@ -151,6 +151,57 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn subtree_commitment_proofs_keep_unrelated_values_blinded_and_prove_absence() {
+        let mut state = StateBatch::default();
+        state.begin().unwrap();
+        state
+            .set(&[b"public", b"value"], b"visible".to_vec())
+            .unwrap();
+        state
+            .set(&[b"private", b"value"], b"hidden".to_vec())
+            .unwrap();
+        let snapshot = state.snapshot();
+        let root = hex::encode(snapshot.root().unwrap());
+        let raw = STANDARD.encode(snapshot.read_proof(&[b"public"], false).unwrap());
+        assert_eq!(
+            octra_node_protocol::irmin::proof::verify_tree(
+                root.as_bytes(),
+                &[b"public"],
+                raw.as_bytes()
+            )
+            .unwrap(),
+            Some(snapshot.subtree(&[b"public"]).unwrap().root().unwrap())
+        );
+        assert!(octra_node_protocol::irmin::proof::verify(
+            root.as_bytes(),
+            &[b"private", b"value"],
+            raw.as_bytes()
+        )
+        .is_err());
+        let raw = STANDARD.encode(snapshot.read_proof(&[b"absent"], false).unwrap());
+        assert!(octra_node_protocol::irmin::proof::verify_tree(
+            root.as_bytes(),
+            &[b"absent"],
+            raw.as_bytes()
+        )
+        .unwrap()
+        .is_none());
+        let raw = STANDARD.encode(snapshot.read_proof(&[b"public", b"value"], false).unwrap());
+        assert!(octra_node_protocol::irmin::proof::verify_tree(
+            root.as_bytes(),
+            &[b"public", b"value"],
+            raw.as_bytes()
+        )
+        .is_err());
+        assert!(octra_node_protocol::irmin::proof::verify_tree(
+            b"bad",
+            &[b"public"],
+            raw.as_bytes()
+        )
+        .is_err());
+    }
+
+    #[test]
     fn cached_read_proof_does_not_walk_blinded_descendants() {
         let mut state = StateBatch::default();
         state.begin().unwrap();

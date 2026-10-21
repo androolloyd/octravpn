@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Actual multi-payments CLI, kernel probes and explicit owned-route recovery."""
 import json
+import errno
 import hashlib
 import os
 import pathlib
@@ -110,17 +111,35 @@ class Client:
     def __init__(self):
         g.ROOT = pathlib.Path('/state/client'); g.ROOT.mkdir()
         self.process = None; self.stream = None; self.round = 0; self.launches = 0
+        ready = json.loads((g.EVIDENCE / 'multi-ready.json').read_text())
+        self.private_control = ready.get('private_control', False)
         self.udp_calls = 0; self.udp_events = 0; self.udp_log_errors = []; self.last_udp_event = None
         mapping = [{'listen': ['127.0.0.1', port], 'target': [A_IP, 10000 + port]} for port in [19879, 19889]]
         # Underlay listeners are20879/20889, not the native loopback ports.
         for row, port in zip(mapping, [20879, 20889], strict=True): row['target'][1] = port
         path = g.ROOT / 'links.json'; path.write_text(json.dumps(mapping))
         self.link_log = (g.EVIDENCE / 'multi-client-links.log').open('x')
-        self.link = subprocess.Popen(['python3', '-u', '/usr/local/bin/multi_link.py', str(path)], stdout=self.link_log, stderr=self.link_log)
-        g.until(lambda: '"ready": true' in (g.EVIDENCE / 'multi-client-links.log').read_text(), 20, 'local control management links')
+        self.link = None
+        if not self.private_control:
+            self.link = subprocess.Popen(['python3', '-u', '/usr/local/bin/multi_link.py', str(path)], stdout=self.link_log, stderr=self.link_log)
+            g.until(lambda: '"ready": true' in (g.EVIDENCE / 'multi-client-links.log').read_text(), 20, 'local control management links')
         ip('route', 'replace', 'default', 'via', '172.31.237.2', 'dev', 'eth0')
         ip('route', 'replace', A_IP + '/32', 'via', '172.31.237.2', 'dev', 'eth0')
-        self.configure(json.loads((g.EVIDENCE / 'multi-ready.json').read_text())['plans'])
+        if self.private_control:
+            g.command(['iptables', '-N', 'OCTRA_PRIVATE_BOOTSTRAP'])
+            g.command(['iptables', '-A', 'OUTPUT', '-j', 'OCTRA_PRIVATE_BOOTSTRAP'])
+            g.command(['iptables', '-A', 'OCTRA_PRIVATE_BOOTSTRAP', '-o', 'eth0', '-d', B_IP, '-j', 'REJECT'])
+            for protocol in ['udp', 'tcp']:
+                g.command(['iptables', '-A', 'OCTRA_PRIVATE_BOOTSTRAP', '-p', protocol, '--dport', '53', '-j', 'REJECT'])
+            try:
+                with socket.create_connection((B_IP, 20889), timeout=1):
+                    raise AssertionError('direct downstream control unexpectedly connected')
+            except OSError:
+                pass
+            assert self.privacy_counters()[0]['packets'] > 0
+            atomic(g.EVIDENCE / 'private-control-direct-negative.json', self.privacy_counters())
+            g.command(['iptables', '-Z', 'OCTRA_PRIVATE_BOOTSTRAP'])
+        self.configure(ready['plans'])
         atomic(g.EVIDENCE / 'multi-client-ready.json', {'ready': True})
 
     def configure(self, plans):
@@ -128,21 +147,32 @@ class Client:
             {'plan': plan, 'journal': str(g.ROOT / f'hop-{self.round}-{index}'),
              'receipt_key': f'/config/receipt-{"A" if index == 0 else "B"}.hex', 'interface_name': NAMES[index]}
             for index, plan in enumerate(plans)]}
+        if self.private_control:
+            route.update(bootstrap_privacy='pinned_ips', payment_privacy='public')
+            for hop, address, wg_port, control_port in zip(route['hops'], [A_IP, B_IP], [19874, 19884], [20879, 20889], strict=True):
+                hop.update(wireguard_pin=f'{address}:{wg_port}', control_pin=f'{address}:{control_port}')
         self.path = g.ROOT / 'route.json'; self.path.write_text(json.dumps(route)); self.route = route
         atomic(g.EVIDENCE / f'accepted-multi-route-{self.round}.json', route)
 
-    def launch(self, resume=False, negative=False):
+    def launch(self, resume=False, negative=False, wrong_host=False):
         assert self.process is None or self.process.poll() is not None
         self.launches += 1
         self.log_path = g.EVIDENCE / f'multi-client-{self.launches}.log'; self.stream = self.log_path.open('x')
         path = self.path
         if negative:
-            route = json.loads(path.read_text()); route['journal'] += '-negative'
-            for hop in route['hops']: hop['journal'] += '-negative'
+            suffix = '-tls-negative' if wrong_host else '-negative'
+            route = json.loads(path.read_text()); route['journal'] += suffix
+            for hop in route['hops']: hop['journal'] += suffix
+            if wrong_host: route['hops'][0]['plan']['control_url'] = 'https://wrong.octra.invalid:20879/'
             path = g.ROOT / 'negative-route.json'; path.write_text(json.dumps(route))
         args = ['octravpn', 'multi-payments', '--route', str(path)]
         if resume: args.append('--resume')
         self.process = subprocess.Popen(args, stdout=self.stream, stderr=self.stream)
+
+    def privacy_counters(self):
+        text = g.command(['iptables', '-L', 'OCTRA_PRIVATE_BOOTSTRAP', '-v', '-n', '-x'])
+        return [{'packets': int(row.split()[0]), 'bytes': int(row.split()[1]), 'rule': row}
+                for row in text.splitlines() if row.split() and row.split()[0].isdigit()]
 
     def ready(self):
         assert self.process.poll() is None, self.log_path.read_text()[-2000:]
@@ -187,26 +217,51 @@ class Client:
     def udp(self, count, length=900, expect=True):
         assert 0 < count <= 64 and 32 <= length <= 1400
         self.udp_calls += 1; call = self.udp_calls
-        received = 0
+        received = 0; attempts = 0; acknowledged = set()
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as connection:
             connection.bind((self.interface(1), 0)); connection.settimeout(2)
             # Permit the kernel to hand fragments to the actual TUN for the
             # oversized negative, so EMSGSIZE alone cannot impersonate a drop.
             connection.setsockopt(socket.IPPROTO_IP, 10, 0)
             for index in range(count):
-                body = struct.pack('!Q', index) + b'nested-paid:' + bytes(length - 20)
+                body = struct.pack('!QQ', call, index) + b'nested-paid:' + bytes(length - 28)
                 assert len(body) == length
-                assert connection.sendto(body, (g.PUBLIC, 20001)) == length
-                self.record_udp('sent', call, index, body, expected_reply=expect)
-                try: data, peer = connection.recvfrom(2048)
-                except socket.timeout:
-                    self.record_udp('timeout', call, index, body, expected_reply=expect)
-                    if expect: raise
-                    continue
-                self.record_udp('received', call, index, data, peer=list(peer), expected_reply=expect)
-                assert expect, 'exhausted/oversized/revoked nested packet delivered'
-                assert data == body and peer == (g.PUBLIC, 20001); received += len(data)
-        return {'received_payload_bytes': received, 'payload_length': length}
+                delivered = False
+                # UDP may lose a reply during publication or re-handshake.
+                # Retries stay finite, paid and visible in the packet journal.
+                for attempt in range(3 if expect else 1):
+                    attempts += 1
+                    try:
+                        assert connection.sendto(body, (g.PUBLIC, 20001)) == length
+                    except OSError as error:
+                        if expect or error.errno not in [errno.ENETUNREACH, errno.EHOSTUNREACH, errno.ENETDOWN,
+                                                        errno.EACCES, errno.EPERM]:
+                            raise
+                        self.record_udp('kernel_rejected', call, index, body, errno=error.errno)
+                        break
+                    self.record_udp('sent', call, index, body, expected_reply=expect, attempt=attempt)
+                    deadline = time.monotonic() + 2
+                    try:
+                        while True:
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0: raise socket.timeout()
+                            connection.settimeout(remaining)
+                            data, peer = connection.recvfrom(2048)
+                            assert expect, 'exhausted/oversized/revoked nested packet delivered'
+                            assert peer == (g.PUBLIC, 20001)
+                            if data in acknowledged:
+                                self.record_udp('duplicate', call, index, data, peer=list(peer))
+                                continue
+                            assert data == body
+                            self.record_udp('received', call, index, data, peer=list(peer), expected_reply=True)
+                            acknowledged.add(body); received += len(data); delivered = True
+                            break
+                    except socket.timeout:
+                        self.record_udp('timeout', call, index, body, expected_reply=expect, attempt=attempt)
+                    if delivered: break
+                if expect and not delivered:
+                    raise socket.timeout('bounded paid UDP probe did not receive its echo')
+        return {'received_payload_bytes': received, 'payload_length': length, 'sent_attempts': attempts}
 
     def cleanup(self):
         # Explicit fixture-only recovery, after the writer and all TUNs are gone.
@@ -259,14 +314,31 @@ class Client:
             assert not table('-4') and not table('-6')
             ip('-4', 'rule', 'del', 'priority', '1', 'lookup', 'main'); self.process = None
             return {'refused_before_payment': True}
+        if action == 'tls_negative':
+            assert self.private_control
+            self.launch(negative=True, wrong_host=True)
+            self.process.wait(timeout=30); self.stream.close()
+            text = self.log_path.read_text().lower()
+            assert self.process.returncode != 0 and 'certificate' in text and 'name' in text, text[-2000:]
+            self.cleanup(); self.process = None
+            return {'wrong_hostname_refused': True}
         if action == 'launch': self.launch(request.get('resume', False)); return {'started': True}
         if action == 'ready':
             g.until(self.ready, 180, 'all-hop canonical purchases and handshakes')
             result = self.snapshot(); assert {row['ifname']: row['mtu'] for row in result['links'] if row['ifname'] in NAMES} == dict(zip(NAMES, [1280, 1075], strict=True))
             assert rows('-4', 'route', 'get', g.PUBLIC)[0]['dev'] == NAMES[1]
             assert rows('-4', 'route', 'get', B_IP)[0]['dev'] == NAMES[0]
+            if self.private_control:
+                counters = self.privacy_counters()
+                assert len(counters) == 3 and all(row['packets'] == 0 for row in counters)
+                result['privacy_counters'] = counters
             return result
         if action == 'state': return self.snapshot()
+        if action == 'privacy':
+            assert self.private_control
+            counters = self.privacy_counters()
+            assert len(counters) == 3 and all(row['packets'] == 0 for row in counters)
+            return {'forbidden_physical_and_dns': counters}
         if action == 'traffic': return {'udp': self.udp(3), 'tcp_payload_bytes': p.tcp_and_icmp(self.interface(1))}
         if action == 'near_mtu': return self.udp(2, 1047)
         if action == 'oversize':
@@ -286,6 +358,13 @@ class Client:
             assert any(row.get('type') == 'blackhole' and row.get('dst') in [B_IP, B_IP + '/32'] for row in found)
             probe = subprocess.run(['ip', '-4', '-j', 'route', 'get', B_IP], capture_output=True, text=True)
             assert probe.returncode != 0 or not any(row.get('dev') == 'eth0' for row in json.loads(probe.stdout))
+            if self.private_control:
+                try:
+                    with socket.create_connection((B_IP, 20889), timeout=1):
+                        raise AssertionError('downstream TLS escaped a missing carrier')
+                except OSError:
+                    pass
+                assert all(row['packets'] == 0 for row in self.privacy_counters())
             self.cleanup(); ip('-4', 'route', 'del', B_IP + '/32', 'via', '172.31.237.2', 'dev', 'eth0')
             return {'physical_fallback_blocked': True}
         if action == 'clean_stop':
@@ -302,7 +381,9 @@ class Client:
 
     def close(self):
         if self.process is not None and self.process.poll() is None: self.process.kill(); self.process.wait(timeout=15); self.stream.close()
-        self.link.terminate(); self.link.wait(timeout=15); self.link_log.close()
+        if self.link is not None:
+            self.link.terminate(); self.link.wait(timeout=15)
+        self.link_log.close()
 
 
 def main():

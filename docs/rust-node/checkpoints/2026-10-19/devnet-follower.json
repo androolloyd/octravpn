@@ -1,0 +1,52 @@
+{
+  "date": "2026-10-19",
+  "network": "octra-devnet-9871-cluster",
+  "status": "public_joined_availability_unqualified",
+  "image": "octra-native-vpn-devnet-relay:20261019-follower",
+  "image_sha256": "5315ecd783181be4b1a29b3c49e13a9116f700a17be9dc194550fca7e6150e77",
+  "source_sha256": "a778cb518ea0deb6c4dd571d34a85a6163b69c8a2c029a4e4c5f96a502a35ce9",
+  "change": "After current-root peer attestation, a nonvoting public observer starts the existing consensus driver with voting disabled. Signed finalized frames use the normal authenticated execution/publisher path instead of requiring a new full-prefix resume for every successor. No membership, quorum, finality or voting rule was changed.",
+  "local_evidence": {
+    "receive_only_follower": "A signed peer Finalize advanced the real canonical node and ExEx checkpoint while the observer wrote no vote.",
+    "recovery_suite": "10 of 10 live recovery tests passed",
+    "strict_clippy": "octra-node library and tests passed with -D warnings",
+    "linux_image_build": "Completed all Dockerfile build, release and payment test layers with exit 0"
+  },
+  "private_gate": {
+    "evidence": "out/octra-follower-payments-20261019/qualification.json",
+    "qualified": true,
+    "scope": "Isolated four-validator Circle custody; real paid TUN TCP/UDP/ICMP, crash/restart, finite exhaustion, immediate withdrawal and four matching ExEx claim sinks.",
+    "qualification_exit": 0
+  },
+  "public_deployment": {
+    "role": "nonvoting",
+    "retained_state": "same read-write observer volume; previous stopped container retained for rollback",
+    "client": "unchanged durable 1 MiB paid plan and journal",
+    "bridge_ip": "192.168.215.2",
+    "ports": "127.0.0.1:20800/tcp and 127.0.0.1:20804/udp",
+    "control_bridge": "new isolated sidecar ready with one link",
+    "join": "Cold retained-state verification completed; HTTPS state sync reported synced=true, verified=78 and no error. The observer opened local RPC, matched the official devnet head at epoch 1717778 with root 13873e8f3ff1b2d65465b6dbb0dfa5ce1629b32cbad9e43905b17c89742a4788, and later advanced to at least epoch 1717792 without voting.",
+    "availability_sample": {
+      "duration_seconds": 45,
+      "serving_samples": 5,
+      "auditing_canonical_history_samples": 30,
+      "consensus_driver_stopped_samples": 7,
+      "authenticated_http_catchup_samples": 3,
+      "epoch_start": 1717781,
+      "epoch_end": 1717782,
+      "assessment": "The receive-only follower did not remove the public audit/catch-up service flapping."
+    },
+    "paid_transport_probe": {
+      "client_route": "1.1.1.1/32 dev octrapay1 during the request; temporary route removed afterward",
+      "response": "HTTP/1.1 301 Moved Permanently",
+      "client_committed_bytes": 6588,
+      "operator_committed_bytes": 6588,
+      "uncertain_bytes_each": 0,
+      "authorized_bytes": 1048576,
+      "claim_queue_slots": 0,
+      "operator_circle_earnings_ou": 0,
+      "interpretation": "The existing public-devnet purchase carried one new bounded TUN-to-Internet HTTP request with matching journals. No fresh purchase or claim was needed; the earlier 1,000 OU earnings withdrawal remained final. This does not establish sustained paid-exit availability."
+    }
+  },
+  "limits": "A signed private peer-frame test and private paid gate do not establish sustained public-devnet finality-following, paid exit availability or universal upstream parity. The first public 45-second sample had only five serving observations and recurring full-prefix audits. The previous diagnostic image remains the rollback artifact."
+}

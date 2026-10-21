@@ -63,6 +63,16 @@ def factory_artifact(source, artifact):
     return base64.b64encode(code).decode(), hashlib.sha256(code).hexdigest()
 
 
+def register_operator_receipt_key(operator_key, program, domain, operator, label):
+    generation = int(g.view(program, 'get_operator_generation', [operator]))
+    assert generation > 0
+    public = g.command(['octra', 'cast', 'wallet', 'pubkey', '--key', operator_key])
+    message = f'Octranet operator key v1|{domain}|{program}|{operator}|{generation}'
+    signature = g.command(['octra', 'cast', 'wallet', 'sign', '--key', operator_key, message])
+    g.send(label, operator_key, program, 'register_operator_receipt_key', [public, signature])
+    return generation
+
+
 def ip(*args):
     return g.command(['ip', *args])
 
@@ -838,6 +848,8 @@ def prepare(validate_environment=g.native_guard, *, custody_cap=200_000_000):
            code_hash=artifacts['octranet-payments.aml']['code_hash'],
            admission_scope='legacy binary execution; local source-build certificate only')
     g.send('bond actual operator stake', operator_key, program, 'bond_operator', [], STAKE)
+    operator_generation = register_operator_receipt_key(
+        operator_key, program, domain, operator, 'pin bonded operator service receipt key')
     receipt_public = configs[0]['genesis']['funded_public']
     message = f'Octranet register v1|{domain}|{program}|{payer}|1'
     signature = g.command(['octra', 'cast', 'wallet', 'sign', '--key', faucet, message])
@@ -881,7 +893,8 @@ def prepare(validate_environment=g.native_guard, *, custody_cap=200_000_000):
     g.send('open funded plan', faucet, program, 'open_plan', [0, BUDGET])
     binding = {'deployment': {'domain': domain, 'program': program}, 'payer': payer,
                'generation': 1, 'plan': 0, 'offer': 0, 'manifest_hash': manifest}
-    accepted = {'binding': binding, 'tariff': tariff, 'original_budget_ou': BUDGET,
+    accepted = {'binding': binding, 'tariff': tariff, 'operator_generation': operator_generation,
+                'original_budget_ou': BUDGET,
                 'control_url': 'http://127.0.0.1:19879', 'wireguard_endpoint': '127.0.0.1:19874',
                 'prepaid_bytes': PREPAID_BYTES}
     plan_path = g.ROOT / 'accepted-plan.json'

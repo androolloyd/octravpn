@@ -1,0 +1,41 @@
+{
+  "status": "host build, strict checks and native peer regressions passed; integrated runtime qualification pending",
+  "adopted_upstream": "d3e834919bd586e81f947d0dae91becc6c43c756",
+  "evidence": "out/private-route-controller-20261020",
+  "source_manifest": "out/private-route-controller-20261020/source-before.json",
+  "sources": 1854,
+  "sources_unchanged": true,
+  "checks": {
+    "strict_experimental_node_protocol_client_all_targets": true,
+    "native_swarm_tests": {
+      "passed": 16,
+      "failed": 0
+    },
+    "new_native_credit_revalidation_test": "compiled; execution pending",
+    "full_client_regressions": "pending for this source"
+  },
+  "log_sha256": {
+    "check-v2.log": "2bc457a4bfb94078891b4e2fc7609130014725e1fd212df35757dd4cd4b93aa3",
+    "strict-v3.log": "de06e225858475b7eefa475c258728778249b4d6d67f1628bfb06ad1e0a1bebb",
+    "swarm-tests.log": "61e714ca7145a07950369fdeb5dfbd7264708cfcba1189296855af7df4b2f058"
+  },
+  "implemented": [
+    "Ordered native funding with complete route consent and child journal ownership",
+    "Native P2P pause/rebind acknowledgement closes old owned sessions",
+    "Linux table185 for device-bound chain sockets, table186 for ordered ordinary traffic",
+    "Existing credit revalidation authenticates exact native quote and operator output without new payment"
+  ],
+  "pending": [
+    "Before-start launcher configuration and armed route restoration",
+    "Cold entry reconnection without fresh-chain bootstrap or repeated purchase",
+    "Actual Linux bound-socket routing policy and cleanup",
+    "Combined funded private route, exhaustion, carrier loss, restart and ExEx qualification",
+    "Same-channel multiple traffic classes",
+    "Sustained public devnet and independent security qualification"
+  ],
+  "new_consensus_change": false,
+  "deployed": false,
+  "full_goal_complete": false,
+  "launch_qualified": false,
+  "recorded_at_utc": "2026-10-20T08:14:09.620974+00:00"
+}

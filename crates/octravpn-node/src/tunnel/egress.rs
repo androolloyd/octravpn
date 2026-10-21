@@ -166,6 +166,11 @@ impl ReturnPath {
 
     pub(super) async fn reply_body(&self, body: &[u8]) -> Result<()> {
         if !self.allowed() {
+            debug!(
+                bytes = body.len(),
+                retained = self.retained(),
+                "VPN reply grant unavailable"
+            );
             return Ok(());
         }
         let frame = if self.stock().is_some() {
@@ -175,6 +180,7 @@ impl ReturnPath {
         };
         let peer = self.peers.get(&self.key.peer);
         if self.stock_peer.is_none() && peer.is_none() {
+            debug!(bytes = body.len(), "VPN reply peer unavailable");
             return Ok(());
         }
         let ticket = if let Some(connection) = self.paid() {
@@ -200,6 +206,10 @@ impl ReturnPath {
         if let Some(connection) = self.paid() {
             let ticket = ticket.context("paid packet reservation missing")?;
             if no_session {
+                debug!(
+                    bytes = body.len(),
+                    "VPN reply WireGuard session unavailable"
+                );
                 // No raw payload entered the library. A normal rekey can drop
                 // this packet, but cannot consume permanent uncertain credit.
                 ticket.cancel().await?;

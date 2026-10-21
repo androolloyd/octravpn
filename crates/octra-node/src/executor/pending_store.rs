@@ -379,6 +379,20 @@ impl Disk {
             cursors,
         ))
     }
+    /// An authenticated historical cleanup may arrive after admission has
+    /// already saved a newer head. Its removals retain that newer binding.
+    /// Ordinary admission still passes its exact current draft cursor to save.
+    pub(super) fn cleanup_cursor(&self, cursor: Cursor) -> Result<Cursor> {
+        if cursor.sequence < self.cursor.sequence {
+            ensure!(
+                cursor.epoch < self.cursor.epoch,
+                "historical queue cleanup epoch conflicts"
+            );
+            Ok(self.cursor)
+        } else {
+            Ok(cursor)
+        }
+    }
     pub(super) fn save(&mut self, pool: &Pool, cursor: Cursor) -> Result<()> {
         ensure!(
             cursor.sequence >= self.cursor.sequence,

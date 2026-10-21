@@ -7,15 +7,35 @@ use crate::{b64, parse_native_address, sig, Address, CoreError, KeyPair, PublicK
 
 mod budget;
 mod connection;
+mod private_purchase;
+mod service_receipt;
+mod shielded_status;
 mod tariff;
 pub use budget::{Budget, Reservation};
 pub use connection::{Connect, PlanBinding, SignedConnect, SignedStatus, Status};
+pub use private_purchase::{
+    PrivateAction, PrivateExchange, PrivateRequest, PrivateResult, PrivateTarget,
+    SignedPrivateReply, SignedPrivateRequest,
+};
+pub use service_receipt::{ServiceReceipt, SignedServiceReceipt};
+pub use shielded_status::{ShieldedStatus, SignedShieldedStatus};
 pub use tariff::{Direction, IpPrefix, Protocol, Selector, Tariff, TrafficClass};
 
 pub const BYTES_PER_MIB: u64 = 1_048_576;
 pub const MAX_CLASSES: usize = 32;
 pub const MAX_SELECTORS: usize = 256;
 pub const MAX_TARIFF_BYTES: usize = 65_536;
+
+/// No current service view or control transport. This grants no authority and
+/// cannot extend a client's last authenticated canonical-clock deadline.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct Unavailable(String);
+impl Unavailable {
+    pub fn new(reason: impl Into<String>) -> Self {
+        Self(reason.into())
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

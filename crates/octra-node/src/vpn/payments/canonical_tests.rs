@@ -89,6 +89,20 @@ impl Host for Authority {
     }
 }
 
+// A second immutable genesis offer allows the real canonical private test to
+// distinguish operator price consent while sharing one custody pool.
+fn second_tariff() -> Tariff {
+    Tariff::new(
+        parse_native_address(&payment_host::address(12)).unwrap(),
+        vec![TrafficClass {
+            name: "default".into(),
+            rate_ou_per_mib: 20,
+        }],
+        vec![],
+    )
+    .unwrap()
+}
+
 fn genesis(tariff: &Tariff, expires: Option<i64>) -> StateBatch {
     let mut state = StateBatch::default();
     state.begin().unwrap();
@@ -132,45 +146,47 @@ fn genesis(tariff: &Tariff, expires: Option<i64>) -> StateBatch {
     // The existing public Circle fixture supplies canonical metadata and the
     // compiled counter. Its tariff is an immutable, hash-addressed genesis asset.
     circle_host::install_counter(&mut state, circle.as_bytes(), b"0");
-    let bytes = tariff.canonical_bytes().unwrap();
-    let hash = tariff.hash_hex().unwrap();
-    let path = format!("/offers/{hash}/tariff.json");
-    let path_key = circles::path_key(path.as_bytes());
-    let metadata = AssetMeta {
-        path_key: path_key.as_bytes().to_vec(),
-        canonical_path: path.as_bytes().to_vec(),
-        content_type: b"application/json".to_vec(),
-        encoding: b"identity".to_vec(),
-        size_bytes: i64::try_from(bytes.len()).unwrap(),
-        blob_hash: hash.as_bytes().to_vec(),
-        body_mode: ResourceMode::Public,
-        plaintext_hash: None,
-        key_id: None,
-        padding_class: None,
-        resource_key: circles::resource_key(circle.as_bytes(), path.as_bytes()).into_bytes(),
-        locator_mode: LocatorMode::Path,
-        slot_ref: None,
-        activate_after_epoch: None,
-        expire_after_epoch: expires,
-        metadata_mode: MetadataMode::Reveal,
-    };
-    for (field, value) in [
-        (b"meta".as_slice(), metadata.to_json_bytes()),
-        (b"body_b64".as_slice(), STANDARD.encode(bytes).into_bytes()),
-    ] {
-        state
-            .set(
-                &[
-                    b"circles",
-                    circle.as_bytes(),
-                    b"assets",
-                    b"by_hash",
-                    path_key.as_bytes(),
-                    field,
-                ],
-                value,
-            )
-            .unwrap();
+    for tariff in [tariff, &second_tariff()] {
+        let bytes = tariff.canonical_bytes().unwrap();
+        let hash = tariff.hash_hex().unwrap();
+        let path = format!("/offers/{hash}/tariff.json");
+        let path_key = circles::path_key(path.as_bytes());
+        let metadata = AssetMeta {
+            path_key: path_key.as_bytes().to_vec(),
+            canonical_path: path.as_bytes().to_vec(),
+            content_type: b"application/json".to_vec(),
+            encoding: b"identity".to_vec(),
+            size_bytes: i64::try_from(bytes.len()).unwrap(),
+            blob_hash: hash.as_bytes().to_vec(),
+            body_mode: ResourceMode::Public,
+            plaintext_hash: None,
+            key_id: None,
+            padding_class: None,
+            resource_key: circles::resource_key(circle.as_bytes(), path.as_bytes()).into_bytes(),
+            locator_mode: LocatorMode::Path,
+            slot_ref: None,
+            activate_after_epoch: None,
+            expire_after_epoch: expires,
+            metadata_mode: MetadataMode::Reveal,
+        };
+        for (field, value) in [
+            (b"meta".as_slice(), metadata.to_json_bytes()),
+            (b"body_b64".as_slice(), STANDARD.encode(bytes).into_bytes()),
+        ] {
+            state
+                .set(
+                    &[
+                        b"circles",
+                        circle.as_bytes(),
+                        b"assets",
+                        b"by_hash",
+                        path_key.as_bytes(),
+                        field,
+                    ],
+                    value,
+                )
+                .unwrap();
+        }
     }
     state
         .set(
@@ -207,6 +223,12 @@ impl Fixture {
         Box::pin(Self::with_application(expires, Application::Program)).await
     }
     async fn with_application(expires: Option<i64>, application: Application) -> Self {
+        Box::pin(Self::with_capacity(expires, application, 200_000_000)).await
+    }
+    async fn with_capacity(expires: Option<i64>, application: Application, cap: u64) -> Self {
+        // Legacy program binaries embed the original cap. Circle fixtures can
+        // explicitly reserve enough custody for multiple operator stakes.
+        assert!(application == Application::Circle || cap == 200_000_000);
         let directory = tempfile::tempdir().unwrap();
         let operator = parse_native_address(&payment_host::address(11)).unwrap();
         let tariff = Tariff::new(
@@ -240,7 +262,7 @@ impl Fixture {
             Application::Circle => (
                 STANDARD
                     .decode(
-                        super::build::compile(&domain, 200_000_000, payment_host::STAKE).unwrap()
+                        super::build::compile(&domain, cap, payment_host::STAKE).unwrap()
                             ["bytecode"]
                             .as_str()
                             .unwrap(),
@@ -273,7 +295,7 @@ impl Fixture {
         let node = Node::open(
             store,
             Authority { chain },
-            runtime.clone(),
+            runtime,
             Arc::new(UnavailableHost),
             checkpoints,
         )
@@ -285,9 +307,36 @@ impl Fixture {
             node
         };
         let protocol = Protocol::new(2).unwrap();
-        let native = executor::Native::new(
+        let native = Self::executor(&node, graph.clone(), protocol, directory.path());
+        assert!(node.resume().await.unwrap());
+        let mut fixture = Self {
+            node: Arc::new(node),
+            native,
+            graph,
+            protocol,
+            domain,
+            tariff,
+            now: GENESIS_SECONDS,
+            factory: String::new(),
+            program: String::new(),
+            application,
+            payment_code,
+            factory_code,
+            directory,
+        };
+        fixture.deploy_and_fund().await;
+        fixture
+    }
+
+    fn executor(
+        node: &Node<Authority>,
+        graph: Graph,
+        protocol: Protocol,
+        directory: &std::path::Path,
+    ) -> executor::Native {
+        executor::Native::new(
             executor::Config {
-                graph: graph.clone(),
+                graph,
                 protocol,
                 profile: Profile {
                     release: ReleaseProfile::DevnetFullV1,
@@ -307,31 +356,13 @@ impl Fixture {
                 max_stealth: 32,
                 max_multi_exec_calls: 8,
                 ready_max_lag: 10,
-                pvac_dir: directory.path().join("unused-pvac"),
+                pvac_dir: directory.join("unused-pvac"),
                 migration: None,
             },
-            runtime,
+            node.runtime.clone(),
             node.history(),
         )
-        .unwrap();
-        assert!(node.resume().await.unwrap());
-        let mut fixture = Self {
-            node: Arc::new(node),
-            native,
-            graph,
-            protocol,
-            domain,
-            tariff,
-            now: GENESIS_SECONDS,
-            factory: String::new(),
-            program: String::new(),
-            application,
-            payment_code,
-            factory_code,
-            directory,
-        };
-        fixture.deploy_and_fund().await;
-        fixture
+        .unwrap()
     }
 
     #[allow(clippy::needless_pass_by_value)] // Fixture call sites use owned JSON literals.
@@ -410,7 +441,17 @@ impl Fixture {
         let built = self.native.build_proposal(draft, inputs).await.unwrap();
         assert!(
             built.refused().is_empty(),
-            "unexpected rejected fixture transaction"
+            "unexpected rejected fixture methods: {:?}",
+            built
+                .refused()
+                .iter()
+                .map(
+                    |tx| String::from_utf8_lossy(tx.encrypted_data.as_deref().unwrap_or_default())
+                        .chars()
+                        .take(64)
+                        .collect::<String>()
+                )
+                .collect::<Vec<_>>()
         );
         assert!(
             built.held().is_empty(),
@@ -572,6 +613,22 @@ impl Fixture {
         }
         self.call(11, "bond_operator", json!([]), payment_host::STAKE)
             .await;
+        let operator_message = format!(
+            "Octranet operator key v1|{}|{}|{}|1",
+            self.domain,
+            self.program,
+            payment_host::address(11)
+        );
+        self.call(
+            11,
+            "register_operator_receipt_key",
+            json!([
+                STANDARD.encode(payment_host::key(11).verifying_key().as_bytes()),
+                payment_host::sign(11, &operator_message)
+            ]),
+            0,
+        )
+        .await;
         let registration = format!(
             "Octranet register v1|{}|{}|{}|1",
             self.domain,
@@ -608,7 +665,7 @@ impl Fixture {
         self.call(12, "open_plan", json!([0, 1000]), 0).await;
         assert_eq!(
             self.node.snapshot().unwrap().head().cursor.epoch.0,
-            10 + u64::from(self.application == Application::Circle)
+            11 + u64::from(self.application == Application::Circle)
         );
     }
 
@@ -636,6 +693,10 @@ impl Fixture {
 #[path = "../../rpc/circle_admission_tests.rs"]
 mod rpc_admission;
 
+#[cfg(feature = "private-payments-experimental")]
+#[path = "shielded_tests.rs"]
+mod shielded;
+
 fn receipt(plan: &Plan, bytes: u64) -> SignedUsage {
     SignedUsage::sign(
         Usage {
@@ -652,6 +713,120 @@ fn receipt(plan: &Plan, bytes: u64) -> SignedUsage {
         &KeyPair::from_secret_bytes(&[21; 32]),
     )
     .unwrap()
+}
+
+#[tokio::test]
+async fn standalone_offers_follow_the_exact_publication_and_need_no_plan() {
+    for application in [Application::Program, Application::Circle] {
+        let mut fixture = Box::pin(Fixture::with_application(None, application)).await;
+        let original_reader = fixture.payments();
+        // A second independently sealed product has no public payer or plan.
+        fixture
+            .call(
+                11,
+                "create_offer",
+                json!([fixture.tariff.hash_hex().unwrap()]),
+                0,
+            )
+            .await;
+        fixture.call(11, "append_class", json!([1, 10]), 0).await;
+        fixture.call(11, "append_class", json!([1, 100]), 0).await;
+        fixture.call(11, "seal_offer", json!([1]), 0).await;
+        let mut config = original_reader.config.clone();
+        config.offer = 1;
+        let reader = fixture
+            .node
+            .payments(config, original_reader.operator.clone())
+            .unwrap();
+        assert!(reader.plan(1).await.is_err());
+        let offered = reader.offer(1).await.unwrap();
+        assert!(offered.purchasable() && offered.bonded());
+        assert_eq!(offered.tariff, fixture.tariff);
+        assert_eq!(offered.application, application);
+        assert_eq!(offered.operator_generation, 1);
+        assert_eq!(
+            offered.receipt_key,
+            Some(KeyPair::from_secret_bytes(&[11; 32]).public)
+        );
+        assert_eq!(
+            offered.publication().committed().head(),
+            fixture.node.snapshot().unwrap().head()
+        );
+        assert_eq!(
+            offered.with_current(|data| Ok(data.canonical_ms)).unwrap(),
+            offered.canonical_ms
+        );
+        fixture
+            .node
+            .suspend("standalone quote lost canonical publication");
+        assert!(!offered.purchasable() && !offered.bonded());
+        assert!(offered.with_current(|_| Ok(())).is_err());
+        assert!(reader.offer(1).await.is_err());
+        assert!(fixture.node.resume().await.unwrap());
+        assert!(reader.offer(1).await.unwrap().purchasable());
+        assert!(
+            !offered.purchasable(),
+            "same-head resume revived an old quote"
+        );
+        fixture
+            .call(11, "request_operator_unstake", json!([]), 0)
+            .await;
+        let stopped = reader.offer(1).await.unwrap();
+        assert!(!stopped.bonded() && !stopped.purchasable());
+        assert_eq!(stopped.operator_stopped_ms, stopped.canonical_ms);
+        assert!(stopped.with_current(|_| Ok(())).is_err());
+        fixture.node.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn standalone_circle_offer_has_the_same_notice_boundary_without_a_successor_plan() {
+    let mut fixture = Box::pin(Fixture::with_application(None, Application::Circle)).await;
+    let reader = fixture.payments();
+    fixture
+        .call(
+            11,
+            "create_rate_change",
+            json!([0, fixture.tariff.hash_hex().unwrap()]),
+            0,
+        )
+        .await;
+    fixture.call(11, "append_class", json!([1, 10]), 0).await;
+    fixture.call(11, "append_class", json!([1, 100]), 0).await;
+    fixture.call(11, "seal_offer", json!([1]), 0).await;
+    let current = reader.offer(0).await.unwrap();
+    let pending = reader.offer(1).await.unwrap();
+    assert!(current.purchasable() && pending.bonded() && !pending.purchasable());
+    assert_eq!(current.offer_end_ms, current.canonical_ms + 86_400_000);
+    assert_eq!(pending.offer_start_ms, current.offer_end_ms);
+    assert!(pending.with_current(|_| Ok(())).is_err());
+    let activation = current.offer_end_ms;
+    #[allow(clippy::cast_precision_loss)] // Fixture integer milliseconds fit f64.
+    let seconds = activation as f64 / 1000.;
+    fixture.publish_at(vec![], seconds).await;
+    assert!(!current.purchasable() && !pending.purchasable());
+    let retired = reader.offer(0).await.unwrap();
+    let active = reader.offer(1).await.unwrap();
+    assert!(retired.bonded() && !retired.purchasable());
+    assert!(active.purchasable());
+    assert_eq!(active.canonical_ms, activation);
+    assert!(reader.plan(1).await.is_err());
+    fixture.node.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn standalone_offer_cannot_reuse_a_retained_tariff_after_public_asset_expiry() {
+    let mut fixture = Box::pin(Fixture::new(Some(13))).await;
+    let reader = fixture.payments();
+    assert!(reader.offer(0).await.unwrap().purchasable());
+    fixture.publish(vec![]).await;
+    assert_eq!(
+        reader.offer(0).await.unwrap_err().to_string(),
+        "Circle asset is not published"
+    );
+    // Retention supports already bought public receipt recovery, not quotes.
+    assert!(reader.claim_plan(0).await.is_ok());
+    fixture.node.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -745,8 +920,8 @@ async fn public_payment_grant_revokes_new_purchases_on_unstake_and_releases_unsp
 #[tokio::test]
 async fn public_payment_grant_checks_canonical_circle_asset_expiry() {
     // Public Circle reads evaluate visibility at the next epoch. The offer
-    // asset is visible at captured epoch10 and expires at policy epoch12.
-    let mut fixture = Box::pin(Fixture::new(Some(12))).await;
+    // asset is visible at captured epoch11 and expires at policy epoch13.
+    let mut fixture = Box::pin(Fixture::new(Some(13))).await;
     let reader = fixture.payments();
     let active = reader.plan(0).await.unwrap();
     assert!(active.admissible());
@@ -981,7 +1156,7 @@ async fn circle_prepaid_authority_uses_real_qc_storage_clock_and_refuses_program
             b"domain"
         ])
         .is_none());
-    assert_eq!(view.head().cursor.epoch.0, 12);
+    assert_eq!(view.head().cursor.epoch.0, 13);
     fixture
         .node
         .suspend("Circle fixture lost canonical availability");

@@ -1,0 +1,56 @@
+{
+  "observed_at_utc": "2026-10-21T00:55:03.683346+00:00",
+  "status": "host qualified; corrected Linux private observer image building",
+  "consensus_changes": false,
+  "mechanism": "Require the existing explicit native observer-relay opt-in before private payer startup. Normal observers stay read-only; voting policy and consensus checks are unchanged. Only fixture C enables native submissions.",
+  "host": [
+    {
+      "check": "observer-relay-strict",
+      "exit_code": 0,
+      "seconds": 32.38
+    },
+    {
+      "check": "observer-relay-default-strict",
+      "exit_code": 0,
+      "seconds": 20.69
+    },
+    {
+      "check": "observer-relay-tests",
+      "exit_code": 0,
+      "seconds": 96.2
+    }
+  ],
+  "prior_funded_profiles": {
+    "observed_at_utc": "2026-10-21T00:49:46.635731+00:00",
+    "cases": [
+      {
+        "case": "matrix-hop0-v11",
+        "canonical_pool_exchanges": 0,
+        "native_signed_attempts": 1,
+        "cleanup_verified": true,
+        "stop_reason": "Diagnosed observer relay opt-in absent; interrupted coordinators through finally cleanup"
+      },
+      {
+        "case": "matrix-hop1-v11",
+        "canonical_pool_exchanges": 0,
+        "native_signed_attempts": 1,
+        "cleanup_verified": true,
+        "stop_reason": "Diagnosed observer relay opt-in absent; interrupted coordinators through finally cleanup"
+      }
+    ],
+    "client_sampled_memory_gib": [
+      1.403,
+      1.406
+    ],
+    "consensus_changed": false
+  },
+  "linux_context": "out/private-funded-multihop-20261020/linux-v12/context",
+  "linux_qualified": false,
+  "public_alpha_qualified": false,
+  "full_goal_complete": false,
+  "source_sha256": {
+    "crates/octra-node/src/launch.rs": "66252f28398d4f87bc9e077e8f54226f7185e83c46e9850f216331b01178c53b",
+    "docker/native-vpn/shielded_run.py": "367696450340911b9254f160c3ece6ce3609b0190006a84f10112be2c89af73d"
+  },
+  "evidence": "out/private-funded-multihop-20261020"
+}

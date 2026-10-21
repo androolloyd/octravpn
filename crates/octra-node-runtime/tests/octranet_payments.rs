@@ -8,6 +8,11 @@ use octra_node_protocol::{
     transaction::{self, OpType},
 };
 use octra_node_runtime::{epoch_execution::Effect, program::store};
+use octravpn_core::{
+    parse_native_address,
+    payments::{Deployment, PlanBinding, ServiceReceipt, SignedServiceReceipt, Usage},
+    KeyPair,
+};
 use serde_json::{json, Value};
 #[path = "common/payments_host.rs"]
 #[allow(dead_code)]
@@ -52,6 +57,218 @@ fn local_compiler_artifact_matches_legacy_factory_execution() {
 }
 
 #[test]
+fn only_two_operator_signed_statements_for_one_slot_can_slash_the_bond() {
+    let mut c = Chain::new();
+    c.funded_plan();
+    let before = c.locked();
+    let payer_before = c
+        .ledger
+        .account(address(12).as_bytes())
+        .unwrap()
+        .balance
+        .clone();
+    let message_a = c.view("get_service_message", json!([0, 0, 7, 100]));
+    let message_b = c.view("get_service_message", json!([0, 0, 7, 101]));
+    let message_a = message_a.as_str().unwrap();
+    let message_b = message_b.as_str().unwrap();
+    assert!(message_a.contains(&format!(
+        "|{}|1|0|{}|1|0|{MANIFEST}|0|7|100",
+        address(11),
+        address(12)
+    )));
+    let first = sign(11, message_a);
+    let second = sign(11, message_b);
+    c.denied(
+        13,
+        "slash_double_service_receipt",
+        json!([0, 0, 7, 100, first, 100, second]),
+        0,
+        "receipts do not conflict",
+    );
+    c.denied(
+        13,
+        "slash_double_service_receipt",
+        json!([0, 0, 7, 100, first, 101, sign(21, message_b)]),
+        0,
+        "second operator signature invalid",
+    );
+    c.denied(
+        13,
+        "slash_double_service_receipt",
+        json!([0, 1, 7, 100, first, 101, second]),
+        0,
+        "first operator signature invalid",
+    );
+    c.ok(
+        13,
+        "slash_double_service_receipt",
+        json!([0, 0, 7, 100, first, 101, second]),
+        0,
+    );
+    assert_eq!(c.number("get_operator_stake", json!([address(11)])), 0);
+    assert_eq!(c.number("get_operator_slashed", json!([address(11), 1])), 1);
+    assert_eq!(c.number("get_slash_award", json!([address(11), 1])), STAKE);
+    assert_eq!(
+        c.number("get_slash_award_unlock_ms", json!([address(11), 1])),
+        (c.now + WEEK) as u64
+    );
+    assert_eq!(c.locked(), before);
+    assert_eq!(
+        c.ledger.account(address(12).as_bytes()).unwrap().balance,
+        payer_before
+    );
+    assert_eq!(c.view("can_forward", json!([0])), false);
+    c.ok(12, "release_stopped_plan", json!([0]), 0);
+    c.denied(
+        13,
+        "withdraw_slash_award",
+        json!([address(11), 1]),
+        0,
+        "not slash beneficiary",
+    );
+    c.denied(
+        12,
+        "withdraw_slash_award",
+        json!([address(11), 0]),
+        0,
+        "invalid slash generation",
+    );
+    c.denied(
+        12,
+        "withdraw_slash_award",
+        json!([address(11), 1]),
+        0,
+        "slash award locked",
+    );
+    c.denied(
+        13,
+        "slash_double_service_receipt",
+        json!([0, 0, 7, 100, first, 101, second]),
+        0,
+        "operator bond unavailable",
+    );
+    c.now += WEEK;
+    let payer_before_award = c
+        .ledger
+        .account(address(12).as_bytes())
+        .unwrap()
+        .balance
+        .clone();
+    c.ok(12, "withdraw_slash_award", json!([address(11), 1]), 0);
+    assert_eq!(c.locked(), before - STAKE);
+    assert_eq!(
+        c.ledger.account(address(12).as_bytes()).unwrap().balance,
+        payer_before_award - FEE + STAKE
+    );
+    c.denied(
+        12,
+        "withdraw_slash_award",
+        json!([address(11), 1]),
+        0,
+        "slash award unavailable",
+    );
+    c.ok(11, "bond_operator", json!([]), STAKE);
+    c.denied(
+        13,
+        "slash_double_service_receipt",
+        json!([0, 0, 7, 100, first, 101, second]),
+        0,
+        "operator generation closed",
+    );
+    c.denied(
+        11,
+        "create_offer",
+        json!([MANIFEST]),
+        0,
+        "operator receipt key missing",
+    );
+    c.register_operator_key(11, 11, 2);
+    c.ok(11, "create_offer", json!([MANIFEST]), 0);
+}
+
+#[test]
+fn rust_service_evidence_slashes_in_the_compiled_aml() {
+    let mut c = Chain::new();
+    c.funded_plan();
+    let binding = PlanBinding {
+        deployment: Deployment {
+            domain: DOMAIN.into(),
+            program: parse_native_address(&c.program).unwrap(),
+        },
+        payer: parse_native_address(&address(12)).unwrap(),
+        generation: 1,
+        plan: 0,
+        offer: 0,
+        manifest_hash: MANIFEST.into(),
+    };
+    let operator_key = KeyPair::from_secret_bytes(&[11; 32]);
+    let operator = parse_native_address(&address(11)).unwrap();
+    let sign_receipt = |bytes| {
+        SignedServiceReceipt::sign(
+            ServiceReceipt {
+                usage: Usage::from_binding(binding.clone(), 0, 7, bytes).unwrap(),
+                operator: operator.clone(),
+                operator_generation: 1,
+            },
+            &operator_key,
+        )
+        .unwrap()
+    };
+    let first = sign_receipt(100);
+    let second = sign_receipt(101);
+    assert_eq!(
+        first.receipt.signing_message().unwrap(),
+        c.view("get_service_message", json!([0, 0, 7, 100]))
+    );
+    let params = SignedServiceReceipt::slash_params(&first, &second).unwrap();
+    c.ok(13, "slash_double_service_receipt", params, 0);
+    assert_eq!(c.number("get_operator_stake", json!([address(11)])), 0);
+    assert_eq!(c.number("get_slash_award", json!([address(11), 1])), STAKE);
+    assert_eq!(c.view("can_forward", json!([0])), false);
+}
+
+#[test]
+fn slash_during_unstake_keeps_the_original_seven_day_deadline() {
+    let mut c = Chain::new();
+    c.funded_plan();
+    c.now += 1000;
+    c.ok(11, "request_operator_unstake", json!([]), 0);
+    let original = c.number("get_operator_unlock_ms", json!([address(11)]));
+    c.now += DAY;
+    let a = c.view("get_service_message", json!([0, 0, 4, 100]));
+    let b = c.view("get_service_message", json!([0, 0, 4, 101]));
+    c.ok(
+        13,
+        "slash_double_service_receipt",
+        json!([
+            0,
+            0,
+            4,
+            100,
+            sign(11, a.as_str().unwrap()),
+            101,
+            sign(11, b.as_str().unwrap())
+        ]),
+        0,
+    );
+    assert_eq!(
+        c.number("get_slash_award_unlock_ms", json!([address(11), 1])),
+        original
+    );
+    c.now = i64::try_from(original).unwrap() - 1;
+    c.denied(
+        12,
+        "withdraw_slash_award",
+        json!([address(11), 1]),
+        0,
+        "slash award locked",
+    );
+    c.now += 1;
+    c.ok(12, "withdraw_slash_award", json!([address(11), 1]), 0);
+    assert_eq!(c.number("get_slash_award", json!([address(11), 1])), 0);
+}
+
+#[test]
 fn prepaid_purchase_settles_before_delivery_and_rejects_old_usage_authority() {
     let mut c = Chain::new();
     c.funded_plan();
@@ -91,6 +308,23 @@ fn prepaid_purchase_settles_before_delivery_and_rejects_old_usage_authority() {
         0,
         "plan budget exhausted",
     );
+    let locked = c.locked();
+    let stake = c.number("get_operator_stake", json!([address(11)]));
+    let operator_balance = c
+        .ledger
+        .account(address(11).as_bytes())
+        .unwrap()
+        .balance
+        .clone();
+    c.ok(11, "withdraw_earnings", json!([1000]), 0);
+    assert_eq!(c.locked(), locked - 1000);
+    assert_eq!(
+        c.ledger.account(address(11).as_bytes()).unwrap().balance,
+        operator_balance + BigInt::from(1000) - BigInt::from(FEE)
+    );
+    assert_eq!(c.number("get_earnings", json!([address(11)])), 0);
+    assert_eq!(c.number("get_operator_stake", json!([address(11)])), stake);
+    assert_eq!(c.view("can_forward", json!([0])), true);
 }
 
 #[test]
@@ -362,6 +596,7 @@ fn exit_earnings_fund_own_traffic_and_cross_operator_purchases_without_custody_c
     assert_eq!(c.locked(), locked);
 
     c.ok(13, "bond_operator", json!([]), STAKE);
+    c.register_operator_key(13, 13, 1);
     c.ok(13, "create_offer", json!([MANIFEST]), 0);
     c.ok(13, "append_class", json!([1, 10]), 0);
     c.ok(13, "seal_offer", json!([1]), 0);
@@ -947,6 +1182,7 @@ fn rebond_does_not_revive_an_old_offer_plan_or_claim_window() {
     c.ok(12, "release_stopped_plan", json!([0]), 0);
     c.ok(12, "release_stopped_plan", json!([0]), 0);
     assert_eq!(c.number("get_reserved", json!([address(12)])), 0);
+    c.register_operator_key(11, 31, 2);
     c.ok(11, "create_offer", json!([MANIFEST]), 0);
     c.ok(11, "append_class", json!([1, 0]), 0);
     c.ok(11, "seal_offer", json!([1]), 0);

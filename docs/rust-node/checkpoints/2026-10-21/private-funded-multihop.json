@@ -1,0 +1,97 @@
+{
+  "observed_at_utc": "2026-10-21T08:03:56.945130+00:00",
+  "status": "isolated funded two-hop transport, recovery and full Linux suite qualified; public canary pending",
+  "scope": "Two independently funded private operator hops and a native payer in isolated Linux kernels; actual native proof transactions, nested traffic, original-journal recovery and independent accounting",
+  "funded_vpn_end_to_end": true,
+  "full_node_end_to_end": false,
+  "public_network_qualified": false,
+  "production_setup_qualified": false,
+  "image": "sha256:b0696eab1afbdde18d6a101b013f18eb76bb0fd429195fd9ee0d4cf2d20a98b2",
+  "native_binary_sha256": "5f75e0b74fab5b5520c54b4e3a521411757a12b16930a42b49cb8d1bbd86cd4d",
+  "test_binary_sha256": "0ccc4bb3a6c63cda41dc5f641a07a3225b02281c021712155e071aa2cb1b3d19",
+  "frozen_manifest_sha256": "78c1c51610eba9bb6415a1ef229a08e46fcff207aa50b432e11d1b49687eee15",
+  "cases": [
+    {
+      "exhaustion_hop": 0,
+      "qualified": true,
+      "transport_qualified": true,
+      "independent_accounting_qualified": true,
+      "cleanup_verified": true,
+      "canonical_exchange_count": 5,
+      "report_sha256": "a2a88bbcea199e1cea251acb5b128538cf6f2f59a6faa09c60a7247141c677b6",
+      "steps": [
+        "actual native factory/pool deployed with independently generated isolated proving material",
+        "one deposit and four real private class payments precede final route activation",
+        "real nested TCP/UDP/ICMP and near-MTU return traffic; unprivileged physical negatives",
+        "all actual providers and local payer node recover original custody and consent with no duplicate spending",
+        "provider outage retains physical blockers; explicit resume preserves custody without replacement spending",
+        "finite shielded allowances stop without topup or physical fallback"
+      ],
+      "payer_available_ou": 57625,
+      "operator_unspent_income_ou": [
+        32250,
+        10125
+      ]
+    },
+    {
+      "exhaustion_hop": 1,
+      "qualified": true,
+      "transport_qualified": true,
+      "independent_accounting_qualified": true,
+      "cleanup_verified": true,
+      "canonical_exchange_count": 5,
+      "report_sha256": "8420fca4fac2814703ca26bc04e50294ae39fb6f56b1dc1a5c164f8cc0db1a3e",
+      "steps": [
+        "actual native factory/pool deployed with independently generated isolated proving material",
+        "one deposit and four real private class payments precede final route activation",
+        "real nested TCP/UDP/ICMP and near-MTU return traffic; unprivileged physical negatives",
+        "all actual providers and local payer node recover original custody and consent with no duplicate spending",
+        "provider outage retains physical blockers; explicit resume preserves custody without replacement spending",
+        "finite shielded allowances stop without topup or physical fallback"
+      ],
+      "payer_available_ou": 65250,
+      "operator_unspent_income_ou": [
+        34000,
+        750
+      ]
+    }
+  ],
+  "full_linux_suite": {
+    "status": "passed",
+    "initial_6_gib_oom_kills": 1,
+    "initial_log_sha256": "826a18f673782a75099f5b679676d550b621493f68ddce311f0588b1b80775a4",
+    "unchanged_sources_and_binary": true,
+    "passed": 257,
+    "failed": 0,
+    "ignored": 3,
+    "seconds": 787.01,
+    "memory_limit_bytes": 8589934592,
+    "memory_peak_bytes": 7110733824,
+    "oom_kills": 0,
+    "log_sha256": "2e8c9470c1333d57f501599210a31ec4f3e8beabe6f85a1d3f80026cc048c948",
+    "frozen_sources_unchanged": true
+  },
+  "strict_private_all_targets": "passed",
+  "strict_default_all_targets": "passed",
+  "fixes": [
+    "Poll guarded route admission concurrently with its original journal work",
+    "Retry temporary canonical publication refusal with the same signed requests and original freshness deadline",
+    "Reopen the original pool index atomically across temporary publication revocation; quarantine and invalid history remain fatal",
+    "Use bounded authenticated selected-tree projections and indexed SQLite object reads",
+    "Check both provider counters and authenticated encrypted client handoff, uncertainty and pending counters at finite exhaustion"
+  ],
+  "limitations": [
+    "Single-party isolated test setup; no production ceremony qualification",
+    "No three-hop or public multi-operator qualification",
+    "No cryptographic proof of arbitrary Internet non-delivery",
+    "Public ingress and funded public canary remain launch gates"
+  ],
+  "evidence": "out/private-funded-multihop-20261020",
+  "public_operator_candidate": {
+    "container_image": "sha256:5e7b3b67fdcac6c90ae8c5e325c5c25f8af4037ebc401987f12f939fdf41e1b9",
+    "nonvoting": true,
+    "retained_state_preserved": true,
+    "private_paid_ingress_active": false,
+    "canonical_readiness_pending": true
+  }
+}

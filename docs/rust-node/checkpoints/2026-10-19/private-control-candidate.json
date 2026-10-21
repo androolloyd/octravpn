@@ -1,0 +1,172 @@
+{
+  "schema": "octra_private_control_candidate_v1",
+  "observed_at_utc": "2026-10-19T14:35:07.096286+00:00",
+  "full_rust_node_complete": false,
+  "qualified": false,
+  "adopted_pin": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "source_equivalent_requested_pin": "d3e834919bd586e81f947d0dae91becc6c43c756",
+  "upstream_source_check": "1158 exact runtime files plus reproduced Circle host patch passed",
+  "linux_image": "octra-private-route-20261019:v6-admission",
+  "linux_image_id": "sha256:c5c7e5ccd25a403664fa3804c7b99085f9cfa0c040b9b7bb3a64e0ca35fb0507",
+  "source_sha256": "74429b2044a60ca0bf92340c998a14373ef4849f7c17994784306eb589804af9",
+  "binary_hashes_verified": true,
+  "construction": "Source-bound derivation of completed native base: client TLS validation rebuilt, node diagnostics and status-retry fix rebuilt, later harness-only tracing update; all six executable hashes independently verified. Full derivation retained in image manifest.",
+  "shielded_payments": false,
+  "circle_private_control_gate": {
+    "qualified": true,
+    "scope": "two-hop exit-side exhaustion and withdrawal; encrypted control with public Circle prepaid settlement",
+    "passed_steps": [
+      "foreign priority1 policy rule refuses before any canonical purchase",
+      "wrong TLS hostname refuses before any canonical purchase",
+      "every independently signed canonical purchase precedes final route activation",
+      "downstream TLS sees only entry carrier, pinned invalid hostnames bootstrap without DNS",
+      "conservative finalMTU1075 carries near-boundary traffic bothways, TCPMSS<=1035, oversized profile packets refused",
+      "both actual native operators and client restart with original independent journals and purchases",
+      "deleted carrierTUN cannot reveal a deliberately installed physical downstream route; exact owned cleanup then explicit resume",
+      "selected operator independently exhausts finite capacity without buying more",
+      "selected hop canonical withdrawal blocks live nested traffic and four exact ExEx sinks agree"
+    ],
+    "cleanup_verified": true,
+    "evidence": "out/private-route-20261019/v6/circle-private-hop1",
+    "report_sha256": "e1470866b8eee8fd96122894715d24083b9b3772498d393ea6157539911b20ce",
+    "claims": {
+      "claims": 10,
+      "per_operator_earnings": [
+        20000,
+        1500
+      ],
+      "payer_withdrawals": [
+        1,
+        2
+      ]
+    },
+    "forbidden_physical_and_dns_packets": [
+      0,
+      0,
+      0
+    ]
+  },
+  "host_gate": {
+    "qualified": true,
+    "scope": "Unchanged-source combined local suite before additive lease/recovery patch",
+    "passed": 1200,
+    "failed": 0,
+    "ignored": 11,
+    "sources_unchanged": true,
+    "evidence": "out/private-route-20261019/v6/core-host.json",
+    "post_baseline_node_patch": {
+      "node_tests_passed": 233,
+      "strict_clippy": "passed",
+      "transition": "out/private-service-lease-20261019/source-transition.json"
+    },
+    "full_node_or_public_network_qualified": false
+  },
+  "next": [
+    "Implement authenticated native-private funding authority and claim-to-meter integration",
+    "Implement durable output single-use and one-time claimant wallet recovery",
+    "Qualify real private transfers, claims, restart and routed paid traffic together; keep shielded mode disabled meanwhile"
+  ],
+  "limits": "Public paid serving, public octra.to DNS/TLS, shielded settlement and Mainnet remain unqualified.",
+  "status_retry_fix": {
+    "regression_before_failed": true,
+    "node_tests_after": 581,
+    "strict_clippy": "passed",
+    "kernel_fixed_image": "Both strict Circle/private-control exhaustion directions passed all nine steps with verified owned cleanup",
+    "shielded_settlement": false,
+    "linux_checks": {
+      "admission": 20,
+      "meter": 20,
+      "tunnel": 42
+    }
+  },
+  "prior_diagnostic_gate": {
+    "evidence": "out/private-route-20261019/v4/circle-private-hop1",
+    "qualified": false,
+    "failure": "Downstream connect returned HTTP403 before all-hop admission; payment rejection diagnostics were not enabled",
+    "cleanup_verified": true
+  },
+  "original_packet_loss": {
+    "status": "demonstrated status-poll interruption fixed; fresh strict near-MTU gate passed",
+    "causal_limit": "The precise branch rejecting the original v2 packet was not recorded; the deterministic regression proves a real interruption mechanism, not retrospective attribution of that packet."
+  },
+  "private_control_transport_qualified": true,
+  "circle_private_control_gates": {
+    "0": {
+      "qualified": true,
+      "steps": [
+        "foreign priority1 policy rule refuses before any canonical purchase",
+        "wrong TLS hostname refuses before any canonical purchase",
+        "every independently signed canonical purchase precedes final route activation",
+        "downstream TLS sees only entry carrier, pinned invalid hostnames bootstrap without DNS",
+        "conservative finalMTU1075 carries near-boundary traffic bothways, TCPMSS<=1035, oversized profile packets refused",
+        "both actual native operators and client restart with original independent journals and purchases",
+        "deleted carrierTUN cannot reveal a deliberately installed physical downstream route; exact owned cleanup then explicit resume",
+        "selected operator independently exhausts finite capacity without buying more",
+        "selected hop canonical withdrawal blocks live nested traffic and four exact ExEx sinks agree"
+      ],
+      "cleanup_verified": true,
+      "evidence": "out/private-route-20261019/v6/circle-private-hop0",
+      "report_sha256": "7af4bd9c72204ccbda7795083357d6a54c0484f620ad211c2e8d07f26eff8a17",
+      "claims": {
+        "claims": 10,
+        "per_operator_earnings": [
+          16500,
+          20250
+        ],
+        "payer_withdrawals": [
+          2,
+          1
+        ]
+      },
+      "forbidden_physical_and_dns_packets": [
+        0,
+        0,
+        0
+      ]
+    },
+    "1": {
+      "qualified": true,
+      "steps": [
+        "foreign priority1 policy rule refuses before any canonical purchase",
+        "wrong TLS hostname refuses before any canonical purchase",
+        "every independently signed canonical purchase precedes final route activation",
+        "downstream TLS sees only entry carrier, pinned invalid hostnames bootstrap without DNS",
+        "conservative finalMTU1075 carries near-boundary traffic bothways, TCPMSS<=1035, oversized profile packets refused",
+        "both actual native operators and client restart with original independent journals and purchases",
+        "deleted carrierTUN cannot reveal a deliberately installed physical downstream route; exact owned cleanup then explicit resume",
+        "selected operator independently exhausts finite capacity without buying more",
+        "selected hop canonical withdrawal blocks live nested traffic and four exact ExEx sinks agree"
+      ],
+      "cleanup_verified": true,
+      "evidence": "out/private-route-20261019/v6/circle-private-hop1",
+      "report_sha256": "e1470866b8eee8fd96122894715d24083b9b3772498d393ea6157539911b20ce",
+      "claims": {
+        "claims": 10,
+        "per_operator_earnings": [
+          20000,
+          1500
+        ],
+        "payer_withdrawals": [
+          1,
+          2
+        ]
+      },
+      "forbidden_physical_and_dns_packets": [
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "transport_report": {
+    "path": "out/private-route-20261019/v6/private-control-transport.json",
+    "sha256": "3d27186fa09286c0bc2a9b07db61f273ea25370aaecdb4c700e0255ef91bdfab"
+  },
+  "private_payment_components": "docs/rust-node/checkpoints/2026-10-19/private-payment-components.json",
+  "private_funding_authority": {
+    "report": "docs/rust-node/checkpoints/2026-10-19/private-funding-authority.json",
+    "node_tests": 238,
+    "pool_tests": 25,
+    "release_enabled": false
+  }
+}

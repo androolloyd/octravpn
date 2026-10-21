@@ -2,6 +2,7 @@
 import asyncio
 import json
 import signal
+import ssl
 import sys
 
 
@@ -40,8 +41,19 @@ async def serve(mapping):
                 await asyncio.gather(writer.wait_closed(), *( [other.wait_closed()] if other else []), return_exceptions=True)
     for row in mapping:
         target = tuple(row['target'])
-        async def accept(reader, writer, target=target): await bridge(reader, writer, target)
-        servers.append(await asyncio.start_server(accept, *row['listen'], limit=65_536))
+        context = None
+        if 'tls' in row:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            context.load_cert_chain(row['tls']['certificate'], row['tls']['private_key'])
+        async def accept(reader, writer, target=target, row=row):
+            if 'tls' in row:
+                print(json.dumps({'tls_peer': writer.get_extra_info('peername')[0], 'listen': row['listen']}), flush=True)
+            elif row.get('observe_peer'):
+                print(json.dumps({'tcp_peer': writer.get_extra_info('peername')[0], 'listen': row['listen']}), flush=True)
+            await bridge(reader, writer, target)
+        servers.append(await asyncio.start_server(accept, *row['listen'], limit=65_536, ssl=context,
+            **({'ssl_handshake_timeout': 10} if context else {})))
     print(json.dumps({'ready': True, 'links': len(servers)}), flush=True)
     stopped = asyncio.Event()
     loop = asyncio.get_running_loop()

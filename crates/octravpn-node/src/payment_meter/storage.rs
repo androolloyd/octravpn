@@ -29,6 +29,10 @@ pub(super) struct Record {
     pub purchased: Vec<u64>,
     pub uncertain: Vec<u64>,
     pub pending: Vec<u64>,
+    #[serde(default, skip_serializing_if = "super::is_zero")]
+    pub service_sequence: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub service_totals: Vec<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connect: Option<octravpn_core::payments::SignedConnect>,
     pub transport: crate::stock::Transport,
@@ -102,6 +106,8 @@ fn decode(raw: &[u8]) -> Result<Record> {
                 purchased,
                 uncertain,
                 pending,
+                service_sequence: 0,
+                service_totals: Vec::new(),
                 connect,
                 authorizations,
                 transport: crate::stock::Transport::Framed,
@@ -123,6 +129,7 @@ struct Envelope {
 pub(super) struct Disk {
     directory: File,
     _lease: File,
+    protection: Option<octravpn_core::sealed::Protection>,
     #[cfg(test)]
     fail_next: std::sync::atomic::AtomicBool,
 }
@@ -130,13 +137,24 @@ pub(super) struct Disk {
 pub(super) struct Disk;
 impl Disk {
     pub(super) fn open(path: &Path) -> Result<(Self, Option<Record>)> {
-        Self::open_mode(path, true)
+        Self::open_mode(path, true, None)
     }
     pub(super) fn resume(path: &Path) -> Result<(Self, Option<Record>)> {
-        Self::open_mode(path, false)
+        Self::open_mode(path, false, None)
+    }
+    pub(super) fn private(
+        path: &Path,
+        existing_only: bool,
+        protection: octravpn_core::sealed::Protection,
+    ) -> Result<(Self, Option<Record>)> {
+        Self::open_mode(path, !existing_only, Some(protection))
     }
     #[cfg(not(unix))]
-    fn open_mode(_: &Path, _: bool) -> Result<(Self, Option<Record>)> {
+    fn open_mode(
+        _: &Path,
+        _: bool,
+        _: Option<octravpn_core::sealed::Protection>,
+    ) -> Result<(Self, Option<Record>)> {
         anyhow::bail!("durable payment metering requires Unix writer locking")
     }
     #[cfg(unix)]
@@ -144,7 +162,11 @@ impl Disk {
         clippy::verbose_bit_mask,
         reason = "Explicit POSIX private-file permission masks."
     )]
-    fn open_mode(path: &Path, create: bool) -> Result<(Self, Option<Record>)> {
+    fn open_mode(
+        path: &Path,
+        create: bool,
+        protection: Option<octravpn_core::sealed::Protection>,
+    ) -> Result<(Self, Option<Record>)> {
         use rustix::fs::{flock, open, openat, unlinkat, AtFlags, FlockOperation, Mode, OFlags};
         use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
         match std::fs::symlink_metadata(path) {
@@ -198,6 +220,12 @@ impl Disk {
         );
         flock(&lease, FlockOperation::NonBlockingLockExclusive)
             .context("payment meter already in use")?;
+        let max_bytes = MAX_BYTES
+            + if protection.is_some() {
+                octravpn_core::sealed::OVERHEAD as u64
+            } else {
+                0
+            };
         let saved = match openat(
             &directory,
             "meter.json",
@@ -218,18 +246,27 @@ impl Disk {
                         && metadata.permissions().mode() & 0o077 == 0
                         && metadata.nlink() == 1
                         && metadata.uid() == directory.metadata()?.uid()
-                        && metadata.len() <= MAX_BYTES,
+                        && metadata.len() <= max_bytes,
                     "meter journal must be a bounded private regular file"
                 );
                 let mut raw = Vec::new();
                 Read::by_ref(&mut file)
-                    .take(MAX_BYTES + 1)
+                    .take(max_bytes + 1)
                     .read_to_end(&mut raw)?;
                 ensure!(
-                    u64::try_from(raw.len())? <= MAX_BYTES,
+                    u64::try_from(raw.len())? <= max_bytes,
                     "meter journal exceeds byte bound"
                 );
-                Some(decode(&raw)?)
+                let plaintext = if let Some(protection) = &protection {
+                    protection.open(&raw)?
+                } else {
+                    zeroize::Zeroizing::new(raw)
+                };
+                ensure!(
+                    plaintext.len() <= MAX_BYTES as usize,
+                    "meter plaintext exceeds bound"
+                );
+                Some(decode(&plaintext)?)
             }
             Err(rustix::io::Errno::NOENT) => {
                 ensure!(
@@ -244,6 +281,7 @@ impl Disk {
             Self {
                 directory,
                 _lease: lease,
+                protection,
                 #[cfg(test)]
                 fail_next: std::sync::atomic::AtomicBool::new(false),
             },
@@ -263,18 +301,23 @@ impl Disk {
                 .swap(false, std::sync::atomic::Ordering::AcqRel),
             "injected journal write failure"
         );
-        let sha256 = hex::encode(Sha256::digest(serde_json::to_vec(record)?));
-        let raw = serde_json::to_vec(&Envelope {
+        let plaintext = zeroize::Zeroizing::new(serde_json::to_vec(record)?);
+        let sha256 = hex::encode(Sha256::digest(&*plaintext));
+        let raw = zeroize::Zeroizing::new(serde_json::to_vec(&Envelope {
             version: VERSION,
             record: record.clone(),
             sha256,
-        })?;
+        })?);
         ensure!(
             u64::try_from(raw.len())? <= MAX_BYTES,
             "meter journal exceeds byte bound"
         );
         let mut temporary = Temporary::new(&self.directory)?;
-        temporary.file.write_all(&raw)?;
+        if let Some(protection) = &self.protection {
+            temporary.file.write_all(&protection.seal(&raw)?)?;
+        } else {
+            temporary.file.write_all(&raw)?;
+        }
         temporary.file.sync_all()?;
         temporary.replace()?;
         self.directory.sync_all()?;

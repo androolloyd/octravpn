@@ -1,0 +1,52 @@
+{
+  "seed": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "ed_public": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+  "address": "oct6ooAjytx2tERAi6rpXCqxMKCBr4z6Kw3UoRDbuuAUiGT",
+  "ephemeral_secret": "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40",
+  "view_secret": "3894eea49c580aef816935762be049559d6d1440dede12e6a125f1841fff8e6f",
+  "view_public": "4701d08488451f545a409fb58ae3e58581ca40ac3f7f114698cd71deac73ca01",
+  "shared": "55deb0e93cf01d5b656aeac641d71ff6f5a0277967d3fbb041976b05a506bda4",
+  "tag": "70cd7248d035d36a42e3b1bd2ff2769f",
+  "claim_secret": "debefa8aa870124bc61ef769499f29598225c5f9a1649e9ad83271b04eda6753",
+  "recipient": "oct1JBUrYbeTQazQ39LQn4ZjnPLHfDpLGXouqon1jZhJfYP",
+  "claim_public": "0331aed1e127277fca31aae3b1e031cf12875db5bdcc07a5276ca081c0de3e70",
+  "cases": [
+    {
+      "amount": "0",
+      "blinding": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0",
+      "encrypted": "ICEiIyQlJicoKSoreiJQDJhXksOuJFt+otQtwuLGjQkLTadAE/c5HN+oLtLekHRiJNBUdQ3mcGyEV23/l7uqC8mf5Ko=",
+      "native_round_trip": true
+    },
+    {
+      "amount": "1",
+      "blinding": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0",
+      "encrypted": "LC0uLzAxMjM0NTY3/ZNtk/B0Ik1YGVjl1ZDi/LtOZkTcSF5mfOz7h+iDgV0oBVEhVESdq1I93H29m0bSG7vuDw+PxDA=",
+      "native_round_trip": true
+    },
+    {
+      "amount": "72623859790382856",
+      "blinding": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0",
+      "encrypted": "ODk6Ozw9Pj9AQUJDvDRwZKNOgHWJSaxBhA0K/XO6O8SWMBzrQ5W//6VTrb0QfgFghyoylDP0F8lMDN0U31iOweE1lM4=",
+      "native_round_trip": true
+    },
+    {
+      "amount": "18446744073709551615",
+      "blinding": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0",
+      "encrypted": "REVGR0hJSktMTU5PeWRYQFxSYZSAKecc5scemWaE/PObU4CYeggtp9kKU9MY71F6R38BZETFXA1X06KVUwf6I5UgEDc=",
+      "native_round_trip": true
+    }
+  ],
+  "oracle": {
+    "upstream_commit": "549536d6fbe265a4aace02bc9b85b5313ebb4868",
+    "sources": {
+      "lib/stealth.hpp": "6ffd4e1494121ceef389478676437a14a360065b976babaaaec7937de8ee8935",
+      "crypto_utils.hpp": "f58bd4012c6cf4f7975fbe9d54ed20ef73a86ddeb3267800c737ec7136ed447a",
+      "lib/tweetnacl.c": "6aa61f5a236db5ebcbd72463e92c777765a3833d1a9aa1a7a6f33f7d398e7121",
+      "lib/tweetnacl.h": "30062079b79d25369a40c3c589b2e24adf2e8cc72595741ba51982626d453738"
+    },
+    "shim_sha256": "8f422f39c86a42005d3e322ff0800aef0b7739f2ec428a2e75303aa793bb5b3f",
+    "randomness": "Deterministic test-only linked randombytes callback; unchanged native AES/encoding/view/claim implementations",
+    "compiler": "Apple clang version 17.0.0 (clang-1700.6.4.2)\nTarget: arm64-apple-darwin25.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin",
+    "openssl": "3.6.3"
+  }
+}

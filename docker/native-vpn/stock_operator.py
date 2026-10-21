@@ -107,16 +107,16 @@ class Fixture:
         assert isinstance(result, dict) and 'result' in result
         return result['result']
 
-    def circle_application(self):
+    def circle_application(self, custody_cap=200_000_000):
         old = json.loads(self.context['plan_path'].read_text())
         chain = g.JOURNAL['genesis']['chain']
         chain_id = chain['chain_id'].encode()
         domain = hashlib.sha256(b'Octranet Circle payments network v1\0' + len(chain_id).to_bytes(8, 'big')
                                 + chain_id + bytes(chain['genesis_root'])).hexdigest()
         build = json.loads(g.command(['octra-node', 'compile-circle-payments', '--domain', domain,
-                                      '--custody-cap', 200_000_000, '--minimum-stake', p.STAKE]))
+                                      '--custody-cap', custody_cap, '--minimum-stake', p.STAKE]))
         assert build['application'] == 'circle' and build['initialization'] == 'separate-finalized-circle-call'
-        assert build['terms'] == {'domain': domain, 'custody_cap': 200_000_000, 'minimum_stake': p.STAKE}
+        assert build['terms'] == {'domain': domain, 'custody_cap': custody_cap, 'minimum_stake': p.STAKE}
         atomic(g.EVIDENCE / 'circle-payments-build.json', build)
         code = base64.b64decode(build['bytecode'], validate=True)
         factory_code = base64.b64decode(build['factory_bytecode'], validate=True)
@@ -137,6 +137,16 @@ class Fixture:
         self.program = next(event['values'][0] for event in spawned['events'] if event['event'] == 'PaymentsCircleDeployed')
         self.send('initialize real spawned Circle payment app', self.context['faucet'], 'initialize', [])
         self.send('bond Circle operator stake', self.context['operator_key'], 'bond_operator', [], p.STAKE)
+        operator = self.context['operator']
+        operator_generation = int(self.view('get_operator_generation', [operator]))
+        assert operator_generation > 0
+        operator_public = g.command(['octra', 'cast', 'wallet', 'pubkey',
+                                     '--key', self.context['operator_key']])
+        operator_message = f'Octranet operator key v1|{domain}|{self.program}|{operator}|{operator_generation}'
+        operator_signature = g.command(['octra', 'cast', 'wallet', 'sign',
+                                        '--key', self.context['operator_key'], operator_message])
+        self.send('pin Circle operator service receipt key', self.context['operator_key'],
+                  'register_operator_receipt_key', [operator_public, operator_signature])
         payer = old['binding']['payer']
         message = f'Octranet register v1|{domain}|{self.program}|{payer}|1'
         signature = g.command(['octra', 'cast', 'wallet', 'sign', '--key', self.context['faucet'], message])
@@ -149,6 +159,7 @@ class Fixture:
         self.send('seal Circle tariff', self.context['operator_key'], 'seal_offer', [0])
         self.send('open actual funded Circle plan', self.context['faucet'], 'open_plan', [0, p.BUDGET])
         old['binding']['deployment'] = {'domain': domain, 'program': self.program}
+        old['operator_generation'] = operator_generation
         self.context['plan_path'].write_text(json.dumps(old))
         atomic(g.EVIDENCE / 'accepted-plan.json', old)
         self.context['application'] = {**self.context['application'], 'application': 'circle',

@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "observed_at_utc": "2026-10-20T07:27:23.269317+00:00",
+  "status": "ALL_HOP_CONSENT_AND_EMBEDDED_CLIENT_ROUTE_OWNERSHIP_HOST_QUALIFIED_COORDINATOR_PENDING",
+  "goal_complete": false,
+  "consensus_rule_changes": false,
+  "protocol_commission": 0,
+  "pushed": false,
+  "deployed": false,
+  "public_network_qualification": false,
+  "full_private_route_coordination_implemented": false,
+  "implemented": [
+    "Pre-channel endpoint consent validates public pins and TLS before native record writes",
+    "Encrypted complete route consent fixes order, full targets, tariffs, caps, lifetime, fee policy, receipt public keys, book identities and transport",
+    "Fresh purchase and route ownership commit atomically in each custody book",
+    "Ownership embedded in the purchase prevents missing marker records from downgrading jobs to standalone",
+    "Client phase and its purchase digest commit atomically; missing phase cannot enable standalone scheduling or client recreation",
+    "Exact existing intent required for resume; only never-started partial initialization can finish missing jobs",
+    "Completed initialization never recreates missing intent, jobs or ownership",
+    "Distinct books require distinct relayers; a shared book retains one relayer and fee policy"
+  ],
+  "evidence": {
+    "root": "out/private-route-consent-20261020",
+    "source_manifest": "out/private-route-consent-20261020/source-before.json",
+    "strict": "out/private-route-consent-20261020/clippy-anchored.log",
+    "client": "out/private-route-consent-20261020/client-tests.log",
+    "client_source_reuse": "out/private-route-consent-20261020/client-source-reuse.json",
+    "native": "out/private-route-consent-20261020/node-release-anchored.log",
+    "default_strict": "out/private-route-consent-20261020/normal-clippy-anchored.log",
+    "source_verification": "out/private-route-consent-20261020/source-verification-final.json",
+    "earlier_pre_client_anchor_native": "out/private-route-consent-20261020/node-release-final.log",
+    "interrupted_build": "out/private-route-consent-20261020/cancelled-before-receipt-pin.json"
+  },
+  "source_sha256": {
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner.rs": "ef9b89939d275cd99fa416ced76faaaec87654dd8603aa080c4e5d58f3dbac22",
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner/catalog.rs": "7358332d7a40c4be62edb6184f30953c312fb3dfa7ee2ea5bb10e20a2767a165",
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner/client.rs": "801f39f81d4a117b915413b0a3dd5d4a39f526f2e4204bfed1d493ad7e7aa050",
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner/control.rs": "3dc45ef1054975d690c609aabc6325ddd51dd797aa008a4f8332fa97bb34564c",
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner/route.rs": "e18edc121161951d68f438aa8143c0e678ae5fecc9683f9aa05dc7b471b30587",
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner/route/consent.rs": "9cf7869b8366751af63ba20f3e4cfd6ae2189b7b5d7299b83ea72782ab280c60",
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner/route/storage.rs": "eae4484424ad4591a06d28fc71dd2ce2458a966c6e9ba414ca712e705e49c2fe",
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner/route/tests.rs": "61154390c18dff4ab612dc225c21ac6a8c63846ddf14f02a08ad9d3d0ae24e6f",
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner/settlement.rs": "79500f4c2739d0bdbcd35b294f69ae434850b689806d87955a61f7e279119d11",
+    "crates/octra-node/src/vpn/payments/shielded/runner_tests.rs": "095e8778bde306852c8fc6ce862b4bec8808081f6327f028165503100c60d612",
+    "crates/octra-node/src/vpn/payments/shielded/runner_tests/service.rs": "3ad72ce0d2d1ffd7e2401fca9db1380145862a20c8937b487c21f7c5af203ef1",
+    "crates/octravpn-client/src/multihop/private.rs": "225c3d8bfa06761c93281ac2457987217f6f1276397847c17c9f4d5364e17fc9",
+    "crates/octravpn-client/src/private_control.rs": "ea98eb7151dac57b3b6cccd58e714a391ea925380b44ccbd370d58be9ec96364",
+    "crates/octravpn-client/src/private_control/endpoint.rs": "c08f97f9ed0fa8afbe09bd31a73c70c0f54733f1e05a129003415ea275a19ad1"
+  },
+  "host": {
+    "client_tests": 378,
+    "client_benchmark_checks": 4,
+    "strict_experimental_node_all_targets": true,
+    "strict_client_all_targets": true,
+    "native_release_status": "PASSED",
+    "native_release_tests": 69,
+    "native_test_seconds": 298.57,
+    "strict_default_node_all_targets": true,
+    "binary": "target/release/deps/octra_node-29d821b50c793905",
+    "binary_sha256": "2a2bc28e0788ffaaef7f05be8a6f68b3eea61f32b91d563295cdbe370ab04a46"
+  },
+  "kernel": {
+    "rerun": false,
+    "scope": "Offline consent, role ownership and wallet recovery stage. Previous single-hop kernel regression retains its original source/binary scope; this stage does not qualify a complete route."
+  },
+  "remaining": [
+    "Ordered private native funding and carrier admission using complete route ownership",
+    "Trusted local-node chain transport while ordinary applications stay blocked during activation",
+    "Multiple priced-class purchases for the same hop channel and receipt identity",
+    "Funded private multihop kernel traffic, exhaustion, carrier loss, income, restart and ExEx qualification",
+    "Broader native/public-chain parity, sustained public service and production cryptographic qualification"
+  ],
+  "scope": "Offline complete route consent, atomic role binding, real encrypted-book cold resume, exact-input refusal and missing-record scheduling guards inside the actual two-operator canonical private-payment fixture. This API initializes and checks consent; it does not fund or open the complete route.",
+  "validation_limits": [
+    "No new kernel, public-network or mainnet qualification; earlier kernel evidence retains its frozen source/binary scope.",
+    "Native execution used release; the debug canonical scenario limitation recorded by the preceding checkpoint is unchanged.",
+    "The initial native build was deliberately interrupted for the explicit receipt-key pin; the earlier completed native pass predates the final client role anchor and is retained separately."
+  ]
+}

@@ -11,10 +11,7 @@ use crate::{
 use anyhow::{ensure, Context, Result};
 use ed25519_dalek::SigningKey;
 use octra_browser::application::UnavailableHost;
-use octra_exex::{
-    native_history::NativeTransaction, sqlite::SqliteCheckpoints, CommittedEpoch, ExEx,
-    ExtensionStatus,
-};
+use octra_exex::{sqlite::SqliteCheckpoints, ExtensionStatus};
 use octra_node_protocol::{
     consensus::{
         engine::{Engine, TimeoutConfig},
@@ -68,6 +65,12 @@ pub(crate) struct Plan {
     pub compute: octra_node_protocol::resource_compute::provider::Config,
     pub vpn: Option<crate::vpn::Config>,
     pub payments: Option<crate::vpn::payments::ServiceConfig>,
+    #[cfg(feature = "private-payments-experimental")]
+    pub shielded: Option<crate::vpn::payments::shielded::startup::Config>,
+    #[cfg(feature = "private-payments-experimental")]
+    pub private_payer: Option<crate::vpn::payments::shielded::payer::startup::Config>,
+    #[cfg(feature = "private-payments-experimental")]
+    pub private_route: Option<crate::vpn::payments::shielded::payer::startup::route::Config>,
     pub voting: bool,
     pub state_sync: Option<crate::snapshot_export::Config>,
     pub minimum_peers: usize,
@@ -96,22 +99,6 @@ impl crate::vpn::Settlement for Unfunded {
         _: &octravpn_core::receipt::ReceiptContext,
     ) -> Result<octravpn_node::admission::RelayLifecycle> {
         anyhow::bail!("VPN settlement Circle is not configured")
-    }
-}
-struct Archive(PathBuf);
-impl ExEx<NativeTransaction> for Archive {
-    fn name(&self) -> &'static str {
-        "devnet-archive"
-    }
-    async fn on_epoch(&mut self, event: &CommittedEpoch<NativeTransaction>) -> Result<(), String> {
-        let path = self
-            .0
-            .join(format!("{:016x}.json", event.cursor.sequence.0));
-        let bytes = serde_json::to_vec(event).map_err(|e| e.to_string())?;
-        tokio::task::spawn_blocking(move || crate::storage::publish(&path, &bytes))
-            .await
-            .map_err(|e| e.to_string())?
-            .map_err(|e| e.to_string())
     }
 }
 struct Stop {
@@ -192,6 +179,23 @@ fn resolve_local_setting(
     }
 }
 
+fn submission_policy(voting: bool, relay: Option<&[u8]>, private_payer: bool) -> Result<bool> {
+    let read_only = !voting
+        && !relay.is_some_and(|raw| {
+            matches!(
+                octra_node_protocol::network::endpoint::native_trim(raw)
+                    .to_ascii_lowercase()
+                    .as_slice(),
+                b"1" | b"true" | b"yes"
+            )
+        });
+    ensure!(
+        !private_payer || !read_only,
+        "private payer on an observer requires explicit OCTRA_OBSERVER_RELAY_SUBMITS=1"
+    );
+    Ok(read_only)
+}
+
 pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Result<()> {
     require_crypto(&plan.runtime)?;
     let Plan {
@@ -208,6 +212,12 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         compute: compute_config,
         vpn,
         payments,
+        #[cfg(feature = "private-payments-experimental")]
+        shielded,
+        #[cfg(feature = "private-payments-experimental")]
+        private_payer,
+        #[cfg(feature = "private-payments-experimental")]
+        private_route,
         voting,
         state_sync,
         minimum_peers,
@@ -222,6 +232,45 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         vpn.is_none() || payments.is_none(),
         "select one VPN payment application"
     );
+    #[cfg(feature = "private-payments-experimental")]
+    if shielded.is_some() || private_payer.is_some() || private_route.is_some() {
+        ensure!(
+            vpn.is_none()
+                && payments.is_none()
+                && services.stock_portal.is_none()
+                && services.stock_circle_gateway.is_none()
+                && services
+                    .mesh
+                    .as_ref()
+                    .is_none_or(|mesh| mesh.stock_exit.is_none()),
+            "private wallet startup requires an exclusive payment service"
+        );
+        crate::vpn::payments::shielded::startup::check_profile(&execution.graph)?;
+    }
+    #[cfg(feature = "private-payments-experimental")]
+    if let Some(private) = &shielded {
+        private.validate()?;
+    }
+    #[cfg(feature = "private-payments-experimental")]
+    if let Some(payer) = &private_payer {
+        payer.validate()?;
+        ensure!(
+            !payer.spend_operator_income || shielded.is_some(),
+            "private payer income requires this node's operator wallet"
+        );
+    }
+    #[cfg(feature = "private-payments-experimental")]
+    if let Some(route) = &private_route {
+        route.validate()?;
+        ensure!(
+            private_payer.is_none(),
+            "select the route owner or standalone payer scheduler"
+        );
+        ensure!(
+            route.hops.iter().all(|hop| !hop.spend_operator_income) || shielded.is_some(),
+            "private route income requires this node's operator wallet"
+        );
+    }
     let chain = store.chain().clone();
     let runtime = runtime.with_public_keys(Arc::new(octra_node_runtime::pvac::Files(
         execution.pvac_dir.clone(),
@@ -279,15 +328,15 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
             .unwrap_or(32)
             .max(1),
     )?;
-    let observer_submissions = !voting
-        && !local_setting("OCTRA_OBSERVER_RELAY_SUBMITS").is_some_and(|raw| {
-            matches!(
-                octra_node_protocol::network::endpoint::native_trim(&raw)
-                    .to_ascii_lowercase()
-                    .as_slice(),
-                b"1" | b"true" | b"yes"
-            )
-        });
+    #[cfg(feature = "private-payments-experimental")]
+    let needs_private_submissions = private_payer.is_some() || private_route.is_some();
+    #[cfg(not(feature = "private-payments-experimental"))]
+    let needs_private_submissions = false;
+    let observer_submissions = submission_policy(
+        voting,
+        local_setting("OCTRA_OBSERVER_RELAY_SUBMITS").as_deref(),
+        needs_private_submissions,
+    )?;
     let status_signer: octra_node_runtime::status_read::Signer = Arc::new(move |bytes| {
         use ed25519_dalek::Signer;
         status_key.sign(bytes).to_bytes().to_vec()
@@ -314,9 +363,10 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         _ = shutdown.wait_for(|stopping| *stopping) => return Ok(()),
     };
     let node = Arc::new(opened.with_view_graph(execution.graph.clone())?);
-    node.register(Archive(services.data.join("exex"))).await?;
+    node.register(crate::archive::Archive::new(services.data.join("exex")))
+        .await?;
     let archive_status = node
-        .extension_status("devnet-archive")
+        .extension_status(crate::archive::Archive::NAME)
         .await
         .context("archive ExEx status missing")?;
     let head = node.head().await?;
@@ -470,6 +520,16 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         fees,
         http: http.clone(),
     });
+    // Restore armed route policy before the P2P actor can open any socket.
+    #[cfg(feature = "private-payments-experimental")]
+    let private_route = match private_route {
+        Some(config) => Some(config.prepare(submission.clone()).await?),
+        None => None,
+    };
+    #[cfg(feature = "private-payments-experimental")]
+    let route_income = private_route
+        .as_ref()
+        .map(crate::vpn::payments::shielded::payer::startup::route::Prepared::income);
     let (stop, stopped) = watch::channel(false);
     let lifecycle = Stop {
         signal: stop.clone(),
@@ -515,6 +575,10 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         stop.subscribe(),
     ));
     tasks.spawn(async move { network.run(stopped).await.map_err(anyhow::Error::from) });
+    #[cfg(feature = "private-payments-experimental")]
+    if let Some(route) = private_route {
+        tasks.spawn(route.run(stop.subscribe()));
+    }
     let startup = async {
         let initialize = async {
             // This marker is a retained local observation, never membership or
@@ -526,6 +590,8 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
             )
             .await?;
             if join.configured() {
+                // Give nonvoting observers time to import a verified prefix.
+                let join_cap = Duration::from_secs(if voting { 60 } else { 300 });
                 let report = join
                     .synchronize(
                         &node,
@@ -533,7 +599,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                         &services.data,
                         &key,
                         voting,
-                        tokio::time::Instant::now() + startup_timeout.min(Duration::from_secs(60)),
+                        tokio::time::Instant::now() + startup_timeout.min(join_cap),
                     )
                     .await?;
                 eprintln!(
@@ -767,6 +833,10 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         );
         let paid = if let Some(config) = payments {
             config.ip_tunnel.validate()?;
+            anyhow::ensure!(
+                voting == config.claim_rpc_url.is_none(),
+                "nonvoting payments require claim_rpc_url; voting nodes submit claims locally"
+            );
             let application = Arc::new(node.payments(config.application, operator.clone())?);
             let directory = services.data.join("octranet-payments");
             tokio::fs::create_dir_all(&directory).await?;
@@ -776,6 +846,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                 key.clone(),
                 directory.join("claims"),
                 config.max_claim_fees_ou,
+                config.claim_rpc_url.as_deref(),
             )
             .await?;
             tasks.spawn(claims.run(stop.subscribe()));
@@ -790,7 +861,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                             &key.to_bytes(),
                         )),
                         wireguard_secret: wireguard.clone(),
-                        ip_tunnel: config.ip_tunnel,
+                        ip_tunnel: Some(config.ip_tunnel),
                     },
                     application,
                     publisher,
@@ -801,6 +872,35 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         } else {
             None
         };
+        #[cfg(feature = "private-payments-experimental")]
+        let (paid, private_income) = if let Some(private) = shielded {
+            let (service, wallet) = private
+                .bind_with_wallet(
+                    &node,
+                    crate::vpn::payments::shielded::startup::Listen {
+                        browser: services.browser,
+                        control: services.control,
+                        tunnel: services.tunnel,
+                    },
+                    &services.data,
+                    &key,
+                )
+                .await?;
+            (Some(service), Some(wallet))
+        } else {
+            (paid, None)
+        };
+        #[cfg(feature = "private-payments-experimental")]
+        if let (Some(income), Some(wallet)) = (route_income, private_income.as_ref()) {
+            income.attach(wallet.clone())?;
+        }
+        #[cfg(feature = "private-payments-experimental")]
+        if let Some(payer) = private_payer {
+            let payer = payer
+                .prepare_with_income(submission.clone(), private_income)
+                .await?;
+            tasks.spawn(payer.run(stop.subscribe()));
+        }
         if let Some(portal) = services.stock_portal.clone() {
             let service = node.bind_stock_portal(portal).await?;
             tasks.spawn(service.run(stop.subscribe()));
@@ -984,6 +1084,21 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn private_observer_funding_requires_explicit_submission_opt_in() {
+        assert!(submission_policy(false, None, false).unwrap());
+        for refused in [None, Some(b"0".as_slice()), Some(b"false"), Some(b"no")] {
+            assert!(submission_policy(false, refused, true)
+                .unwrap_err()
+                .to_string()
+                .contains("OCTRA_OBSERVER_RELAY_SUBMITS=1"));
+            assert!(submission_policy(false, refused, false).unwrap());
+            assert!(!submission_policy(true, refused, true).unwrap());
+        }
+        for allowed in [b"1".as_slice(), b"true", b" YES "] {
+            assert!(!submission_policy(false, Some(allowed), true).unwrap());
+        }
+    }
     use octra_exex::{Cursor, EpochId, Sequence, StateRoot};
 
     #[test]

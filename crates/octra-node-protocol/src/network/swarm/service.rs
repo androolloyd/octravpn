@@ -35,6 +35,7 @@ impl Drop for RunGuard {
             s.peers.clear();
             s.dialing.clear();
             s.record_dialing.clear();
+            self.swarm.0.scope_applied.send_replace(u64::MAX);
         }
     }
 }
@@ -168,7 +169,7 @@ async fn dial(
         }
     }
     let proxy = swarm.state().proxy;
-    let stream = match super::super::proxy::connect_diagnosed(endpoint, proxy).await {
+    let stream = match swarm.scope().connect(endpoint, proxy).await {
         Ok(stream) => {
             swarm.note(
                 generation,
@@ -359,45 +360,10 @@ fn records(
     }
 }
 use crate::network::accept::delay as accept_delay;
-pub(super) async fn run(
-    swarm: Swarm,
-    listener: TcpListener,
-    handler: Arc<dyn Handler>,
-) -> Result<(), Error> {
-    let port = listener
-        .local_addr()
-        .map_err(|e| Error::from(e.to_string()))?
-        .port();
-    let generation = {
-        let mut s = swarm.state();
-        if s.started {
-            return Err("p2p swarm is active".into());
-        }
-        s.generation = s
-            .generation
-            .checked_add(1)
-            .ok_or_else(|| Error::from("swarm generation exhausted"))?;
-        s.started = true;
-        s.running = true;
-        s.connections = diagnostics::Counters::default();
-        swarm.0.stop.send_replace(false);
-        s.generation
-    };
-    let _run = RunGuard {
-        swarm: swarm.clone(),
-        generation,
-    };
-    let mut tasks = JoinSet::new();
-    let (tx, mut rx) = mpsc::channel(64);
-    let spawn = Spawner(tx);
-    let mut stop = swarm.0.stop.subscribe();
-    // This is an operational resource ceiling, independent of peer roles and consensus.
-    let pending = Arc::new(Semaphore::new(512));
-    let mut reconnect = tokio::time::interval_at(
-        Instant::now() + Duration::from_secs(10),
-        Duration::from_secs(10),
-    );
-    reconnect.set_missed_tick_behavior(MissedTickBehavior::Delay);
+fn maintain(swarm: &Swarm, generation: u64, tasks: &mut JoinSet<()>) {
+    if swarm.scope().paused() {
+        return;
+    }
     let owner = swarm.clone();
     tasks.spawn(async move {
         while active(&owner, generation) {
@@ -412,7 +378,96 @@ pub(super) async fn run(
             while sends.join_next().await.is_some() {}
         }
     });
-    bootstraps(&swarm, generation, port, &handler, &spawn, &mut tasks);
+}
+
+async fn transition(
+    swarm: &Swarm,
+    listener: &TcpListener,
+    request: super::scope::Request,
+    tasks: &mut JoinSet<()>,
+    queued: &mut mpsc::Receiver<Task>,
+) -> Result<u64, Error> {
+    {
+        let s = swarm.state();
+        for peer in s.peers.values() {
+            peer.peer.close();
+        }
+    }
+    tasks.abort_all();
+    while tasks.join_next().await.is_some() {}
+    while queued.try_recv().is_ok() {}
+    request.scope.listener(listener)?;
+    let mut s = swarm.state();
+    if !s.running {
+        return Err("P2P stopped during scope transition".into());
+    }
+    s.generation = s
+        .generation
+        .checked_add(1)
+        .ok_or_else(|| Error::from("swarm generation exhausted"))?;
+    s.peers.clear();
+    s.dialing.clear();
+    s.record_dialing.clear();
+    s.due.clear();
+    s.scope = request.scope;
+    s.scope_revision = request.revision;
+    s.connections = diagnostics::Counters::default();
+    Ok(s.generation)
+}
+
+pub(super) async fn run(
+    swarm: Swarm,
+    listener: TcpListener,
+    handler: Arc<dyn Handler>,
+) -> Result<(), Error> {
+    let port = listener
+        .local_addr()
+        .map_err(|e| Error::from(e.to_string()))?
+        .port();
+    let mut scope = swarm.0.scope.subscribe();
+    let mut generation = {
+        let mut s = swarm.state();
+        if s.started {
+            return Err("p2p swarm is active".into());
+        }
+        let requested = scope.borrow_and_update().clone();
+        requested.scope.validate(s.proxy.is_some())?;
+        requested.scope.listener(&listener)?;
+        s.scope = requested.scope;
+        s.scope_revision = requested.revision;
+        s.generation = s
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| Error::from("swarm generation exhausted"))?;
+        s.started = true;
+        s.running = true;
+        s.connections = diagnostics::Counters::default();
+        swarm.0.stop.send_replace(false);
+        s.generation
+    };
+    let mut run = RunGuard {
+        swarm: swarm.clone(),
+        generation,
+    };
+    swarm
+        .0
+        .scope_applied
+        .send_replace(swarm.state().scope_revision);
+    let mut tasks = JoinSet::new();
+    let (tx, mut rx) = mpsc::channel(64);
+    let spawn = Spawner(tx);
+    let mut stop = swarm.0.stop.subscribe();
+    // This is an operational resource ceiling, independent of peer roles and consensus.
+    let pending = Arc::new(Semaphore::new(512));
+    let mut reconnect = tokio::time::interval_at(
+        Instant::now() + Duration::from_secs(10),
+        Duration::from_secs(10),
+    );
+    reconnect.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    maintain(&swarm, generation, &mut tasks);
+    if !swarm.scope().paused() {
+        bootstraps(&swarm, generation, port, &handler, &spawn, &mut tasks);
+    }
     let mut attempt = 0;
     let mut next_accept = Instant::now();
     let result = loop {
@@ -421,12 +476,28 @@ pub(super) async fn run(
         }
         tokio::select! {
             _=stop.changed()=>break Ok(()),
+            changed=scope.changed()=>{
+                if changed.is_err() { break Err("P2P scope controller closed".into()); }
+                let request=scope.borrow_and_update().clone();
+                let revision=request.revision;
+                match transition(&swarm,&listener,request,&mut tasks,&mut rx).await {
+                    Ok(next)=>{ generation=next; run.generation=next; },
+                    Err(error)=>break Err(error),
+                }
+                maintain(&swarm,generation,&mut tasks);
+                if !swarm.scope().paused() {
+                    bootstraps(&swarm,generation,port,&handler,&spawn,&mut tasks);
+                    records(&swarm,generation,port,&handler,&spawn,&mut tasks);
+                }
+                swarm.0.scope_applied.send_replace(revision);
+            },
             Some(task)=rx.recv()=>{tasks.spawn(task);},
             Some(result)=tasks.join_next(),if !tasks.is_empty()=>{if let Err(e)=result{break Err(Error::from(format!("peer service failed: {e}")));}},
-            accepted=async{tokio::time::sleep_until(next_accept).await;listener.accept().await}=>{
+            accepted=async{tokio::time::sleep_until(next_accept).await;listener.accept().await},if !swarm.scope().paused()=>{
                 match accepted{
                     Err(e)=>match accept_delay(attempt,&e){Some(delay)=>{attempt=(attempt+1).min(7);next_accept=Instant::now()+delay;},None=>break Err(Error::from(e.to_string()))},
                     Ok((stream,address))=>{
+                        if !swarm.scope().accepts(&stream)? { continue; }
                         swarm.note(generation,Direction::Inbound,Phase::Transport,Outcome::Accepted);
                         attempt=0;next_accept=Instant::now();
                         let key=address.ip().to_string().into_bytes();
@@ -456,11 +527,12 @@ pub(super) async fn run(
                 }
             },
             _=reconnect.tick()=>{
+                if swarm.scope().paused() { continue; }
                 swarm.peers();
                 if Swarm::counts(&swarm.state()).0<swarm.0.config.bootstrap.len() as i64{bootstraps(&swarm,generation,port,&handler,&spawn,&mut tasks);}
                 records(&swarm,generation,port,&handler,&spawn,&mut tasks);
             },
-            ()=swarm.0.wake.notified()=>records(&swarm,generation,port,&handler,&spawn,&mut tasks),
+            ()=swarm.0.wake.notified(),if !swarm.scope().paused()=>records(&swarm,generation,port,&handler,&spawn,&mut tasks),
         }
     };
     swarm.stop();

@@ -15,6 +15,18 @@ use crate::{admission::Revocation, payment_meter::Meter};
 mod service;
 pub use service::{Config, Service};
 
+/// Private purchase control is supplied by the canonical host, separately
+/// from packet admission. The provider must enforce target pins, ownership,
+/// canonical time, bounded allocation and durable idempotency.
+#[async_trait]
+pub trait PrivatePurchases: Send + Sync {
+    async fn execute(
+        &self,
+        request: octravpn_core::payments::SignedPrivateRequest,
+        operator: &octravpn_core::KeyPair,
+    ) -> Result<Vec<u8>>;
+}
+
 /// `current` holds the host's publication guard through one nonblocking IO
 /// operation. It must not await, write a journal, or perform proof work.
 pub trait Guard: Send + Sync {
@@ -22,16 +34,55 @@ pub trait Guard: Send + Sync {
     fn current(&self, action: &mut dyn FnMut() -> Result<()>) -> Result<()>;
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Public,
+    Shielded,
+}
+
+/// A public channel's available OCT and a private wallet's accepted quote
+/// ceiling have different meanings. Neither may be presented as the other.
+#[derive(Clone, Copy)]
+pub enum Funds {
+    Channel {
+        original_budget_ou: u64,
+        remaining_ou: u64,
+        claim_deadline_ms: Option<u64>,
+    },
+    Shielded {
+        quote_ceiling_ou: u64,
+        paid_ou: u64,
+    },
+}
+impl Funds {
+    pub fn mode(&self) -> Mode {
+        match self {
+            Self::Channel { .. } => Mode::Public,
+            Self::Shielded { .. } => Mode::Shielded,
+        }
+    }
+    pub fn ceiling_ou(&self) -> u64 {
+        match self {
+            Self::Channel {
+                original_budget_ou, ..
+            } => *original_budget_ou,
+            Self::Shielded {
+                quote_ceiling_ou, ..
+            } => *quote_ceiling_ou,
+        }
+    }
+}
+
 pub struct Grant {
     pub binding: PlanBinding,
     pub receipt_key: PublicKey,
+    /// Bond generation pinned by the accepted offer and its receipt key.
+    pub operator_generation: u64,
     pub tariff: Tariff,
-    pub original_budget_ou: u64,
-    pub remaining_ou: u64,
+    pub funds: Funds,
     /// Authenticated cumulative prepaid byte entitlements, per class.
     pub redeemed_totals: Vec<u64>,
     pub canonical_ms: u64,
-    pub claim_deadline_ms: Option<u64>,
     /// Eligibility in the authenticated immutable state. Lease expiry and
     /// publication revocation belong to `guard`, never this retirement fact.
     pub admissible: bool,
@@ -40,6 +91,9 @@ pub struct Grant {
 
 #[async_trait]
 pub trait Authority: Send + Sync {
+    fn mode(&self) -> Mode {
+        Mode::Public
+    }
     fn updates(&self) -> Option<tokio::sync::watch::Receiver<()>> {
         None
     }
@@ -167,6 +221,7 @@ pub(crate) struct Registry {
     stock: RwLock<Option<Arc<crate::stock::Exit>>>,
     // Held by every in-flight control operation and tunnel connection.
     _writer: Arc<std::fs::File>,
+    meter_key: Option<octravpn_core::sealed::Key>,
 }
 const MAX_PLANS: usize = 4096;
 
@@ -181,6 +236,7 @@ impl Registry {
             stop: Revocation::default(),
             stock: RwLock::new(None),
             _writer: writer,
+            meter_key: None,
         }
     }
     pub(crate) fn get(&self, key: &[u8; 32]) -> Option<Arc<Connection>> {
@@ -201,17 +257,31 @@ impl Registry {
         ensure!(
             meter.binding() == &grant.binding
                 && meter.tariff() == &grant.tariff
-                && meter.budget_ou() == grant.original_budget_ou,
+                && meter.budget_ou() == grant.funds.ceiling_ou(),
             "paid immutable plan changed"
         );
         Ok(())
     }
+    async fn grant(&self, binding: &PlanBinding, claim: bool) -> Result<Grant> {
+        let grant = if claim {
+            self.authority.claim_plan(binding).await?
+        } else {
+            self.authority.plan(binding).await?
+        };
+        ensure!(
+            grant.funds.mode() == self.authority.mode(),
+            "payment accounting mode differs"
+        );
+        Ok(grant)
+    }
     fn check(grant: &Grant, request: &SignedConnect) -> Result<()> {
         Self::check_binding(grant, request)?;
-        ensure!(
-            grant.admissible && grant.guard.live(),
-            "paid plan unavailable"
-        );
+        ensure!(grant.admissible, "paid plan unavailable");
+        if !grant.guard.live() {
+            return Err(
+                octravpn_core::payments::Unavailable::new("paid publication unavailable").into(),
+            );
+        }
         Ok(())
     }
     pub(crate) fn attach_stock(&self, exit: Arc<crate::stock::Exit>) -> Result<()> {
@@ -257,7 +327,7 @@ impl Registry {
         }
         let _serial = self.serial.lock().await;
         ensure!(!self.stop.is_revoked(), "paid VPN stopped");
-        let grant = self.authority.plan(&request.request.binding).await?;
+        let grant = self.grant(&request.request.binding, false).await?;
         Self::check(&grant, &request)?;
         let session = grant.binding.session_id()?;
         let key = request.request.wireguard_key;
@@ -295,18 +365,48 @@ impl Registry {
                 self.meters.read().len() < MAX_PLANS,
                 "paid plan capacity exhausted"
             );
-            let meter = Meter::open(
-                self.root.join(hex::encode(session.as_bytes())),
-                grant.binding.clone(),
-                grant.tariff.clone(),
-                grant.original_budget_ou,
-                grant.redeemed_totals.clone(),
-            )
-            .await?;
+            let meter = if let Some(key) = &self.meter_key {
+                Meter::open_private(
+                    self.root.join(hex::encode(session.as_bytes())),
+                    grant.binding.clone(),
+                    grant.tariff.clone(),
+                    grant.funds.ceiling_ou(),
+                    grant.redeemed_totals.clone(),
+                    key.clone(),
+                    false,
+                )
+                .await?
+            } else {
+                Meter::open(
+                    self.root.join(hex::encode(session.as_bytes())),
+                    grant.binding.clone(),
+                    grant.tariff.clone(),
+                    grant.funds.ceiling_ou(),
+                    grant.redeemed_totals.clone(),
+                )
+                .await?
+            };
             self.meters.write().insert(session.clone(), meter.clone());
             meter
         };
         meter.check_transport(&request, &transport)?;
+        // Status polling reuses the signed connection. Revalidate its current
+        // canonical grant without interrupting packets or rotating the journal.
+        if let Some(previous) = self.get(&key) {
+            if previous.request == request
+                && previous.transport == transport
+                && Arc::ptr_eq(&previous.meter, &meter)
+                && meter.transport_is_current(&request, &transport)
+            {
+                Self::check(&grant, &request)?;
+                ensure!(
+                    previous.stock_live(),
+                    "stock registration changed during connect"
+                );
+                *previous.grant.write() = Some(grant);
+                return Ok(previous);
+            }
+        }
         // Revoke before any cancellable durable rotation. A dropped HTTP task
         // cannot leave the previous connection active behind a newer watermark.
         for previous in self
@@ -326,13 +426,6 @@ impl Registry {
                 stock.as_ref().is_some_and(|s| s.current(registration)),
                 "stock registration changed during connect"
             );
-        }
-        // Identical retries preserve transport identity and buffered packets.
-        if let Some(previous) = self.get(&key) {
-            if previous.request == request && previous.transport == transport {
-                *previous.grant.write() = Some(grant);
-                return Ok(previous);
-            }
         }
         let connection = Arc::new(Connection {
             request,
@@ -363,11 +456,7 @@ impl Registry {
         let _serial = self.serial.lock().await;
         let connections: Vec<_> = self.connections.read().values().cloned().collect();
         for connection in connections {
-            let Ok(grant) = self
-                .authority
-                .plan(&connection.request.request.binding)
-                .await
-            else {
+            let Ok(grant) = self.grant(&connection.request.request.binding, false).await else {
                 // A publication gap suspends forwarding, but preserving
                 // this Arc lets the next current view restore its routes.
                 connection.invalidate();
@@ -407,7 +496,7 @@ impl Registry {
     async fn confirm_usage(&self, meter: &Arc<Meter>, usage: SignedUsage) -> Result<()> {
         let _serial = self.serial.lock().await;
         ensure!(!self.stop.is_revoked(), "paid VPN stopped");
-        let grant = self.authority.claim_plan(&usage.usage.binding()).await?;
+        let grant = self.grant(&usage.usage.binding(), true).await?;
         Self::check_meter(&grant, meter)?;
         ensure!(
             grant.receipt_key == usage.receipt_key && grant.guard.live(),
@@ -442,7 +531,7 @@ impl Registry {
             if let Some(meter) = cached {
                 meter
             } else {
-                let grant = self.authority.claim_plan(&binding).await?;
+                let grant = self.grant(&binding, true).await?;
                 ensure!(
                     grant.binding == binding && grant.receipt_key == usage.receipt_key,
                     "canonical usage binding or key differs"
@@ -459,14 +548,27 @@ impl Registry {
                     self.meters.read().len() < MAX_PLANS,
                     "paid plan capacity exhausted"
                 );
-                let meter = Meter::resume(
-                    self.root.join(hex::encode(session.as_bytes())),
-                    grant.binding.clone(),
-                    grant.tariff,
-                    grant.original_budget_ou,
-                    grant.redeemed_totals,
-                )
-                .await?;
+                let meter = if let Some(key) = &self.meter_key {
+                    Meter::open_private(
+                        self.root.join(hex::encode(session.as_bytes())),
+                        grant.binding.clone(),
+                        grant.tariff.clone(),
+                        grant.funds.ceiling_ou(),
+                        grant.redeemed_totals.clone(),
+                        key.clone(),
+                        true,
+                    )
+                    .await?
+                } else {
+                    Meter::resume(
+                        self.root.join(hex::encode(session.as_bytes())),
+                        grant.binding.clone(),
+                        grant.tariff,
+                        grant.funds.ceiling_ou(),
+                        grant.redeemed_totals,
+                    )
+                    .await?
+                };
                 ensure!(grant.guard.live(), "canonical payment lease revoked");
                 meter.check_usage(usage)?;
                 self.meters.write().insert(session, meter.clone());

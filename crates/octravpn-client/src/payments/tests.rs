@@ -1,6 +1,6 @@
 use super::*;
 use octravpn_core::{
-    payments::{Deployment, IpPrefix, Protocol, Selector, TrafficClass},
+    payments::{Deployment, IpPrefix, Protocol, Selector, SignedStatus, Status, TrafficClass},
     Address,
 };
 use std::{fs, net::Ipv4Addr, path::PathBuf};
@@ -11,6 +11,7 @@ struct Fixture {
     binding: PlanBinding,
     tariff: Tariff,
     key: Arc<KeyPair>,
+    operator: Arc<KeyPair>,
     budget: u64,
     prepaid: Vec<u64>,
 }
@@ -19,8 +20,9 @@ impl Fixture {
     fn new(budget: u64) -> Self {
         let root = tempfile::tempdir().unwrap();
         let key = Arc::new(KeyPair::from_secret_bytes(&[0x9d; 32]));
+        let operator = Arc::new(KeyPair::from_secret_bytes(&[7; 32]));
         let tariff = Tariff::new(
-            Address::from_pubkey(&[7; 32]),
+            Address::from_pubkey(&operator.public.0),
             vec![
                 TrafficClass {
                     name: "default".into(),
@@ -56,6 +58,7 @@ impl Fixture {
             binding,
             tariff,
             key,
+            operator,
             budget,
             prepaid: vec![1024, 1024],
         }
@@ -88,6 +91,48 @@ impl Fixture {
         )
         .unwrap();
     }
+}
+
+#[test]
+fn service_equivocation_is_durably_retained_and_refuses_more_payment() {
+    let fixture = Fixture::new(10_000);
+    let mut journal = fixture.open(OpenMode::Create).unwrap();
+    let base = Status {
+        binding: fixture.binding.clone(),
+        connect_sequence: 1,
+        client_wireguard_key: [11; 32],
+        server_wireguard_key: [12; 32],
+        tariff: fixture.tariff.clone(),
+        original_budget_ou: fixture.budget,
+        remaining_ou: fixture.budget,
+        committed_totals: vec![0, 0],
+        redeemed_totals: fixture.prepaid.clone(),
+        canonical_ms: 100,
+        claim_deadline_ms: 1_000,
+    };
+    let missing = SignedStatus::sign(base.clone(), &fixture.operator).unwrap();
+    assert!(journal.observe_service_status(&missing, 1).is_err());
+    let wrong_generation =
+        SignedStatus::sign_with_receipts(base.clone(), &fixture.operator, 2, 1).unwrap();
+    assert!(journal
+        .observe_service_status(&wrong_generation, 1)
+        .is_err());
+    let first = SignedStatus::sign_with_receipts(base.clone(), &fixture.operator, 1, 1).unwrap();
+    journal.observe_service_status(&first, 1).unwrap();
+    let mut changed = base;
+    changed.committed_totals[0] = 1;
+    let conflicting = SignedStatus::sign_with_receipts(changed, &fixture.operator, 1, 1).unwrap();
+    assert!(journal.observe_service_status(&conflicting, 1).is_err());
+    let [a, b] = journal.state.service_conflict.clone().unwrap();
+    assert!(SignedServiceReceipt::slash_params(&a, &b).is_ok());
+    assert!(journal.observe_service_status(&first, 1).is_err());
+    drop(journal);
+    let exported = service_evidence(&fixture.path).unwrap();
+    assert_eq!(exported["method"], "slash_double_service_receipt");
+    assert_eq!(exported["params"][0], fixture.binding.plan);
+    assert_eq!(exported["params"][1], 0);
+    let recovered = fixture.open(OpenMode::Resume).unwrap();
+    assert_eq!(recovered.state.service_conflict, Some([a, b]));
 }
 
 /// A complete UDP datagram with a valid IPv4 header checksum. IPv4 permits a
@@ -621,9 +666,11 @@ fn control_only_stock_journal_cannot_reinterpret_a_local_tun_journal() {
     let plan = crate::payment_runner::Plan {
         binding: fixture.binding.clone(),
         tariff: fixture.tariff.clone(),
+        operator_generation: 1,
         original_budget_ou: fixture.budget,
         prepaid_bytes: fixture.prepaid.clone(),
         control_url: "http://127.0.0.1/".into(),
+        control_ca_pem: None,
         wireguard_endpoint: "127.0.0.1:51820".into(),
     };
     assert!(

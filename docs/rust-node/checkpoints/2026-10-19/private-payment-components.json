@@ -1,0 +1,61 @@
+{
+  "schema": "octra_private_payment_components_v1",
+  "observed_at_utc": "2026-10-19T14:35:07.096286+00:00",
+  "release_enabled": false,
+  "shielded_settlement_qualified": false,
+  "consensus_changes": false,
+  "upstream_wallet": "549536d6fbe265a4aace02bc9b85b5313ebb4868",
+  "source_sha256": {
+    ".gitignore": "306fd52e74fca6746e12acc750f232de15e71da917756a1270d74c91f5eb7368",
+    "Cargo.lock": "abc31866195a1354143434059042ff47eb8eb25a147c8b80274fad0f8746efeb",
+    "Cargo.toml": "64d6d6131871f99c250770d609fa89135b0a9ab2de8ffe76ff69be710768e32d",
+    "README.md": "e0955dc708169746b2900c0faf2e8e3c48417bef1ef84dbc0ea7b5375dfe31e9",
+    "src/commitment.rs": "058283a2f8f4363b5a82eb884600fae5716e72cc1fe36385927521898819dcbd",
+    "src/invoice/tests.rs": "a78d8ec998e523e9cb7069b075dd58a4091c212caec48d654beb5052e48ca7a1",
+    "src/invoice.rs": "85bf554e0ba32e60d7d714110e839dfbee6af7272cf94797f6f3b227d0199213",
+    "src/lib.rs": "40ab1b7af8c8a3035d7f5da7b86ddb6e98adb54041b6857d8983ba725a76fb64",
+    "src/native_stealth/tests.rs": "cb69bbc89e802795463646397cee63371a90fbd06042e14db853759b1f7fb75d",
+    "src/native_stealth.rs": "a1bdb6e2a29775e8fadfdf54493ef371b89cd23a22c067bb77f789c51af9de40",
+    "src/proposal/tests.rs": "0bae8e01299394b6a1743fa6308ce6b0892e987ab365132990b69e2a74cba2fa",
+    "src/proposal.rs": "1e47e627c43c2d4bcf62dea07720824d26342a8dbe2efb80241595b2f5dee125",
+    "tests/native-commitments.json": "236687bf7908d2c7173b2f7e522cfc78def53833c57e8699ce9bcae155f57b87",
+    "tests/native-stealth.json": "6fc476d09903e6f7dc97f9d99f1496fb18d6eef6c1e9354f2a285837273e917c",
+    "tools/native-stealth-fixtures.py": "76e0ef14c6e9c4f63f4dc5461b49c858c1a9c86f8c9cca9f5c13ecea9b013dff",
+    "tools/native-stealth-oracle.cpp": "8f422f39c86a42005d3e322ff0800aef0b7739f2ec428a2e75303aa793bb5b3f"
+  },
+  "tests": {
+    "passed": 16,
+    "failed": 0,
+    "strict_clippy": "passed",
+    "native_wallet_oracle": "Actual pristine C++ wallet headers and TweetNaCl with a deterministic linked test RNG",
+    "native_commitment_vectors": 8,
+    "tests_log": "out/private-payment-codec-20261019/components-final-tests.log",
+    "strict_clippy_log": "out/private-payment-codec-20261019/components-final-clippy.log"
+  },
+  "implemented": [
+    "Native AES-GCM/little-endian payload codec, native view/claim/address bindings",
+    "Operator and one-time claimant signatures with chain/offer/rate/price/expiry consent",
+    "Fresh ECDH purchase proposal and authenticated amount/claim opening",
+    "Native HFHE amount-commitment opening verification"
+  ],
+  "not_implemented": [
+    "Native transfer construction/proving/submission and actual canonical claim",
+    "Authenticated historical output/proof-activation authority",
+    "Durable global output single-use journal and recovery",
+    "Live paid meter/node/client integration",
+    "Public network shielded settlement and metadata/linkability qualification"
+  ],
+  "limits": "Current Circle path is public and shielded_required still refuses. A matching ciphertext/opening or signed invoice never grants traffic.",
+  "hfhe_source_sha256": {
+    "crates/octra-hfhe/src/proof/generators.rs": "7ed95dd6745bfb263a038de2965fe7834247f39aaae6b71ef7679f899adb52dc",
+    "crates/octra-hfhe/src/scalar.rs": "ae7192b993749578dfc44a3de0a44acc6784e94cfe30da431faa2015dab9100a"
+  },
+  "canonical_lease_api": {
+    "applied_to_primary": true,
+    "node_tests_passed": 233,
+    "strict_clippy": "passed",
+    "transition": "out/private-service-lease-20261019/source-transition.json"
+  },
+  "historical_snapshot": true,
+  "later_checkpoint": "docs/rust-node/checkpoints/2026-10-19/private-payment-pool.json"
+}

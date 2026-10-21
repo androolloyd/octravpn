@@ -36,6 +36,7 @@ fn options(directory: &Path) -> Options {
                     original_budget_ou: 200_000,
                     prepaid_bytes: vec![100_000],
                     control_url: "http://127.0.0.1/".into(),
+                    control_ca_pem: None,
                     wireguard_endpoint: format!("8.8.{}.4:51820", index + 4),
                 },
                 journal: directory.join(format!("hop-{index}")),
@@ -210,4 +211,35 @@ async fn all_hop_journals_can_be_prepared_without_contacting_or_paying_an_operat
         assert_eq!(state["payload"]["connection_sequence"], 1);
     }
     assert_eq!(prepared.len(), 2);
+}
+
+#[tokio::test]
+async fn public_route_accepts_receipt_signers_delegated_by_different_payer_wallets() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    for (index, hop) in value.hops.iter_mut().enumerate() {
+        let owner = KeyPair::from_secret_bytes(&[150 + u8::try_from(index).unwrap(); 32]);
+        hop.plan.binding.payer = Address::from_pubkey(&owner.public.0);
+        assert_ne!(
+            hop.plan.binding.payer,
+            Address::from_pubkey(&hop.receipt_key.public.0)
+        );
+    }
+    // Public channel registration authenticates this delegation on chain.
+    // Local preparation must preserve it without equating both identities.
+    validate(&value).unwrap();
+    for (mut hop, pin) in value.hops.into_iter().zip(pins()) {
+        hop.plan.control_url = format!("http://{}/", pin.control);
+        let path = hop.journal.clone();
+        let binding = hop.plan.binding.clone();
+        let prepared = Prepared::new(hop, Some(pin), 1075).await.unwrap();
+        let state: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path.join("state.json")).unwrap()).unwrap();
+        assert_eq!(
+            state["payload"]["identity"]["binding"],
+            serde_json::to_value(binding).unwrap()
+        );
+        assert_eq!(state["payload"]["authorized_bytes"], serde_json::json!([0]));
+        drop(prepared);
+    }
 }

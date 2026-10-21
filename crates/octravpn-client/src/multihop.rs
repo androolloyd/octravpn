@@ -31,8 +31,11 @@ use std::{
     time::Duration,
 };
 
+pub(crate) mod funded;
 mod journal;
-mod mtu;
+pub(crate) mod mtu;
+pub(crate) mod private;
+mod service;
 #[cfg(test)]
 mod tests;
 
@@ -144,21 +147,15 @@ pub struct Options {
 
 /// Explicitly accepted network addresses; TLS and WireGuard still authenticate
 /// the operator's original hostname/key rather than trusting the IP alone.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RoutePins {
     pub wireguard: SocketAddrV4,
     pub control: SocketAddrV4,
 }
 
-/// Owned bounded route and live hop tasks. Opening installs host routes; unlike
-/// PaymentClient, this opt-in service deliberately owns a global Linux lease.
-pub struct Client {
-    workers: tokio::task::JoinSet<(usize, Result<PaymentSummary>)>,
-    stop: tokio::sync::watch::Sender<bool>,
-    routes: CompositeRouteGuard,
-    journal: journal::Lease,
-    interfaces: Vec<crate::Interface>,
-}
+/// Owned bounded public prepaid route. Private routes share the same lifecycle.
+pub struct Client(service::Route<PaymentSummary>);
 impl Client {
     pub async fn open(mut options: Options) -> Result<Self> {
         validate(&options)?;
@@ -201,111 +198,21 @@ impl Client {
         for ((hop, pin), mtu) in options.hops.drain(..).zip(pins.iter().copied()).zip(mtus) {
             prepared.push(Prepared::new(hop, Some(pin), mtu).await?);
         }
-        let (stop, _) = tokio::sync::watch::channel(false);
-        let mut client = Self {
-            workers: tokio::task::JoinSet::new(),
-            stop,
-            routes,
-            journal,
-            interfaces: Vec::new(),
-        };
-        for (index, prepared) in prepared.into_iter().enumerate() {
-            client.journal.check().await?;
-            if let Some(previous) = client.interfaces.last().cloned() {
-                client
-                    .routes
-                    .next(&previous, pins[index].wireguard, pins[index].control)?;
-            }
-            let connection = if client.workers.is_empty() {
-                prepared.open().await?
-            } else {
-                tokio::select! {
-                    biased;
-                    failed = client.workers.join_next() => return Err(worker_failure(failed)),
-                    opened = prepared.open() => opened?,
-                }
-            };
-            client.interfaces.push(connection.interface().clone());
-            let mut stop = client.stop.subscribe();
-            client.workers.spawn(async move {
-                let result = Box::pin(connection.run(async {
-                    stop.wait_for(|stopped| *stopped).await?;
-                    Ok(())
-                }))
-                .await;
-                (index, result)
-            });
-        }
-        client.journal.check().await?;
-        client
-            .routes
-            .finish(client.interfaces.last().context("route exit missing")?)?;
-        Ok(client)
+        Ok(Self(
+            service::Route::open(prepared, &pins, routes, journal).await?,
+        ))
     }
-
     pub fn interfaces(&self) -> &[crate::Interface] {
-        &self.interfaces
+        self.0.interfaces()
     }
-
-    /// Only a successful explicit shutdown releases host routes. Errors and
-    /// future cancellation leave the kernel blockers for deliberate recovery.
     pub async fn run(
-        mut self,
+        self,
         shutdown: impl std::future::Future<Output = Result<()>>,
     ) -> Result<Vec<PaymentSummary>> {
-        let mut interval = tokio::time::interval(Duration::from_secs(1));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        tokio::pin!(shutdown);
-        let outcome = loop {
-            tokio::select! {
-                biased;
-                signal = &mut shutdown => break signal,
-                failure = self.workers.join_next() => break Err(worker_failure(failure)),
-                _ = interval.tick() => { if let Err(error) = self.journal.check().await { break Err(error); } },
-            }
-        };
-        self.stop.send_replace(true);
-        let mut summaries = Vec::new();
-        let mut failure = None;
-        while let Some(result) = self.workers.join_next().await {
-            match result {
-                Ok((index, Ok(summary))) => summaries.push((index, summary)),
-                Ok((_, Err(error))) => {
-                    failure.get_or_insert(error);
-                }
-                Err(error) => {
-                    failure.get_or_insert(error.into());
-                }
-            }
-        }
-        outcome?;
-        if let Some(error) = failure {
-            return Err(error);
-        }
-        ensure!(
-            summaries.len() == self.interfaces.len(),
-            "a route hop stopped before shutdown"
-        );
-        self.routes.disconnect()?;
-        summaries.sort_by_key(|(index, _)| *index);
-        Ok(summaries.into_iter().map(|(_, summary)| summary).collect())
+        self.0.run(shutdown).await
     }
 }
 
-fn worker_failure(
-    result: Option<Result<(usize, Result<PaymentSummary>), tokio::task::JoinError>>,
-) -> anyhow::Error {
-    match result {
-        Some(Ok((index, Err(error)))) => {
-            error.context(format!("paid route hop {index} failed; blockers retained"))
-        }
-        Some(Ok((index, Ok(_)))) => {
-            anyhow::anyhow!("paid route hop {index} stopped unexpectedly; blockers retained")
-        }
-        Some(Err(error)) => error.into(),
-        None => anyhow::anyhow!("paid route workers missing; blockers retained"),
-    }
-}
 fn absolute(path: &Path) -> Result<PathBuf> {
     let name = path
         .file_name()
@@ -325,29 +232,59 @@ fn validate(options: &Options) -> Result<()> {
         options.pins.len() == options.hops.len(),
         "composite route pin count differs from hop count"
     );
-    let mut paths = BTreeSet::from([absolute(&options.journal)?]);
+    for (hop, accepted) in options.hops.iter().zip(&options.pins) {
+        let origin = hop.plan.origin()?;
+        if let Some(pin) = accepted {
+            validate_route_pin(&hop.plan.wireguard_endpoint, &origin, *pin)?;
+        }
+    }
+    validate_layout(
+        &options.journal,
+        options.mode,
+        options.hops.iter().map(|hop| Layout {
+            binding: &hop.plan.binding,
+            journal: &hop.journal,
+            receipt_key: &hop.receipt_key,
+            interface_name: &hop.interface_name,
+            mode: hop.mode,
+        }),
+    )
+}
+struct Layout<'a> {
+    binding: &'a octravpn_core::payments::PlanBinding,
+    journal: &'a Path,
+    receipt_key: &'a octravpn_core::KeyPair,
+    interface_name: &'a str,
+    mode: crate::JournalMode,
+}
+fn validate_layout<'a>(
+    journal: &Path,
+    mode: crate::JournalMode,
+    hops: impl ExactSizeIterator<Item = Layout<'a>>,
+) -> Result<()> {
+    ensure!(
+        (2..=octravpn_core::onion::MAX_HOPS).contains(&hops.len()),
+        "a composite route requires two or three hops"
+    );
+    let mut paths = BTreeSet::from([absolute(journal)?]);
     let mut names = BTreeSet::new();
     let mut sessions = BTreeSet::new();
     let mut addresses = BTreeSet::new();
     let mut keys = BTreeSet::new();
-    for (hop, accepted) in options.hops.iter().zip(&options.pins) {
-        let origin = hop.plan.origin()?;
-        if let Some(pin) = accepted {
-            validate_route_pin(&hop.plan, &origin, *pin)?;
-        }
+    for hop in hops {
         ensure!(
-            hop.mode == options.mode,
+            hop.mode == mode,
             "mixed journal create/resume modes are forbidden"
         );
         ensure!(
-            hop.journal.is_absolute() && options.journal.is_absolute(),
+            hop.journal.is_absolute() && journal.is_absolute(),
             "route journal paths must be absolute"
         );
         ensure!(
-            paths.insert(absolute(&hop.journal)?),
+            paths.insert(absolute(hop.journal)?),
             "duplicate route journal path"
         );
-        let name = &hop.interface_name;
+        let name = hop.interface_name;
         ensure!(
             !name.is_empty()
                 && name.len() <= 15
@@ -355,11 +292,11 @@ fn validate(options: &Options) -> Result<()> {
                 && name
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
-                && names.insert(name.clone()),
+                && names.insert(name.to_owned()),
             "invalid or duplicate composite TUN name"
         );
-        let session = hop.plan.binding.session_id()?;
-        let wg = crate::wireguard::public_key(&hop.receipt_key);
+        let session = hop.binding.session_id()?;
+        let wg = crate::wireguard::public_key(hop.receipt_key);
         ensure!(
             sessions.insert(*session.as_bytes()) && keys.insert(wg),
             "route hops require independent sessions and receipt keys"
@@ -371,8 +308,8 @@ fn validate(options: &Options) -> Result<()> {
     }
     Ok(())
 }
-fn validate_route_pin(
-    plan: &crate::AcceptedPlan,
+pub(crate) fn validate_route_pin(
+    wireguard_endpoint: &str,
     origin: &reqwest::Url,
     pin: RoutePins,
 ) -> Result<()> {
@@ -380,11 +317,10 @@ fn validate_route_pin(
         ip_tunnel::public_ipv4(*pin.wireguard.ip()) && pin.wireguard.port() != 0,
         "WireGuard pin requires a public IPv4 endpoint"
     );
-    let raw = plan
-        .wireguard_endpoint
+    let raw = wireguard_endpoint
         .trim()
         .strip_prefix("wg://")
-        .unwrap_or(plan.wireguard_endpoint.trim());
+        .unwrap_or(wireguard_endpoint.trim());
     let endpoint = reqwest::Url::parse(&format!("udp://{raw}"))?;
     ensure!(
         endpoint.port() == Some(pin.wireguard.port()),

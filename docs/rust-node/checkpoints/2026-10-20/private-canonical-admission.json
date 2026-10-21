@@ -1,0 +1,38 @@
+{
+  "observed_at_utc": "2026-10-21T02:10:43.610464+00:00",
+  "status": "canonical admission retry qualified in host scenario and full frozen Linux suite; funded multi-hop rerun pending",
+  "consensus_changes": false,
+  "behavior": [
+    "Missing, busy and revoked service views use a typed unavailable error",
+    "The route waits only for typed unavailability and retains original consent and payment journals",
+    "Root quarantine, corrupt staged work and all other errors remain failures",
+    "Database acquisition errors identify static source call sites without wallet paths or financial record identities"
+  ],
+  "validation": {
+    "host_canonical_scenario": {
+      "passed": 1,
+      "seconds": 440.52
+    },
+    "linux_node_suite": {
+      "passed": 257,
+      "failed": 0,
+      "ignored": 3,
+      "seconds": 496.38,
+      "source_unchanged": true
+    },
+    "strict_default": "passed",
+    "strict_private": "passed"
+  },
+  "image": "sha256:1a1840bbed7f1773bb12fe799e51ed9c5f600c5dcf4d8b57705a833594d4eaef",
+  "frozen_context": "out/private-funded-multihop-20261020/linux-v14/context",
+  "source_sha256": {
+    "crates/octra-node/src/published.rs": "36473d9c1f7306332088a7ae35f660f02e71dec6239d93710b59e858d49d5578",
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner/route/driver.rs": "9f5dee4168a8d03bc4c0f423afdc7b7ff70d25a1602805fcd7dd780a1cabfbde",
+    "crates/octra-node/src/vpn/payments/shielded/runner_tests.rs": "ae75b893336d6916b0e4897cafb5946a7fd05989996a07efe3d505e4baf11aaf",
+    "crates/octra-node/src/vpn/payments/shielded/storage.rs": "a7e1f07adae615c913e007b0632ba7379ccbda44868673e8c8a6f1632b73a9ff",
+    "docker/native-vpn/shielded_run.py": "22437b915eaa0ff2e006f768b68a91ea227153efbe1efed937d1f706e99a223d"
+  },
+  "evidence": "out/private-funded-multihop-20261020",
+  "public_alpha_qualified": false,
+  "publicly_deployed": false
+}

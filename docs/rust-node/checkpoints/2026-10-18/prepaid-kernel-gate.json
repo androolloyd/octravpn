@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-18",
+  "qualified": true,
+  "scope": "isolated four-validator Program custody, real prepaid client and operator, two Linux kernels, canonical claims and four ExEx sinks",
+  "source_sha256": "8349ccef2664b65969a3671e38c1f09f3c3e257735612f01149586212e615164",
+  "image_id": "sha256:fa9bc1547aeed64af0ed118e699f98bd7f0f974fc39b66f0925675f981e1b1c0",
+  "evidence_directory": "/private/tmp/octra-payment-current-20261018-b7e92c-v3",
+  "evidence_sha256": {
+    "qualification.json": "77fe53c9ea7674374e4fc4176d0e81f7145950fcf54896c3a5a75a12d8437a0e",
+    "journal.json": "91ca9b417795178aac93dffd59811da40adef06f2baedac5b303afc6b00171b7",
+    "source.json": "717131c35b10895960af20787af76131c2a0c5cee772c0841e1a95dee70b2ef3",
+    "build.log": "492440c615939bfba161e5620a4ca6583d275d829327d9beffede679ca7b9b30",
+    "run.log": "d708dec077c35b997ce9dfd925623ee07109c5502e8bf239c83a3ceab210927c"
+  },
+  "main_exit": 0,
+  "target_exit": 0,
+  "checks": [
+    "operator service receipt key registered after bond",
+    "finite canonical prepaid purchases before first paid packet",
+    "UDP, TCP and ICMP through actual client and operator TUNs",
+    "client crash and operator restart retain plan, journal and purchase",
+    "premium capacity exhaustion blocks unpaid packets while other classes continue",
+    "partial and full payer withdrawals revoke old plan and return available OCT immediately",
+    "four exact ExEx claim sinks agree and zero-rate class incurs no commission",
+    "operator earnings buy own traffic without an additional deposit",
+    "operator unstake retry preserves seven-day deadline and early stake withdrawal fails"
+  ],
+  "separate_local_slash_test": "Rust-signed conflicting service statements for one slot submit successfully to the compiled AML; 23 octranet_payments tests pass in the same source-bound image",
+  "limitations": [
+    "Program custody gate only; Circle custody and stock Tailscale integration need their own runs",
+    "no public-chain or Mainnet qualification",
+    "arbitrary Internet non-delivery is not objectively slashable"
+  ]
+}

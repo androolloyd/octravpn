@@ -1055,6 +1055,6 @@ fn native_prepaid_circle_custody_epochs_match() {
             hex::encode(Sha256::digest(content))
         );
     }
-    assert_eq!(fixture["cases"].as_array().unwrap().len(), 13);
+    assert_eq!(fixture["cases"].as_array().unwrap().len(), 15);
     assert_bft_epochs_with_oracle(&fixture, oracle.as_bytes());
 }

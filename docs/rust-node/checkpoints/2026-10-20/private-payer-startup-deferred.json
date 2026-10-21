@@ -1,0 +1,76 @@
+{
+  "observed_at_utc": "2026-10-20T23:52:25.903631+00:00",
+  "status": "host qualified; corrected Linux private multihop deposit proofs running",
+  "goal_status": "active",
+  "consensus_changes": false,
+  "mechanism": [
+    "Authenticated remote peers for an opted-in nonvoting isolated private observer; listeners remain loopback",
+    "Prepare existing payer custody, finite job and fee consent before peer startup",
+    "Shared resume-only canonical index handle waits for fresh publication without spending or operator requests",
+    "Cancellation preserves the same jobs and final-owner shutdown closes the index worker"
+  ],
+  "host": {
+    "strict": [
+      {
+        "check": "host-deferred-strict-v3",
+        "exit_code": 0,
+        "seconds": 30.24
+      },
+      {
+        "check": "host-deferred-default-strict-v3",
+        "exit_code": 0,
+        "seconds": 18.65
+      },
+      {
+        "check": "host-deferred-tests-v3",
+        "exit_code": 0,
+        "seconds": 428.38
+      }
+    ],
+    "release_node_tests": 253,
+    "regression": "Suspended startup prepares existing consent, sends no request, creates no missing index and survives a cancelled wait before genuine resume"
+  },
+  "before": [
+    {
+      "case": "matrix-hop0-v5",
+      "canonical_pool_exchanges": 0,
+      "native_fee_bank_or_attempt_rows": 0,
+      "cleanup_verified": true,
+      "failure": "private payer resumed a fresh index before chain attestation"
+    },
+    {
+      "case": "matrix-hop1-v5",
+      "canonical_pool_exchanges": 0,
+      "native_fee_bank_or_attempt_rows": 0,
+      "cleanup_verified": true,
+      "failure": "private payer resumed a fresh index before chain attestation"
+    }
+  ],
+  "linux": {
+    "candidate_context": "out/private-funded-multihop-20261020/linux-v6/context",
+    "qualified": false,
+    "build_pending": false,
+    "image": "sha256:7310a1808a3f8641ab5edfed648eb4f0228f4ff02fe83e9c0c8aef5cbeffe778",
+    "frozen_source_files_verified": 4979,
+    "funded_profiles_running": true
+  },
+  "public_alpha_qualified": false,
+  "full_goal_complete": false,
+  "remaining": [
+    "Funded private entry/exit exhaustion, full recovery and independent accounting in separate kernels",
+    "Public private-service wiring and sustained current-head admission",
+    "Remaining whole-node parity, public onboarding and cryptographic qualification gates"
+  ],
+  "source_sha256": {
+    "crates/octra-node/src/devnet.rs": "b8844d7558b117f94e1afdb1c4b3a45032d785cbcde926ea5a4341ab9bebf201",
+    "crates/octra-node/src/devnet/tests.rs": "99c558276fbd7fa7d0d99acc1d8b199cd00e044c777a246b6176c3fd12a51bfb",
+    "crates/octra-node/src/launch.rs": "63dddb961fbb76e47c0e50c05d5cf95a81f20390ffc09de8373ccb78d8714636",
+    "crates/octra-node/src/vpn/payments/shielded/index.rs": "45454b047c51bad9c0da296942bf1d7de579efe96be042ff93d7f38c7b628ffd",
+    "crates/octra-node/src/vpn/payments/shielded/index/handle.rs": "1bb80173855ae3ce1a468040005051dd1cea1fd62a8e87ada50dfe02a0f2d295",
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner/route/index.rs": "cd20ed65f0e533682c7badd51a482c0a822f8c637c271a27516631b27699dafa",
+    "crates/octra-node/src/vpn/payments/shielded/payer/service.rs": "f0fc8642bb74083036d8f2c9ca5feb875612f4bdd158a9a6ed673cde7fa6f75c",
+    "crates/octra-node/src/vpn/payments/shielded/payer/startup.rs": "677a6b8d41720bcd69044bd43ef3bd72b48f6866d0bbdbab87961b31ffff96a8",
+    "crates/octra-node/src/vpn/payments/shielded/runner_tests.rs": "d294de3c71d947c4ba1afd40279ba7e3bc185a4c3aa2906ea0afa8d2d32bb976"
+  },
+  "evidence": "out/private-funded-multihop-20261020"
+}

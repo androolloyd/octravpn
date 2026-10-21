@@ -4,14 +4,14 @@
     {
       "path": "/index.html",
       "content_type": "text/html",
-      "bytes": 5186,
-      "sha256": "dac058979e0176acb0edefad605e166ab79c5b57a707571a650e80d56ae0ca07"
+      "bytes": 5169,
+      "sha256": "2fbea09a95a9067fec3618f5ee0dd211847f5b78f777c2c886017a41da08e89c"
     },
     {
       "path": "/join.html",
       "content_type": "text/html",
-      "bytes": 6230,
-      "sha256": "e9555481c2b0014901631189f23c86dce8f9b033289f5dc32ad31575311acb92"
+      "bytes": 5541,
+      "sha256": "99266df22ce83ee9b2f9b31b40dafbacea991c49e3c0323dd7c01d0fe0231a4f"
     },
     {
       "path": "/browse.html",
@@ -22,8 +22,8 @@
     {
       "path": "/operators.html",
       "content_type": "text/html",
-      "bytes": 9677,
-      "sha256": "0a8562dad9f3ee70bf512d4f375379b4031e1868cee5aac04cd360895224c908"
+      "bytes": 9873,
+      "sha256": "051c173bc9463ad61e75aeb1e8702604ad4cce02b981586aab590868beacd319"
     },
     {
       "path": "/style.css",

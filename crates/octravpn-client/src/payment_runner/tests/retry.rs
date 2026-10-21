@@ -143,9 +143,9 @@ fn unchanged(fixture: &Fixture, receipts: &[SignedUsage], image: &[u8]) {
         fixture.plan.prepaid_bytes
     );
     assert_eq!(fixture.journal.lock().totals(), [0]);
-    assert_eq!(
-        std::fs::read(fixture.directory.path().join("plan/state.json")).unwrap(),
-        image
+    assert_payment_snapshot_unchanged(
+        image,
+        &std::fs::read(fixture.directory.path().join("plan/state.json")).unwrap(),
     );
 }
 fn identical_posts(state: &RetryState, count: usize, receipt: &SignedUsage) {

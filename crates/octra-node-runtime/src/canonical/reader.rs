@@ -10,6 +10,12 @@ use octra_node_protocol::{
 use sqlx::{Row, SqlitePool};
 use std::{collections::BTreeMap, sync::Arc};
 mod paths;
+mod projection;
+pub use projection::TreeRead;
+#[cfg(test)]
+mod restore_tests;
+
+const RESTORE_EDGES: &str = "WITH RECURSIVE reachable(hash) AS (SELECT ? UNION SELECT child FROM node_edges JOIN reachable ON parent=reachable.hash) SELECT e.parent,e.child FROM reachable r CROSS JOIN node_edges e ON e.parent=r.hash";
 
 /// A committed absence is distinct from missing historical evidence. Only an
 /// unpublished epoch may consult the mutable validator journal.
@@ -25,6 +31,7 @@ pub struct Reader {
     anchor: Cursor,
     snapshots: Arc<super::snapshots::Cache>,
     pub(super) epoch_tag_keep: i64,
+    pub(super) checkpoint: Option<Arc<octra_node_protocol::consensus::ParentCommit>>,
 }
 impl Reader {
     pub(super) fn new(
@@ -33,6 +40,7 @@ impl Reader {
         anchor: Cursor,
         snapshots: Arc<super::snapshots::Cache>,
         epoch_tag_keep: i64,
+        checkpoint: Option<Arc<octra_node_protocol::consensus::ParentCommit>>,
     ) -> Self {
         Self {
             pool,
@@ -40,6 +48,7 @@ impl Reader {
             anchor,
             snapshots,
             epoch_tag_keep,
+            checkpoint,
         }
     }
     pub fn chain(&self) -> &ChainIdentity {
@@ -47,6 +56,11 @@ impl Reader {
     }
     pub fn anchor(&self) -> Cursor {
         self.anchor
+    }
+    /// Finality already authenticated when this imported store was created or
+    /// reopened. Genesis alone supplies no certificate. This mints no history.
+    pub fn checkpoint_parent(&self) -> Option<Arc<octra_node_protocol::consensus::ParentCommit>> {
+        self.checkpoint.clone()
     }
     /// Allocation preflight for one retained finality record. These lengths are
     /// operational hints, never inclusion evidence: callers must subsequently
@@ -237,8 +251,11 @@ pub(super) async fn restore(pool: &SqlitePool, head: &Head) -> Result<Snapshot> 
             },
         );
     }
-    let mut edges = sqlx::query("WITH RECURSIVE reachable(hash) AS (SELECT ? UNION SELECT child FROM node_edges JOIN reachable ON parent=reachable.hash) SELECT e.parent,e.child FROM node_edges e JOIN reachable r ON e.parent=r.hash")
-        .bind(root.as_slice()).fetch(pool);
+    // Keep reachable roots on the outer side. Reordering this join can scan
+    // every historical edge and build a second index of the selected tree.
+    // UNION still deduplicates shared children and terminates corrupted cycles;
+    // restore_owned below still authenticates every object and physical edge.
+    let mut edges = sqlx::query(RESTORE_EDGES).bind(root.as_slice()).fetch(pool);
     while let Some(row) = edges.try_next().await.map_err(error)? {
         let parent: irmin::Hash = row
             .try_get::<Vec<u8>, _>("parent")

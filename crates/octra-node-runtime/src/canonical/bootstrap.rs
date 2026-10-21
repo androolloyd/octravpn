@@ -16,20 +16,24 @@ use octra_node_protocol::{
 pub(super) struct Bootstrap {
     pub(super) raw: Vec<u8>,
     pub(super) window: Vec<u8>,
-    certificate: VerifiedCertificate,
     roots: Vec<(i64, Vec<u8>)>,
+    pub(super) parent: Arc<ParentCommit>,
 }
 impl Bootstrap {
-    fn new(raw: &[u8], window: &[u8], certificate: VerifiedCertificate) -> Result<Self> {
+    fn new(raw: &[u8], window: &[u8], certificate: &VerifiedCertificate) -> Result<Self> {
         let anchor = certificate
             .anchor()
             .ok_or_else(|| error("bootstrap requires finalized authority"))?;
         let roots = roots::verify_snapshot(anchor, window).map_err(error)?;
+        let parent = Arc::new(ParentCommit {
+            certificate: anchor.anchor().finalize.certificate(),
+            validator_set: anchor.anchor().validator_set.clone(),
+        });
         Ok(Self {
             raw: raw.to_vec(),
             window: window.to_vec(),
-            certificate,
             roots,
+            parent,
         })
     }
 }
@@ -131,7 +135,7 @@ impl CanonicalStore {
         if hex::encode(state.root().map_err(error)?) != head.ledger_root {
             return Err(error("snapshot differs from authenticated checkpoint"));
         }
-        let bootstrap = Bootstrap::new(raw_certificate, root_window, certificate)?;
+        let bootstrap = Bootstrap::new(raw_certificate, root_window, &certificate)?;
         Self::initialize(path, chain, state, head, Some(bootstrap), retention).await
     }
 
@@ -194,7 +198,7 @@ impl CanonicalStore {
                 .await
                 .map_err(error)?,
         );
-        let bootstrap = Some(Bootstrap::new(&raw, &window, certificate)?);
+        let bootstrap = Some(Bootstrap::new(&raw, &window, &certificate)?);
         let head_cache = Arc::new(HeadCache::new(anchor.clone()));
         let store = Self {
             pool,
@@ -227,14 +231,19 @@ impl CanonicalStore {
     }
 
     pub fn checkpoint_parent(&self) -> Option<ParentCommit> {
-        let anchor = self.bootstrap.as_ref()?.certificate.anchor()?.anchor();
-        Some(ParentCommit {
-            certificate: anchor.finalize.certificate(),
-            validator_set: anchor.validator_set.clone(),
-        })
+        self.bootstrap
+            .as_ref()
+            .map(|bootstrap| bootstrap.parent.as_ref().clone())
     }
     pub fn checkpoint_root(&self, epoch: i64) -> Option<Vec<u8>> {
         let bootstrap = self.bootstrap.as_ref()?;
+        // The configured genesis commitment is independently trusted even
+        // after pruning. This adds no synthetic epoch record or transactions.
+        if epoch == 0 {
+            if let Some(root) = self.chain.genesis_root() {
+                return Some(root.0.to_vec());
+            }
+        }
         if let Some((_, root)) = bootstrap.roots.iter().find(|(e, _)| *e == epoch) {
             return hex::decode(root).ok();
         }

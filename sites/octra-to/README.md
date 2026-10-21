@@ -10,7 +10,12 @@ All six current assets are byte-verified on public devnet at Circle
 `octC9XpV4K4LJWFzc16zvaS1Rk3z8nyiqS7xwswH84Tca7E`. The
 [current publication record](../../docs/rust-node/checkpoints/2026-10-19/octra-to-site.json)
 pins the five update transactions and all six asset hashes. DNS delegation is
-live; the public `octra.to` A record and TLS endpoint are still pending.
+live. The apex A record now points to `143.110.222.241` (TTL 300), and the
+relay has a valid public TLS certificate. A direct verified TLS check on
+2026-10-21 returned HTTP 503, `Node is synchronizing`, from the canonical
+gateway; `/rpc`, `/app` and `/circles/*` return 404. This is working HTTPS
+plumbing, not public alpha qualification. The current Mac resolver still has
+the earlier negative DNS result cached.
 
 The site also presents the bonded devnet operator's sealed offer. Its
 `operator-profile.json` is published at `/operators/octra.to/v1.json` in the

@@ -190,6 +190,7 @@ pub struct Driver<H: Host, C: Publication> {
     evidence: octra_node_protocol::consensus::evidence::Pool,
     round_replies: BTreeMap<Bytes, (i64, i64, RoundStep, Instant)>,
     initialized: bool,
+    receive_only: bool,
     proposal_grace: GraceConfig,
     checking: bool,
     relay: ProposalRelay<Broadcast>,
@@ -299,6 +300,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 evidence: octra_node_protocol::consensus::evidence::Pool::default(),
                 round_replies: BTreeMap::new(),
                 initialized: false,
+                receive_only: false,
                 proposal_grace,
                 checking: false,
                 relay,
@@ -331,8 +333,22 @@ impl<H: Host, C: Publication> Driver<H, C> {
         self.duty = Some(handler);
         self
     }
+    /// A nonvoting observer can receive authenticated finalizes without waiting
+    /// to assemble a voting quorum. This also closes every local vote path if
+    /// its host is accidentally marked ready later.
+    pub fn receive_only(mut self) -> Self {
+        self.receive_only = true;
+        self
+    }
+    fn readiness(&self) -> Readiness {
+        let mut readiness = self.host.readiness();
+        if self.receive_only {
+            readiness.can_vote = false;
+        }
+        readiness
+    }
     fn refresh(&mut self) {
-        let (ready, issue) = self.votes.state(&self.engine, self.host.readiness());
+        let (ready, issue) = self.votes.state(&self.engine, self.readiness());
         self.engine.set_voting_ready(ready);
         self.engine.set_round_skip_ready(!self.work_grace());
         // send_replace returns the previous diagnostic result; the newly
@@ -367,7 +383,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
             .as_secs_f64()
     }
     async fn run_inner(&mut self) -> Result<(), Error> {
-        let minimum = if self.engine.validators().n <= 1 {
+        let minimum = if self.receive_only || self.engine.validators().n <= 1 {
             0
         } else if octra_node_protocol::consensus::policy::quorum_active(
             &self.chain,
@@ -383,7 +399,9 @@ impl<H: Host, C: Publication> Driver<H, C> {
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        if !self.receive_only {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
         let validators = self.host.activate(self.engine.state().height).await?;
         self.engine.replace_validator_set(validators);
         self.refresh();

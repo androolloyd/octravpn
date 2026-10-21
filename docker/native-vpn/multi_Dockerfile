@@ -1,4 +1,4 @@
 ARG NODE_IMAGE=octra-native-vpn-qualification:local
 FROM ${NODE_IMAGE}
-COPY multi_fixture.py multi_client.py multi_link.py multi_target.py stock_operator.py /usr/local/bin/
+COPY multi_fixture.py multi_client.py multi_link.py multi_target.py stock_operator.py qualify.py fixture_network.py /usr/local/bin/
 ENTRYPOINT []

@@ -164,8 +164,22 @@ async fn run_until_shutdown(
 }
 
 impl<A: Host> Service<A> {
-    async fn build(&self) -> Result<Live<A>> {
-        let height = i64::try_from(self.node.head().await?.cursor.epoch.0)?
+    async fn build(&self) -> Result<Option<Live<A>>> {
+        let Ok(lease) = self.node.snapshot_lease() else {
+            return Ok(None);
+        };
+        let staged = self.build_at(lease.committed().head()).await;
+        lease.admit(|| {
+            let (handle, driver) = staged?;
+            self.authority.attach(handle)?;
+            Ok(driver)
+        })
+    }
+    async fn build_at(
+        &self,
+        parent: &octra_node_runtime::canonical::Head,
+    ) -> Result<(octra_node_runtime::consensus_driver::Handle, Live<A>)> {
+        let height = i64::try_from(parent.cursor.epoch.0)?
             .checked_add(1)
             .context("consensus epoch overflow")?;
         let validator = driver::Validator::with_peers(
@@ -205,11 +219,13 @@ impl<A: Host> Service<A> {
             Ok(vec![]),
             self.proposal_grace,
         )?;
+        if !self.voting {
+            driver = driver.receive_only();
+        }
         if let Some(duty) = &self.duty {
             driver = driver.with_duty_handler(duty.clone());
         }
-        self.authority.attach(handle)?;
-        Ok(driver)
+        Ok((handle, driver))
     }
     /// Probe complete signed ranges without importing alongside a live driver.
     /// Advertised heads can trigger a probe but cannot become canonical state.
@@ -586,8 +602,14 @@ impl<A: Host> Service<A> {
                                     && self.node.resume_at(&sample.head).await?
                                 {
                                     self.pending.recover(&self.submission).await?;
-                                    if self.voting && running.is_none() {
-                                        running = Some(Running::start(self.build().await?));
+                                    // A nonvoting public observer can follow
+                                    // authenticated finalizes through the same
+                                    // publisher. Its host readiness keeps every
+                                    // local vote disabled.
+                                    if running.is_none() {
+                                        if let Some(driver) = self.build().await? {
+                                            running = Some(Running::start(driver));
+                                        }
                                     }
                                     progress = Instant::now();
                                     continue;
@@ -767,7 +789,10 @@ impl<A: Host> Service<A> {
                 // longer owns a persistent queued target.
                 let failure = match &catchup {
                     Ok(false) => Some("catchup_failed:unavailable"),
-                    Err(_) => Some("catchup_apply_failed:invalid"),
+                    Err(error) => {
+                        eprintln!("live catch-up apply failed: {error:#}");
+                        Some("catchup_apply_failed:invalid")
+                    }
                     Ok(true) => None,
                 };
                 if let Some(reason) = failure {
@@ -820,8 +845,10 @@ impl<A: Host> Service<A> {
                 continue;
             }
             self.pending.recover(&self.submission).await?;
-            if self.voting {
-                running = Some(Running::start(self.build().await?));
+            if self.voting || self.minimum_peers > 0 {
+                if let Some(driver) = self.build().await? {
+                    running = Some(Running::start(driver));
+                }
             }
             progress = Instant::now();
         }

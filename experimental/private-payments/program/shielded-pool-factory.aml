@@ -1,0 +1,10 @@
+// Child code/VK are immutable under a factory with no upgrade entrypoint.
+// Native child installation is deferred: initialize is a later finalized call.
+contract ShieldedPoolFactory {
+  event ShieldedPoolDeployed(child: address)
+  fn deploy_pool(payload_b64: string): address {
+    let child = circle_spawn(payload_b64, "parent")
+    emit ShieldedPoolDeployed(child)
+    return child
+  }
+}

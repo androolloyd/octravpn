@@ -33,8 +33,12 @@ enum Command {
     },
     /// Build immutable-term prepaid custody for the existing OCTB Circle host.
     CompileCirclePayments {
-        #[arg(long)]
-        domain: String,
+        /// Derive the receipt domain from the configured full chain origin.
+        #[arg(long, conflicts_with = "domain", required_unless_present = "domain")]
+        config: Option<PathBuf>,
+        /// Explicit domain for offline fixtures; use --config for a network.
+        #[arg(long, conflicts_with = "config", required_unless_present = "config")]
+        domain: Option<String>,
         #[arg(long)]
         custody_cap: u64,
         #[arg(long)]
@@ -66,6 +70,37 @@ enum Command {
     InitIdentity {
         #[arg(long)]
         key: PathBuf,
+    },
+    /// Initialize a new encrypted operator wallet on supported devnet history.
+    #[cfg(feature = "private-payments-experimental")]
+    InitPrivateWallet {
+        #[arg(long)]
+        config: PathBuf,
+    },
+    /// Initialize empty encrypted payer/index books on a supported devnet pool.
+    #[cfg(feature = "private-payments-experimental")]
+    InitPrivatePayer {
+        #[arg(long)]
+        config: PathBuf,
+    },
+    /// Import finite deposit/purchase consent while the node is stopped.
+    #[cfg(feature = "private-payments-experimental")]
+    PrivatePayerConsent {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        requests: PathBuf,
+    },
+    /// Seal complete finite route consent offline, before any operator request.
+    #[cfg(feature = "private-payments-experimental")]
+    PrivateRouteConsent {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        requests: PathBuf,
+        /// Finish an interrupted initialization with the exact original input.
+        #[arg(long)]
+        resume: bool,
     },
     /// Show the public native VPN keys used for operator registration.
     VpnIdentity {
@@ -121,6 +156,15 @@ enum Command {
 }
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with_ansi(false)
+        .with_writer(std::io::stderr)
+        .try_init()
+        .map_err(|error| anyhow::anyhow!("initialize node diagnostics: {error}"))?;
     match Cli::parse().command {
         Command::CheckStore(options) => std::process::exit(options.run().await?),
         Command::FheAudit(options) => std::process::exit(options.run().await?),
@@ -141,10 +185,22 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         Command::CompileCirclePayments {
+            config,
             domain,
             custody_cap,
             minimum_stake,
         } => {
+            let domain = match (config, domain) {
+                (Some(path), None) => {
+                    let config = octra_node::network::read(&path)?;
+                    octra_node::vpn::payments::application_domain(
+                        &config.network.identity,
+                        octra_node::vpn::payments::Application::Circle,
+                    )
+                }
+                (None, Some(domain)) => domain,
+                _ => unreachable!("clap requires exactly one Circle domain source"),
+            };
             println!(
                 "{}",
                 serde_json::to_string_pretty(&octra_node::vpn::payments::build::compile(
@@ -177,6 +233,65 @@ async fn main() -> Result<()> {
                 "{}",
                 serde_json::to_string_pretty(&octra_node::identity::create(&key)?)?
             );
+        }
+        #[cfg(feature = "private-payments-experimental")]
+        Command::InitPrivateWallet { config } => {
+            let wallet =
+                octra_node::vpn::payments::shielded::startup::offline::run_with_runtime_factory(
+                    &config,
+                    private_crypto,
+                    octra_node::vpn::payments::shielded::startup::Action::Operator,
+                )
+                .await?;
+            println!("{}", serde_json::json!({"created":true,"wallet":wallet}));
+        }
+        #[cfg(feature = "private-payments-experimental")]
+        Command::InitPrivatePayer { config } => {
+            let wallet = Box::pin(
+                octra_node::vpn::payments::shielded::startup::offline::run_with_runtime_factory(
+                    &config,
+                    private_crypto,
+                    octra_node::vpn::payments::shielded::startup::Action::Payer,
+                ),
+            )
+            .await?;
+            println!("{}", serde_json::json!({"created":true,"wallet":wallet}));
+        }
+        #[cfg(feature = "private-payments-experimental")]
+        Command::PrivatePayerConsent { config, requests } => {
+            let requests =
+                octra_node::vpn::payments::shielded::payer::startup::read_requests(&requests)?;
+            let wallet = Box::pin(
+                octra_node::vpn::payments::shielded::startup::offline::run_with_runtime_factory(
+                    &config,
+                    private_crypto,
+                    octra_node::vpn::payments::shielded::startup::Action::Consent(requests),
+                ),
+            )
+            .await?;
+            println!("{}", serde_json::json!({"accepted":true,"wallet":wallet}));
+        }
+        #[cfg(feature = "private-payments-experimental")]
+        Command::PrivateRouteConsent {
+            config,
+            requests,
+            resume,
+        } => {
+            let hops = octra_node::vpn::payments::shielded::payer::startup::route::read_consent(
+                &requests,
+            )?;
+            let wallet = Box::pin(
+                octra_node::vpn::payments::shielded::startup::offline::run_with_runtime_factory(
+                    &config,
+                    private_crypto,
+                    octra_node::vpn::payments::shielded::startup::Action::RouteConsent {
+                        hops,
+                        resume,
+                    },
+                ),
+            )
+            .await?;
+            println!("{}", serde_json::json!({"accepted":true,"wallet":wallet}));
         }
         Command::VpnIdentity { key } => {
             let node = octra_node::identity::read(&key)?;
@@ -269,6 +384,12 @@ async fn main() -> Result<()> {
 }
 /// Only this CLI assumes that its own executable implements the hidden helper.
 /// Library launchers receive the runtime capability from their embedding host.
+#[cfg(feature = "private-payments-experimental")]
+fn private_crypto(
+    settings: Option<&octra_node_protocol::consensus::profile::Settings>,
+) -> Result<octra_node_runtime::circle::CircleRuntime> {
+    settings.map_or_else(crypto, crypto_from_settings)
+}
 fn crypto() -> Result<octra_node_runtime::circle::CircleRuntime> {
     crypto_with_limits(octra_node_runtime::crypto_worker::Limits::capture())
 }
@@ -308,6 +429,75 @@ fn shutdown() -> tokio::sync::watch::Receiver<bool> {
 #[cfg(test)]
 mod startup_settings_tests {
     use super::*;
+    #[test]
+    fn private_wallet_initialization_command_is_feature_scoped() {
+        let result = Cli::try_parse_from([
+            "octra-node",
+            "init-private-wallet",
+            "--config",
+            "private.json",
+        ]);
+        #[cfg(feature = "private-payments-experimental")]
+        assert!(matches!(
+            result.unwrap().command,
+            Command::InitPrivateWallet { .. }
+        ));
+        #[cfg(not(feature = "private-payments-experimental"))]
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn private_payer_commands_are_feature_scoped() {
+        for args in [
+            vec![
+                "octra-node",
+                "init-private-payer",
+                "--config",
+                "private.json",
+            ],
+            vec![
+                "octra-node",
+                "private-payer-consent",
+                "--config",
+                "private.json",
+                "--requests",
+                "consent.json",
+            ],
+        ] {
+            let result = Cli::try_parse_from(args);
+            #[cfg(feature = "private-payments-experimental")]
+            assert!(result.is_ok());
+            #[cfg(not(feature = "private-payments-experimental"))]
+            assert!(result.is_err());
+        }
+    }
+
+    #[test]
+    fn circle_build_requires_one_domain_source() {
+        let base = ["octra-node", "compile-circle-payments"];
+        let terms = ["--custody-cap", "200000000", "--minimum-stake", "100000000"];
+        let parse = |source: &[&str]| {
+            Cli::try_parse_from(base.into_iter().chain(source.iter().copied()).chain(terms))
+        };
+        assert!(matches!(
+            parse(&["--config", "network.json"]).unwrap().command,
+            Command::CompileCirclePayments {
+                config: Some(_),
+                domain: None,
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse(&["--domain", &"a".repeat(64)]).unwrap().command,
+            Command::CompileCirclePayments {
+                config: None,
+                domain: Some(_),
+                ..
+            }
+        ));
+        assert!(parse(&[]).is_err());
+        assert!(parse(&["--config", "network.json", "--domain", "a"]).is_err());
+    }
 
     #[test]
     fn cli_worker_capability_uses_the_captured_file_values() {

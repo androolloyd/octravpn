@@ -1,0 +1,152 @@
+{
+  "status": "Composite IPv4 packet enforcement and retained route/filter ownership qualified locally; full funded private multihop and public launch pending",
+  "adopted_upstream": "d3e834919bd586e81f947d0dae91becc6c43c756",
+  "evidence": "out/private-packet-guard-20261020",
+  "current_source_manifest": "out/private-packet-guard-20261020/v4/source-before.json",
+  "source_files": 1861,
+  "current_sources_unchanged": true,
+  "host_checks": [
+    {
+      "name": "experimental-strict",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "-p",
+        "octra-node",
+        "-p",
+        "octravpn-client",
+        "--features",
+        "octra-node/private-payments-experimental",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 3.61,
+      "log": "out/private-packet-guard-20261020/v3/experimental-strict.log"
+    },
+    {
+      "name": "normal-strict",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "-p",
+        "octra-node",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 0.5,
+      "log": "out/private-packet-guard-20261020/v3/normal-strict.log"
+    },
+    {
+      "name": "client",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "octravpn-client",
+        "--all-targets"
+      ],
+      "exit": 0,
+      "seconds": 32.47,
+      "log": "out/private-packet-guard-20261020/v3/client.log"
+    }
+  ],
+  "host_source_manifest": "out/private-packet-guard-20261020/v3/source-before.json",
+  "host_followup_change": "Only two redundant raw-string delimiters in Linux-only tests changed after host checks; production sources unchanged",
+  "passed": {
+    "client_tests": 380,
+    "client_benchmark_checks": 4,
+    "linux_scope_tests": 5,
+    "strict_host_configurations": 2,
+    "strict_linux_release_client_all_targets": true
+  },
+  "payment_regression": {
+    "tests_passed": 69,
+    "scope": "Passed after packet enforcement implementation; subsequent edits only normalize Linux route metadata, make imports explicit, and format Linux-only tests",
+    "source_manifest": "out/private-packet-guard-20261020/source-before.json",
+    "log": "out/private-packet-guard-20261020/native-payments.log"
+  },
+  "linux": {
+    "image": "sha256:bf9be79baa38172f2dd8cffea2221200ebed22209542dcc7eb111f3579f3434c",
+    "runtime_base": "sha256:b27e5d12c66801033a24eb5960cdd0710581aada81ca74a11fa34e00686964b5",
+    "runtime_base_layers_verified": true,
+    "binary_sha256": {
+      "protocol-scope": "6c4c7297e1668f16c59cf632f0287f2f9d71731f2ea8f155ceba2e870bd1fc65",
+      "swarm-scope": "92e820f8dc085685a50527b2d112d5f5341d803be00477a37c1a71f80bf07a82",
+      "routes-scope": "176354b2e2beb5943644c584ed0833125167aa0317d9b76e20ca03c2043a3d80"
+    },
+    "context_files": 4938,
+    "context_sources_unchanged": true,
+    "container_cleanup_verified": true,
+    "runtime_scope_qualified": true,
+    "full_native_paid_kernel_retested": false
+  },
+  "implemented": [
+    "Static kernel packet allowlist derived from accepted endpoint, interface and socket-mark intent",
+    "Pre-funding read-only filtering ownership check; atomic non-flushing transactions per family",
+    "Only exact existing filtering rules and the first OUTPUT jump may be reused; foreign or shadowed state is refused",
+    "Authenticated sealed-plan recovery repairs a missing family and base routes without adopting paid-device routes",
+    "Real UID-1000/CAP-empty socket probes verify zero unauthorized transmitted packets; marked chain and final paid exit packets succeed",
+    "Filtering remains installed after errors/crashes and is removed only after explicit route cleanup",
+    "Exact IPv6 blackhole loopback representation normalization with negative controls"
+  ],
+  "limitations": [
+    "Root and network-capable principals remain trusted; IPv4 composite routing profile only",
+    "Native authenticated frames and kernel policy are component checks, not funded private multihop",
+    "Legacy standalone v3 route-only guard still needs packet enforcement integration before host-exit launch",
+    "No public deployment, cryptographic production ceremony or public shielded-payment qualification",
+    "Filtering guards local OUTPUT; operator FORWARD policy and full stock-client integration remain separate gates"
+  ],
+  "pending": [
+    "Fix and regress the public observer queue cursor ordering failure before qualified retained-state restart",
+    "Complete full funded private multihop process restart, exhaustion, carrier loss and canonical/ExEx agreement",
+    "Same-channel multiple traffic classes",
+    "Sustained public devnet service, stock-client onboarding, octra.to DNS/TLS and production cryptographic review"
+  ],
+  "public_observer": {
+    "Id": "4820e378980a61ba2ca090af05894275a66445e52dca4456bfe3f22c8125def9",
+    "Name": "/octra-devnet-paid-candidate-20261020",
+    "Image": "sha256:dae2796c3df990e94657f25d784cb31e48fe3d4da51a0d0a2efd838d51ab4758",
+    "Created": "2026-10-20T04:12:50.513405578Z",
+    "State": {
+      "Status": "exited",
+      "Running": false,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 0,
+      "ExitCode": 1,
+      "Error": "",
+      "StartedAt": "2026-10-20T04:12:50.595117943Z",
+      "FinishedAt": "2026-10-20T09:36:18.358777829Z"
+    },
+    "RestartCount": 0,
+    "resources": {
+      "Memory": 64424509440,
+      "MemorySwap": 128849018880,
+      "NanoCpus": 0,
+      "RestartPolicy": {
+        "Name": "no",
+        "MaximumRetryCount": 0
+      }
+    }
+  },
+  "new_consensus_change": false,
+  "deployed": false,
+  "shielded_multihop_qualified": false,
+  "launch_qualified": false,
+  "full_goal_complete": false,
+  "recorded_at_utc": "2026-10-20T10:35:32.358014+00:00"
+}

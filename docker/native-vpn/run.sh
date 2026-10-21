@@ -14,7 +14,11 @@ task_output=${1:?provide a fresh evidence output directory}
 for task_source in octra octra-foundry headscale-rs; do test -d "$task_context/$task_source"; done
 test ! -e "$task_output"
 mkdir -m 700 "$task_output"
-docker build --build-arg "BUILDER_IMAGE=$task_builder" -f "$task_root/docker/native-vpn/Dockerfile" -t "$task_image" "$task_context" 2>&1 | tee "$task_output/build.log"
+if test "${OCTRA_NATIVE_VPN_SKIP_BUILD:-0}" = 1; then
+    docker image inspect --format '{{.Id}}' "$task_image" | tee "$task_output/build.log"
+else
+    docker build --build-arg "BUILDER_IMAGE=$task_builder" -f "$task_root/docker/native-vpn/Dockerfile" -t "$task_image" "$task_context" 2>&1 | tee "$task_output/build.log"
+fi
 task_volume=$(docker volume create)
 task_hop_volume=''
 task_container=''

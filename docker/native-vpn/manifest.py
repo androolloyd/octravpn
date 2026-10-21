@@ -7,8 +7,8 @@ def digest(path):
         for part in iter(lambda:stream.read(1048576),b''):value.update(part)
     return value.hexdigest()
 base=pathlib.Path('/work'); paths=[]
-roots=[base/'octra'/name for name in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','crates','program','vendor','tests','pvac-sidecar','licenses','docker/native-vpn','docs/rust-node/source-map.json','docs/rust-node/upstream.json','docs/rust-node/network-authority.json','.cargo/config.toml','scripts/node-port']]+[base/'octra-foundry',base/'headscale-rs']
-skip={'target','out','.git','node_modules','.cargo-cache','.codex','.agents','.aws'}
+roots=[base/'octra'/name for name in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','crates','experimental/private-payments','program','vendor','tests','sites','pvac-sidecar','licenses','docker/native-vpn','docs/rust-node/source-map.json','docs/rust-node/upstream.json','docs/rust-node/network-authority.json','.cargo/config.toml','scripts/node-port']]+[base/'octra-foundry',base/'headscale-rs']
+skip={'target','out','.git','node_modules','__pycache__','.cargo-cache','.codex','.agents','.aws'}
 for root in roots:
     paths.extend([root] if root.is_file() else [p for p in root.rglob('*') if p.is_file() and not p.is_symlink() and not skip.intersection(p.relative_to(root).parts)])
 records=[]; combined=hashlib.sha256(b'octra:native-vpn:qualification:v1\0')

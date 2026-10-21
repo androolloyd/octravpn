@@ -165,7 +165,10 @@ pub async fn canonical_with_graph(
     anchored(graph, epoch, assets.identity().epoch, history).await
 }
 
-async fn anchored(
+/// Resolve against the node's authenticated rule anchors. The caller must
+/// independently authenticate the captured epoch and private genesis opt-in;
+/// this profile carries no canonical snapshot or mutation authority.
+pub async fn anchored(
     graph: &Graph,
     epoch: i64,
     captured: u64,

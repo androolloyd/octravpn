@@ -1,0 +1,48 @@
+{
+  "observed_at_utc": "2026-10-21T02:59:07.469906+00:00",
+  "chain_id": "octra-devnet-9871-cluster",
+  "rpc": "https://devnet.octrascan.io/rpc",
+  "factory": "oct7bVQG5wUTuMSVzYcBtNfuYUai7j9HjjrE3CZqhVqbbjW",
+  "pool": "octFtF7bWUkmko9y6yvYst1LhyPYzbgbMwao1FA3ZHKWqJz",
+  "pool_cap_ou": 1000000,
+  "escrow_deposited_ou": 0,
+  "declared_fees_ou": 600000,
+  "observed_spend_ou": 600000,
+  "submissions": [
+    {
+      "action": "deploy factory",
+      "hash": "9bc42538f9a4648b9478ad2471631db245be865ad511ea8b495647d239f786bd",
+      "nonce": 536,
+      "epoch": null
+    },
+    {
+      "action": "spawn pool",
+      "hash": "c72cbca21f3a716d5496f9d7a63df8d306fc62215225e04ffe29c4423bc67809",
+      "nonce": 537,
+      "epoch": 1725649
+    },
+    {
+      "action": "initialize pool",
+      "hash": "d28bab973b59a28ec5a2fe056fc6cd22d0346204112c224de5698a2486edb3b2",
+      "nonce": 538,
+      "epoch": 1725656
+    }
+  ],
+  "factory_code_hash": "126ef6da74179073320475719b98477912184c579b0f12400c11febb18ad8ce2",
+  "pool_code_hash": "2a2821b065ae4bf39b8424674987a33d4f3caed0f7c1f166b156abea80c1e65c",
+  "material_manifest_sha256": "07ffff26012ce8259d74ca244ef66a391dd64a4406bde75093decd1707c163a5",
+  "readback": "Official RPC and independent local Rust canonical RPC both verify deployed program bytes and owners",
+  "production_setup_qualified": false,
+  "traffic_qualified": false,
+  "public_alpha_live": false,
+  "independent_native_readback": {
+    "observed_at_utc": "2026-10-21T03:39:00.930477+00:00",
+    "local_epoch": 1725799,
+    "serving": true,
+    "verified_program_hashes": {
+      "factory": "126ef6da74179073320475719b98477912184c579b0f12400c11febb18ad8ce2",
+      "pool": "2a2821b065ae4bf39b8424674987a33d4f3caed0f7c1f166b156abea80c1e65c"
+    },
+    "evidence": "out/devnet-private-alpha-20261020/local-pool-readback.json"
+  }
+}

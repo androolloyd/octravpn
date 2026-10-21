@@ -4,6 +4,7 @@
 //! execution and authenticated activation history remain explicit host inputs.
 //! A host must exclusively own the canonical writer and explicitly resume
 //! serving after catch-up. Restart starts suspended, even with valid history.
+pub mod archive;
 pub mod bootstrap;
 mod compute;
 pub mod consensus;
@@ -61,7 +62,7 @@ use tokio::sync::{watch, Mutex as AsyncMutex};
 
 pub use legacy::Status as LegacyStatus;
 pub use octra_node_protocol::consensus::quarantine::RootEvidence;
-pub use published::{Committed, RootQuarantineTicket, Status};
+pub use published::{Committed, RootQuarantineTicket, SnapshotLease, Status};
 use published::{Handle as Published, Serving, Shared};
 pub use services::Services;
 
@@ -226,6 +227,11 @@ impl<A: Host> Node<A> {
     }
     pub fn snapshot(&self) -> Result<Committed> {
         Ok(self.shared.current()?.committed.clone())
+    }
+    /// Capture the exact revocable publication for a reusable app/ExEx adapter.
+    /// Funding validation belongs to the adapter; final IO must use this lease.
+    pub fn snapshot_lease(&self) -> Result<SnapshotLease> {
+        SnapshotLease::capture(self.shared.clone())
     }
     /// The actual live legacy Tree epoch/root count, independent of its optional
     /// unavailable parent digest and of the BFT root-history window.

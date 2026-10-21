@@ -1,14 +1,16 @@
 //! Durable prepaid purchases and separate local delivery accounting. Purchase
 //! the explicit class caps before forwarding; interrupted handoffs retain
 //! uncertain capacity. Canonical purchase confirmation belongs to the runner.
-//! This journal stores public authorization material, never secrets.
+//! Public authorizations use the original private-file journal. Private plan
+//! records use authenticated encryption scoped to the receipt identity and pins.
 //! The runner must keep one stable path per plan and only Create for a genuinely
 //! new plan. Full directory rollback or deletion by the host owner requires an
 //! independent operator/chain high-water mark; a local checksum cannot detect it.
 use anyhow::{ensure, Context, Result};
 use octravpn_core::{
     payments::{
-        Budget, Connect, Direction, PlanBinding, SignedConnect, SignedUsage, Tariff, Usage,
+        Budget, Connect, Direction, PlanBinding, SignedConnect, SignedServiceReceipt, SignedStatus,
+        SignedUsage, Tariff, Usage,
     },
     sig::{verify, KeyPair, PublicKey},
 };
@@ -16,7 +18,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, path::Path, sync::Arc};
 
+pub(crate) mod private;
 pub(crate) mod storage;
+use private::PrivateIdentity;
 use storage::Store;
 
 /// Creation is an explicit fresh-plan operation. Recovery never infers creation
@@ -37,6 +41,8 @@ struct Identity {
     receipt_key: PublicKey,
     #[serde(default, skip_serializing_if = "is_false")]
     stock: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    private: Option<PrivateIdentity>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -49,12 +55,18 @@ struct State {
     local_bytes: Vec<u64>,
     authorized_bytes: Vec<u64>,
     receipts: Vec<Option<SignedUsage>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    service_receipts: Vec<Option<SignedServiceReceipt>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    service_conflict: Option<[SignedServiceReceipt; 2]>,
     #[serde(default, skip_serializing_if = "is_zero")]
     handoff_sequence: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pending: Option<Pending>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     uncertain_bytes: Vec<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    private_status: Option<octravpn_core::payments::SignedShieldedStatus>,
 }
 
 #[expect(
@@ -227,6 +239,30 @@ impl State {
             sequences.last().copied().unwrap_or(0) == self.usage_sequence,
             "client usage sequence differs from durable receipt high-water mark"
         );
+        ensure!(
+            self.service_receipts.is_empty() || self.service_receipts.len() == classes,
+            "client service statement class shape differs"
+        );
+        for (class, signed) in self.service_receipts.iter().enumerate() {
+            if let Some(signed) = signed {
+                signed.verify()?;
+                ensure!(
+                    signed.receipt.usage.binding() == self.identity.binding
+                        && usize::from(signed.receipt.usage.traffic_class) == class
+                        && signed.receipt.operator == *self.identity.tariff.operator(),
+                    "stored service statement differs from accepted plan"
+                );
+            }
+        }
+        if let Some([first, second]) = &self.service_conflict {
+            SignedServiceReceipt::slash_params(first, second)?;
+            ensure!(
+                first.receipt.usage.binding() == self.identity.binding
+                    && first.receipt.operator == *self.identity.tariff.operator(),
+                "stored service conflict differs from accepted plan"
+            );
+        }
+        self.validate_private()?;
         Ok(())
     }
 }
@@ -256,7 +292,7 @@ impl Journal {
             tariff,
             original_budget_ou,
             prepaid_bytes,
-            (key, false),
+            (key, false, None),
             mode,
         )
     }
@@ -272,7 +308,7 @@ impl Journal {
             plan.tariff.clone(),
             plan.original_budget_ou,
             plan.prepaid_bytes.clone(),
-            (key, true),
+            (key, true, None),
             mode,
         )
     }
@@ -282,7 +318,7 @@ impl Journal {
         tariff: Tariff,
         original_budget_ou: u64,
         prepaid_bytes: Vec<u64>,
-        (key, stock): (Arc<KeyPair>, bool),
+        (key, stock, private): (Arc<KeyPair>, bool, Option<PrivateIdentity>),
         mode: OpenMode,
     ) -> Result<Self> {
         binding.validate()?;
@@ -302,8 +338,13 @@ impl Journal {
             prepaid_bytes,
             receipt_key: key.public,
             stock,
+            private,
         };
-        let mut store = Store::open(path, mode)?;
+        let mut store = if identity.private.is_some() {
+            Store::open_private(path, mode, private::protection(&identity, &key)?)?
+        } else {
+            Store::open(path, mode)?
+        };
         let mut state = match mode {
             OpenMode::Create => {
                 let classes = identity.tariff.classes().len();
@@ -315,9 +356,12 @@ impl Journal {
                     local_bytes: vec![0; classes],
                     authorized_bytes: vec![0; classes],
                     receipts: vec![None; classes],
+                    service_receipts: Vec::new(),
+                    service_conflict: None,
                     handoff_sequence: 0,
                     pending: None,
                     uncertain_bytes: vec![0; classes],
+                    private_status: None,
                 };
                 state.validate()?;
                 let envelope = Envelope {
@@ -367,7 +411,7 @@ impl Journal {
         })
     }
 
-    fn ready(&self) -> Result<()> {
+    pub(crate) fn ready(&self) -> Result<()> {
         ensure!(
             !self.poisoned,
             "client payment journal write was ambiguous; reopen before further authorization"
@@ -542,6 +586,61 @@ impl Journal {
         Ok(self.state.receipts.iter().flatten().cloned().collect())
     }
 
+    /// Keep the latest slashable operator statement per class. Conflicting
+    /// statements in one slot are retained together before stopping payment.
+    pub(crate) fn observe_service_status(
+        &mut self,
+        signed: &SignedStatus,
+        operator_generation: u64,
+    ) -> Result<()> {
+        self.ready()?;
+        signed.verify()?;
+        ensure!(operator_generation > 0, "operator bond generation missing");
+        ensure!(
+            signed.status.binding == self.state.identity.binding
+                && signed.status.tariff == self.state.identity.tariff
+                && signed.service_receipts.len() == self.state.identity.tariff.classes().len(),
+            "operator service statements missing or differ from accepted plan"
+        );
+        ensure!(
+            self.state.service_conflict.is_none(),
+            "operator service statement conflict already recorded"
+        );
+        let mut next = self.state.clone();
+        if next.service_receipts.is_empty() {
+            next.service_receipts = vec![None; signed.service_receipts.len()];
+        }
+        let mut changed = false;
+        for (class, receipt) in signed.service_receipts.iter().enumerate() {
+            ensure!(
+                receipt.receipt.operator_generation == operator_generation,
+                "service statement bond generation differs"
+            );
+            if let Some(previous) = &next.service_receipts[class] {
+                let prior = &previous.receipt.usage;
+                let current = &receipt.receipt.usage;
+                if current.sequence == prior.sequence && current.total_bytes != prior.total_bytes {
+                    next.service_conflict = Some([previous.clone(), receipt.clone()]);
+                    self.commit(next)?;
+                    anyhow::bail!("slashable operator service statement conflict recorded");
+                }
+                ensure!(
+                    current.sequence >= prior.sequence && current.total_bytes >= prior.total_bytes,
+                    "operator service statement regressed"
+                );
+                if current.sequence == prior.sequence {
+                    continue;
+                }
+            }
+            next.service_receipts[class] = Some(receipt.clone());
+            changed = true;
+        }
+        if changed {
+            self.commit(next)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn totals(&self) -> &[u64] {
         &self.state.local_bytes
     }
@@ -570,6 +669,30 @@ impl Journal {
         )?
         .remaining_ou())
     }
+}
+
+/// Read a stopped journal and return ready-to-submit Circle call arguments.
+/// The exclusive reader lease prevents racing a live payer writer.
+pub(crate) fn service_evidence(path: &Path) -> Result<serde_json::Value> {
+    let mut store = Store::open(path, OpenMode::Resume)?;
+    let envelope: Envelope =
+        serde_json::from_slice(&store.read()?).context("invalid client payment journal")?;
+    ensure!(
+        envelope.checksum == checksum(&envelope.payload)?,
+        "client payment journal checksum mismatch"
+    );
+    envelope.payload.validate()?;
+    let [first, second] = envelope
+        .payload
+        .service_conflict
+        .context("no operator service conflict recorded")?;
+    Ok(serde_json::json!({
+        "deployment": first.receipt.usage.deployment,
+        "operator": first.receipt.operator,
+        "operator_generation": first.receipt.operator_generation,
+        "method": "slash_double_service_receipt",
+        "params": SignedServiceReceipt::slash_params(&first, &second)?,
+    }))
 }
 
 pub(crate) fn validate_purchase(tariff: &Tariff, budget: u64, targets: &[u64]) -> Result<()> {

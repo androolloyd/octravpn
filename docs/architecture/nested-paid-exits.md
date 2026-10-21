@@ -103,6 +103,32 @@ The final qualification checkpoint records executed combinations. Support for a
 three-hop route in source does not establish a three-hop kernel test result, and
 local testing does not qualify public paid onboarding or Mainnet.
 
+## Routed private-control qualification
+
+The two-hop gate accepts `--application circle --private-control`. This deploys
+real Circle custody on four local validators and uses separate operator TLS
+identities under a fresh offline CA. Each accepted plan carries its root in
+`control_ca_pem`; all operator hostnames end in `.invalid` and resolve only via
+the route's accepted IP pins. The client firewall rejects physical downstream
+traffic and DNS. A direct-connect negative control must increment that firewall,
+then all counters must remain zero during the real run. A wrong server hostname
+must fail before any purchase. The exit's TLS listener must see only the entry
+carrier's source address. Existing traffic, MTU, restart, exhaustion, withdrawal
+and four-sink ExEx checks still apply.
+
+```sh
+python3 docker/native-vpn/multi_run.py \
+  --node-image <source-bound-native-vpn-image> \
+  --context /absolute/path/to/frozen/context \
+  --headscale-commit <exact-root-lock-commit> \
+  --application circle --private-control --exhaust-hop 1 \
+  --out /absolute/path/to/fresh-evidence
+```
+
+Run each exhaustion direction separately. These checks exercise encrypted
+control transport and public prepaid payments; they do not establish shielded
+payments, public TLS availability or resistance to global timing correlation.
+
 ## Three-hop qualification
 
 The additional kernel gate uses three independent native operators, four

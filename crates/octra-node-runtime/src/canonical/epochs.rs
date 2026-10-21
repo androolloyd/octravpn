@@ -103,9 +103,25 @@ struct Entry {
 }
 impl Reader {
     /// Canonical Program clock from this captured head's authenticated epoch
-    /// record. Irmin commit dates and the local wall clock are not substitutes.
-    /// Genesis/checkpoint anchors without a retained record return no clock.
+    /// record or the imported floor's independently authenticated finalized QC.
+    /// Irmin commit dates and the local wall clock are not substitutes. A
+    /// genesis anchor without a finalized certificate still returns no clock.
     pub async fn epoch_time_ms(&self, captured: &Head) -> Result<Option<i64>> {
+        if captured.cursor == self.anchor() {
+            if self.head_at(captured.cursor.sequence).await? != *captured {
+                return Err(error("epoch clock captured head differs"));
+            }
+            return self
+                .checkpoint
+                .as_ref()
+                .map(|parent| {
+                    octra_node_protocol::consensus::policy::time_of_seconds(
+                        parent.certificate.header.ts,
+                    )
+                })
+                .transpose()
+                .map_err(error);
+        }
         let epoch = i64::try_from(captured.cursor.epoch.0).map_err(error)?;
         self.epoch_entry(captured, epoch)
             .await?

@@ -282,6 +282,21 @@ impl Circle {
     fn funded(&mut self) {
         self.initialize();
         self.call(11, "bond_operator", json!([]), host::STAKE);
+        let operator_message = format!(
+            "Octranet operator key v1|{}|{}|{}|1",
+            host::DOMAIN,
+            self.host.program,
+            host::address(11)
+        );
+        self.call(
+            11,
+            "register_operator_receipt_key",
+            json!([
+                STANDARD.encode(host::key(11).verifying_key().as_bytes()),
+                host::sign(11, &operator_message)
+            ]),
+            0,
+        );
         let message = format!(
             "Octranet register v1|{}|{}|{}|1",
             host::DOMAIN,
@@ -394,6 +409,24 @@ fn circle_custody_buys_before_delivery_withdraws_immediately_and_uses_canonical_
     );
     assert_eq!(c.uint(b"class_bytes", &["0", "0"]), 1_048_576);
     assert_eq!(c.uint(b"earnings", &[&host::address(11)]), 10);
+    let operator_before = c
+        .host
+        .ledger
+        .account(host::address(11).as_bytes())
+        .unwrap()
+        .balance
+        .clone();
+    c.call(11, "withdraw_earnings", json!([10]), 0);
+    assert_eq!(c.uint(b"earnings", &[&host::address(11)]), 0);
+    assert_eq!(
+        c.host
+            .ledger
+            .account(host::address(11).as_bytes())
+            .unwrap()
+            .balance,
+        operator_before - host::FEE + 10
+    );
+    c.denied(11, "withdraw_earnings", json!([10]), 0);
     // Unsupported claims roll back real ledger value and all stable state.
     c.denied(12, "withdraw_channel", json!([host::FUND + 1]), 0);
     let before = c
@@ -437,6 +470,81 @@ fn circle_custody_buys_before_delivery_withdraws_immediately_and_uses_canonical_
             .unwrap()
             .balance,
         before - host::FEE + host::STAKE
+    );
+}
+
+#[test]
+fn circle_operator_equivocation_pays_bond_to_plan_payer_once() {
+    let mut c = Circle::new();
+    c.funded();
+    let before = c
+        .host
+        .ledger
+        .account(host::address(12).as_bytes())
+        .unwrap()
+        .balance
+        .clone();
+    let message = |bytes| {
+        format!(
+            "Octranet service receipt v1|{}|{}|{}|1|0|{}|1|0|{}|0|7|{bytes}",
+            host::DOMAIN,
+            c.host.program,
+            host::address(11),
+            host::address(12),
+            host::MANIFEST
+        )
+    };
+    let first = host::sign(11, &message(100));
+    let second = host::sign(11, &message(101));
+    c.denied(
+        13,
+        "slash_double_service_receipt",
+        json!([0, 0, 7, 100, first, 101, host::sign(21, &message(101))]),
+        0,
+    );
+    c.call(
+        13,
+        "slash_double_service_receipt",
+        json!([0, 0, 7, 100, first, 101, second]),
+        0,
+    );
+    assert_eq!(c.uint(b"operator_stake", &[&host::address(11)]), 0);
+    assert_eq!(c.uint(b"operator_slashed", &[&host::address(11), "1"]), 1);
+    assert_eq!(
+        c.uint(b"slash_award", &[&host::address(11), "1"]),
+        host::STAKE
+    );
+    assert_eq!(
+        c.host
+            .ledger
+            .account(host::address(12).as_bytes())
+            .unwrap()
+            .balance,
+        before
+    );
+    c.denied(12, "withdraw_slash_award", json!([host::address(11), 1]), 0);
+    c.denied(
+        13,
+        "slash_double_service_receipt",
+        json!([0, 0, 7, 100, first, 101, second]),
+        0,
+    );
+    c.host.now += host::WEEK;
+    let payer = c
+        .host
+        .ledger
+        .account(host::address(12).as_bytes())
+        .unwrap()
+        .balance
+        .clone();
+    c.call(12, "withdraw_slash_award", json!([host::address(11), 1]), 0);
+    assert_eq!(
+        c.host
+            .ledger
+            .account(host::address(12).as_bytes())
+            .unwrap()
+            .balance,
+        payer - host::FEE + host::STAKE
     );
 }
 

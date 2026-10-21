@@ -1,0 +1,89 @@
+{
+  "observed_at_utc": "2026-10-21T00:29:31.204385+00:00",
+  "status": "real hostile-subscriber regression reproduced and fixed; funded Linux rerun pending",
+  "consensus_changes": false,
+  "before": {
+    "r1cs_spans_observed": 6600316,
+    "test_exit_code": 101,
+    "log": "proof-tracing-before-v2.log"
+  },
+  "mechanism": "Thread-local NoSubscriber surrounds synchronous native Groth16 construction, local verification and proof serialization; surrounding node diagnostics remain enabled. No proof, statement, VK or wire rule changes.",
+  "host_private_package": {
+    "tests_passed": 29,
+    "tests_failed": 0,
+    "strict": "passed",
+    "sentinels_before_after": 2,
+    "witness_spans_after": 0
+  },
+  "integrated_node_results_so_far": [
+    {
+      "check": "proof-tracing-after",
+      "exit_code": 0,
+      "seconds": 19.99
+    },
+    {
+      "check": "proof-tracing-strict",
+      "exit_code": 0,
+      "seconds": 17.46
+    },
+    {
+      "check": "host-proof-scope-strict",
+      "exit_code": 0,
+      "seconds": 28.56
+    },
+    {
+      "check": "host-proof-scope-tests",
+      "exit_code": 0,
+      "seconds": 493.73
+    }
+  ],
+  "linux": {
+    "context": "out/private-funded-multihop-20261020/linux-v10/context",
+    "build_pending": false,
+    "funded_profiles_qualified": false,
+    "proof_scoped_image": "sha256:e11a464f8b26b410e4d327fbd616c50e6f2b75ad8de26fef6843028f5f2bf1a5",
+    "sampled_client_memory_gib": [
+      1.403,
+      1.406
+    ],
+    "runtime_deposit_proof_completed": true,
+    "native_signed_attempts_per_client": 1,
+    "next_gate": "Observer native submission opt-in, then full funded route and accounting"
+  },
+  "previous_funded_runs": [
+    {
+      "case": "matrix-hop0-v6",
+      "canonical_pool_exchanges": 0,
+      "native_fee_bank_or_attempt_rows": 0,
+      "cleanup_verified": true
+    },
+    {
+      "case": "matrix-hop1-v6",
+      "canonical_pool_exchanges": 0,
+      "native_fee_bank_or_attempt_rows": 0,
+      "cleanup_verified": true
+    }
+  ],
+  "public_observer": {
+    "oom_killed": true,
+    "exit_code": 137,
+    "finished_at_utc": "2026-10-21T00:11:33.991233039Z",
+    "restarted_same_state_at_utc": "2026-10-21T00:25:54.578084707Z",
+    "pid": 4134639,
+    "helpers_namespace_verified": "net:[4026533155]",
+    "existing_nat_restored": true,
+    "serving": false
+  },
+  "source_sha256": {
+    "experimental/private-payments/Cargo.toml": "5fe96f6581cff571e7569ce5db81384234229e732e4b97f1d63380798e54984a",
+    "experimental/private-payments/src/pool/transaction.rs": "d4d4be4d4dcbf50e28a4c2b5980c385ff46b0d7889ad702514d7ec57467b0f7a",
+    "Cargo.lock": "3eaa785155156d33b1bacbb5c65cd28095c6457d6f3d62a3ae911539f69527b7",
+    "experimental/private-payments/Cargo.lock": "3ba4d7ca4135c3ea683674d7d58ee0cf8a34efd99b17a63e03628d00c4efb358",
+    "docker/native-vpn/qualify.py": "2e9e39111e0540ac96ca71637c2f8e1d0b39512afe279f4b2fea0e6b31c829e2",
+    "docker/native-vpn/shielded_run.py": "ad515c9fca9271808f76991095ab252daa1cbc66ceb860ce5703d0963d492675"
+  },
+  "public_alpha_qualified": false,
+  "full_goal_complete": false,
+  "evidence": "out/private-funded-multihop-20261020",
+  "integrated_node_tests_passed": 255
+}

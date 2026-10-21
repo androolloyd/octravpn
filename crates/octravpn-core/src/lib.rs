@@ -58,3 +58,4 @@ pub use sig::{KeyPair, PublicKey, Signature};
 // The chain-canonical tx signer (`transaction.ml` parity). Authoritative
 // over the re-exported `tx` module above for anything hitting a real node.
 pub use tx_signer::CanonicalTx;
+pub mod sealed;

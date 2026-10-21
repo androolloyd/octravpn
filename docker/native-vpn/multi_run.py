@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Two real native operators in separate kernels and explicit nested purchases.
 
-Run both --exhaust-hop0 and1 as fresh gates. This is a two-hop Program custody
-qualification, not a claim of three-hop, Circle custody, public deployment or
-per-socket management isolation.
+Run both --exhaust-hop0 and1 as fresh gates. --application circle exercises
+Circle custody; --private-control requires trusted TLS through the paid carrier
+with pinned bootstrap and no direct downstream/DNS traffic.
 """
 import argparse
 import hashlib
@@ -18,6 +18,7 @@ import uuid
 from json_snapshot import read_object, read_array
 
 from stock_run import atomic, cleanup_owned, command, until
+from private_control import identities
 
 SUITE = pathlib.Path(__file__).resolve().parent
 A_IP = '93.184.216.11'; B_IP = '93.184.216.21'
@@ -27,6 +28,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--node-image', required=True); parser.add_argument('--context', type=pathlib.Path, required=True)
     parser.add_argument('--headscale-commit', required=True); parser.add_argument('--exhaust-hop', type=int, choices=[0, 1], required=True)
+    parser.add_argument('--application', choices=['program', 'circle'], default='program')
+    parser.add_argument('--private-control', action='store_true')
     parser.add_argument('--out', type=pathlib.Path, required=True); args = parser.parse_args()
     assert len(args.headscale_commit) == 40 and all(c in '0123456789abcdef' for c in args.headscale_commit)
     os.umask(0o077); args.out.mkdir(mode=0o700); output = args.out.resolve()
@@ -37,13 +40,17 @@ def main():
     client_config = private / 'client-config'; client_config.mkdir()
     identifier = 'octra-nested-' + uuid.uuid4().hex[:12]; image = identifier + ':local'; network = identifier
     containers = []; volume = None; requests = {'A': 0, 'B': 0, 'C': 0}
-    report = {'qualified': False, 'steps': [], 'scope': 'two independent native Program operators, two prepaid channels and real nested kernel traffic',
+    report = {'qualified': False, 'steps': [], 'scope': 'two independent native ' + args.application + ' operators, two prepaid channels and real nested kernel traffic',
+              'application': args.application, 'private_control': args.private_control, 'shielded_payments': False,
               'exhaustion_and_revocation_hop': args.exhaust_hop, 'public_network_qualified': False,
-              'limitations': ['No three-hop or Circle-custody multihop qualification in this gate',
-                'Existing local HTTP management controls are bridged opaquely over an isolated underlay; no public TLS claim',
-                'Entry/operator-control destination IPs are explicit physical management exceptions, not per-socket isolation',
+              'limitations': ['No three-hop or public-network qualification in this gate',
+                'Private-control mode uses an isolated per-run CA, not a public TLS certificate',
+                'Only entry management has a physical exception in private-control mode; no per-socket management isolation',
                 'Explicit verified owned-route cleanup before crash resume; no automatic stale-rule deletion',
-                'Finite final purchases and no trustless Web delivery proof or non-delivery slashing']}
+                'Finite final purchases, public payment metadata and no trustless Web non-delivery proof']}
+    tls = private / 'tls'
+    if args.private_control:
+        report['tls_identities'] = identities(tls)
     def save(): atomic(output / 'qualification.json', report)
     def step(name, **values): report['steps'].append({'name': name, **values}); save(); print(name, flush=True)
     def execute(container, *argv, timeout=90): return command(['docker', 'exec', container, *argv], timeout=timeout)
@@ -100,7 +107,7 @@ def main():
             assert hashlib.sha256(path.read_bytes()).hexdigest() == row['sha256'], path
         assert args.headscale_commit in (args.context / 'octra/Cargo.lock').read_text()
         report['native_source'] = source; report['headscale_commit'] = args.headscale_commit
-        report['suite_sha256'] = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in SUITE.glob('multi*') if path.is_file()}
+        report['suite_sha256'] = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in [*SUITE.glob('multi*'), SUITE / 'private_control.py'] if path.is_file()}
         command(['docker', 'build', '-f', SUITE / 'multi_Dockerfile', '--build-arg', 'NODE_IMAGE=' + args.node_image,
                  '-t', image, SUITE], timeout=300)
         report['image'] = json.loads(command(['docker', 'image', 'inspect', image]))[0]['Id']
@@ -117,12 +124,15 @@ def main():
                 ready = until(lambda: json.loads((evidence / 'multi-ready.json').read_text()), 'actual four-validator preparation', timeout=900)
                 for key in ['receipt-A.hex', 'receipt-B.hex']: shutil.copyfile(commands / key, client_config / key); (client_config / key).chmod(0o600)
             name = identifier + '-' + role; containers.append(name)
-            command(['docker', 'run', '-d', '--name', name, '--network', network, '--ip', address, *common,
+            tls_mount = ['-v', f'{tls / ("entry" if role == "A" else "exit")}:/control-tls:ro'] if args.private_control else []
+            command(['docker', 'run', '-d', '--name', name, '--network', network, '--ip', address, *common, *tls_mount,
+                '-e', 'OCTRA_NATIVE_VPN_LOG=info,octravpn_node::tunnel=debug,octravpn_node::payments=debug',
                 '--sysctl', 'net.ipv4.ip_forward=1', '--sysctl', 'net.ipv4.conf.all.rp_filter=0',
                 '--sysctl', 'net.ipv4.conf.default.rp_filter=0', '--sysctl', 'net.ipv4.conf.all.route_localnet=1',
                 '--sysctl', 'net.ipv4.conf.default.route_localnet=1', '-v', f'{state}:/state', '-v', f'{commands}:/commands',
                 '-v', f'{volume}:/hop', image, 'python3', '-u', '/usr/local/bin/multi_fixture.py', '--role', role,
-                '--exhaust-hop', str(args.exhaust_hop)])
+                '--exhaust-hop', str(args.exhaust_hop), '--application', args.application,
+                *(['--private-control'] if args.private_control else [])])
         b_ready = until(lambda: json.loads((evidence / 'multi-B-ready.json').read_text()), 'relocated native B writer', timeout=240)
         assert b_ready['retained_state_verified'] is True
         client = identifier + '-C'; containers.append(client)
@@ -133,6 +143,10 @@ def main():
         call('C', 'foreign_rule')
         initial = current(); assert all(not any(row['purchased']) for row in initial['hops'])
         step('foreign priority1 policy rule refuses before any canonical purchase')
+        if args.private_control:
+            call('C', 'tls_negative')
+            assert all(not any(row['purchased']) for row in current()['hops'])
+            step('wrong TLS hostname refuses before any canonical purchase')
         call('C', 'launch'); call('A', 'release')
         until(lambda: current()['hops'][0]['purchased'] == ready['plans'][0]['prepaid_bytes'], 'entry canonical prepaid floor')
         waiting = call('C', 'state'); assert not any(row['ifname'] == 'route-exit' for row in waiting['links'])
@@ -141,7 +155,17 @@ def main():
         call('B', 'release'); opened = call('C', 'ready')
         assert [row['authorized_bytes'] for row in opened['journals']] == [plan['prepaid_bytes'] for plan in ready['plans']]
         assert all(row['connection_sequence'] > 0 for row in opened['journals'])
+        delegation = ready['delegated_receipt']
+        assert delegation['payer'] == ready['plans'][1]['binding']['payer']
+        assert delegation['payer'] != delegation['receipt_address']
+        step('canonically delegated receipt key buys traffic for its distinct payer wallet', **delegation)
         step('every independently signed canonical purchase precedes final route activation', plans=[plan['binding'] for plan in ready['plans']])
+        if args.private_control:
+            observations = [json.loads(line) for line in (evidence / 'links-B.log').read_text().splitlines() if line.startswith('{')]
+            peers = [row['tls_peer'] for row in observations if 'tls_peer' in row]
+            assert peers and set(peers) == {'172.31.237.2'}, peers
+            step('downstream TLS sees only entry carrier, pinned invalid hostnames bootstrap without DNS',
+                 downstream_control_peers=sorted(set(peers)), counters=call('C', 'privacy'))
         traffic(); before_near = current()['target']['udp_payload_bytes']; call('C', 'near_mtu')
         until(lambda: current()['target']['udp_payload_bytes'] >= before_near + 2094, 'nearMTU actual target receive')
         before = current(); call('C', 'oversize')
@@ -190,6 +214,8 @@ def main():
         assert not target_state['errors'] and not target_state['hop']['errors']
         assert all(sources and set(sources) == {'192.0.2.1'} for sources in target_state['observed_sources'].values())
         report['final'] = {'state': final, 'claims': claims, 'target': target_state, 'tcp_mss': mss}
+        if args.private_control:
+            report['final']['privacy'] = call('C', 'privacy')
         step('selected hop canonical withdrawal blocks live nested traffic and four exact ExEx sinks agree', hop=selected, claims=claims)
         call('C', 'stop'); call('B', 'stop'); call('A', 'stop'); report['qualified'] = True; save()
     except Exception:

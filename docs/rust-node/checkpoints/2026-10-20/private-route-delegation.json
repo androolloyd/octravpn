@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "observed_at_utc": "2026-10-20T04:53:19.828850+00:00",
+  "status": "DELEGATED_PUBLIC_RECEIPT_SIGNER_AND_BOTH_NATIVE_ROUTE_CASES_QUALIFIED_PRIVATE_ONBOARDING_PENDING",
+  "goal_complete": false,
+  "consensus_rule_changes": false,
+  "protocol_commission": 0,
+  "pushed": false,
+  "deployed": false,
+  "public_network_qualification": false,
+  "funded_private_multihop_qualified": false,
+  "released_shielded_route_flag_enabled": false,
+  "fix": "Public payer wallets may register different receipt signers; retain private-only receipt pseudonym identity check and shared route key uniqueness",
+  "validation": {
+    "client_tests_passed": 376,
+    "benchmark_checks": 4,
+    "client_and_node_strict_all_targets_clippy": "passed",
+    "native_image": {
+      "image_id": "sha256:c6116e7ea0d97cb262f27bbbe0ab8a679183227cb1013790ca10a6e989cf1a2f",
+      "native_source_files": 4947,
+      "binary_hashes_verified": {
+        "octravpn-node": "f65b618aa3dc7571b3c6371a41aa86fa88d0c4a2984a049f6a5509984c21e0f5",
+        "octravpn": "5ee8b989b7f7b4b176f978c6e638a969f90d5b4f04a004bc26c40a31111f8264",
+        "octra-node": "5f8d5105027a2c5e2b288eca11165a92602230ec0e9296877c9b3ab5be301c7d",
+        "octra-single-fixture": "c32299e6cd5c33cb133793a733efcdc151b0940a106e86d99b4482ed07974314",
+        "octra": "6fc615983c481d71cb6802d433baca48c25f6c616060fa7ade7d98612379f256",
+        "octravpn-private-admin": "3c66f0f152be9280a5adc0363401f6df04c22b0b65930c2efec9da0688fd3cf1"
+      },
+      "source_manifest_matches_frozen_context": true,
+      "rust_test_groups": 57,
+      "rust_test_executions_passed": 351,
+      "ignored": 1
+    },
+    "entry_exhaustion_and_revocation_case": {
+      "qualified": true,
+      "steps": [
+        "foreign priority1 policy rule refuses before any canonical purchase",
+        "wrong TLS hostname refuses before any canonical purchase",
+        "canonically delegated receipt key buys traffic for its distinct payer wallet",
+        "every independently signed canonical purchase precedes final route activation",
+        "downstream TLS sees only entry carrier, pinned invalid hostnames bootstrap without DNS",
+        "conservative finalMTU1075 carries near-boundary traffic bothways, TCPMSS<=1035, oversized profile packets refused",
+        "both actual native operators and client restart with original independent journals and purchases",
+        "deleted carrierTUN cannot reveal a deliberately installed physical downstream route; exact owned cleanup then explicit resume",
+        "selected operator independently exhausts finite capacity without buying more",
+        "selected hop canonical withdrawal blocks live nested traffic and four exact ExEx sinks agree"
+      ],
+      "exact_four_exex_sinks_agree": true,
+      "owned_cleanup_verified": true,
+      "evidence": "out/private-route-delegation-20261020/hop0/qualification.json"
+    },
+    "downstream_exhaustion_and_revocation_case": {
+      "qualified": true,
+      "steps": [
+        "foreign priority1 policy rule refuses before any canonical purchase",
+        "wrong TLS hostname refuses before any canonical purchase",
+        "canonically delegated receipt key buys traffic for its distinct payer wallet",
+        "every independently signed canonical purchase precedes final route activation",
+        "downstream TLS sees only entry carrier, pinned invalid hostnames bootstrap without DNS",
+        "conservative finalMTU1075 carries near-boundary traffic bothways, TCPMSS<=1035, oversized profile packets refused",
+        "both actual native operators and client restart with original independent journals and purchases",
+        "deleted carrierTUN cannot reveal a deliberately installed physical downstream route; exact owned cleanup then explicit resume",
+        "selected operator independently exhausts finite capacity without buying more",
+        "selected hop canonical withdrawal blocks live nested traffic and four exact ExEx sinks agree"
+      ],
+      "exact_four_exex_sinks_agree": true,
+      "owned_cleanup_verified": true,
+      "evidence": "out/private-route-delegation-20261020/hop1/qualification.json"
+    }
+  },
+  "scope": "Two independently paid public Circle channels, real native execution and separate kernels; pinned TLS downstream over entry; this does not qualify shielded payment metadata or private onboarding",
+  "source_context": "out/private-route-delegation-20261020/source-context.json",
+  "remaining": [
+    "Private native purchase/route coordination, including chain access during ordered admission",
+    "Actual funded private composite kernel execution and restart"
+  ]
+}

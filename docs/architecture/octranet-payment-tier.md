@@ -89,7 +89,21 @@ seven-day boundary the operator can withdraw its
 stake. Traffic earnings are available to their owner for withdrawal or traffic
 purchases; no account can spend another account's balance. The custody cap
 includes operator stake.
-This application does not invent an unverified automatic slashing mechanism.
+New offers require a registered operator receipt key, proven by an Ed25519
+signature and pinned for that bond generation. If it signs two different byte
+totals for the same plan, traffic class and sequence,
+`slash_double_service_receipt` verifies both complete, domain-bound messages.
+Anyone may submit them while the bond is locked; the entire bond becomes a
+custodied award for the affected payer. The payer can withdraw at the original
+unstake deadline or seven days after an earlier slash. The operator stops
+serving, and the generation can be slashed only once. This delay prevents an
+operator from using another payer wallet to self-slash out of the seven-day
+lock. This is a narrow equivocation penalty, not insurance for ordinary
+non-delivery.
+The Rust plan reader also checks that the registered key derives the bonded
+operator wallet address; the AML cannot derive that address from a supplied
+public key by itself. Clients need independent authenticated state for the
+same check before treating an outside operator's statements as slashable.
 
 ## Rate changes
 
@@ -119,8 +133,10 @@ supplies the canonical epoch timestamp in milliseconds. The source-derived
 [Circle custody variant](circle-prepaid.md) therefore compiles Program-syntax
 raw OCTB for that unchanged host, with fixed terms and a separate finalized
 initialization call. It adds no clock import, VM instruction or consensus rule.
-Program custody remains the default; each kind has its own deployment pins and
-receipt domain. Portal and offer assets remain Circle resources.
+Program custody remains the serialization default for existing configurations;
+new deployments explicitly select Circle custody. Each kind has its own
+deployment pins and receipt domain. Portal and offer assets remain Circle
+resources.
 
 The adopted typed Program flow profile does not accept Ed25519 instructions.
 The local `compile-legacy` tool therefore emits this Program source as raw OCTB
@@ -181,6 +197,14 @@ their exact purchase signatures before submission. Its traffic interface opens
 only after purchase confirmation. Operator counters cannot cause another
 purchase. Its immutable targets, original budget and consumed/uncertain bytes
 survive reconnects; resume refuses missing, corrupt or old postpaid state.
+The accepted plan also pins the operator's bond generation. Each successful
+status response includes one operator-signed cumulative delivery statement per
+traffic class. The operator durably reserves a new statement sequence only
+when its committed byte counters change; unchanged polls reuse the same slot.
+The client verifies the generation and counters, retains the latest statement
+for each class in its private journal, and refuses a missing or regressing
+statement. A same-slot conflict is retained as a signed pair before payment
+stops.
 
 The gateway's [portal capability](../operators/unpaid-portal.md) limits unpaid
 reads to explicitly selected passive assets in one Circle. It does not confer
@@ -196,7 +220,8 @@ A prepaid signature proves spending consent, not delivery. An operator that
 drops a packet and an operator that forwards correctly before the client,
 router or destination drops the reply can leave identical chain evidence.
 Payer-controlled timeouts or withheld acknowledgments cannot distinguish them.
-No arbitrary Web non-delivery proof or slashing state machine exists here.
+No arbitrary Web non-delivery proof exists here. The slash applies only to
+contradictory operator signatures for one canonical receipt slot.
 
 A successful purchase immediately credits operator earnings, available for
 withdrawal or further traffic purchases. Payer withdrawal returns only OCT
@@ -204,8 +229,16 @@ still in the channel; settled byte purchases are final, including unused
 purchased bytes. Seven-day operator unstaking does not insure future delivery.
 This prepaid product does not implement refundable delivery insurance.
 
-Signed conflicting obligations or a missed on-chain response deadline could
-support narrower objective penalties after that service obligation is specified.
+Clients must retain the signed service statements to submit a dispute. A
+purchase authorization alone is signed by the payer and cannot slash the
+operator. An operator that never signs a service statement cannot be slashed
+for a failed connection under this rule. The client refuses a paid connection
+without a complete statement set, but silence after an initial statement is
+still not slashable. The user limits exposure by buying small byte increments
+and withdrawing unspent channel OCT. Local tests cover statement issuance,
+client conflict retention and a Rust-signed evidence pair submitted through
+the compiled AML transaction path; no public payment Circle or combined live
+paid qualification exists yet.
 A chain-response promise does not itself prove general Internet availability.
 There is no trusted arbiter or witness voting fallback. A launch advertised as
 trustless non-delivery protection is blocked on a verifiable service predicate.

@@ -63,13 +63,15 @@ regressions and native host money tests are separate checks.
 ## Octranet payment candidate (2026-10-17)
 
 `OctranetPayments.lean` models the staged `program/octranet-payments.aml`:
-fixed 24-hour payer exit, seven-day operator unstake, immutable deadlines,
-separate payer/earnings/stake accounting, stopped-generation admission, and
-cumulative receipt redemption despite adversarial sequence ordering. Its 19
-theorems have no application axioms or `sorry`. Canonical clock input, authentic
-signatures, tariff calculation and the immutable per-generation stop record
-remain assumptions at the model boundary. This is not compiler/bytecode
-refinement or a proof of network admission or packet delivery.
+instant full or partial payer withdrawal, immediate operator earnings withdrawal,
+seven-day operator unstake, separate payer/earnings/stake accounting,
+stopped-generation admission, cumulative
+receipt redemption, 24-hour rate-change notice, bounded prepaid capacity and
+an abstract equivocation award. Its 48 theorems have no application axioms or
+`sorry`. Canonical clock input, authentic signatures, tariff calculation,
+service evidence and the immutable per-generation stop record remain
+assumptions at the model boundary. This is not compiler/bytecode refinement
+or a proof of network admission or packet delivery.
 
 `crates/octra-node-runtime/tests/octranet_payments.rs` compiles the actual AML
 and factory and runs the production Program transaction adapter with real

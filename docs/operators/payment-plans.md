@@ -5,24 +5,24 @@ traffic is carried. Check the [current qualification record](../rust-node/status
 separately from earlier postpaid evidence. Existing v5 deployments and stock
 Tailscale enrollment do not become prepaid plans by enabling this configuration.
 
-Build the application locally:
+For a new Circle-first deployment, build the custody Circle from the exact
+network configuration:
 
 ```sh
-octra-node compile-legacy --source program/octranet-payments.aml --loops --point-ops > payments.build.json
+octra-node compile-circle-payments --config network.json \
+  --custody-cap 200000000 --minimum-stake 100000000 > payments-circle.build.json
 ```
 
-This uses the existing Legacy binary VM. The adopted typed Program profile
-excludes Ed25519, while this source needs Program `epoch_time`. The certificate
-pins source and OCTB hashes; it grants no typed Program admission. Deploy its
-`bytecode` through the deployment-only factory and verify the exact stored hash.
-The flags select local emitter capabilities, not public network activation.
+The CLI derives the Circle-specific receipt domain from the configured chain
+origin and emits the Circle child and factory bytecode. Deploy through that
+factory, wait for finality, call the child's `initialize`, wait for finality
+again, then verify both code hashes and terms before accepting value. The
+certificate pins source and OCTB hashes; it grants no typed Program admission.
 No public compiler or consensus change is needed.
 
-For first-party Circle hosting, use the source-derived
-[Circle custody variant](../architecture/circle-prepaid.md). It preserves these
-payment rules and uses a separate application kind, factory and signed operation
-domain. Native deferred spawn requires deployment and initialization in separate
-finalized transactions.
+The [Circle custody details](../architecture/circle-prepaid.md) describe its
+separate application kind and signed operation domain. Existing Program
+deployments remain supported through `compile-legacy` and their own pins.
 
 An operator's BFT node selects `payments` instead of `vpn`:
 
@@ -30,11 +30,12 @@ An operator's BFT node selects `payments` instead of `vpn`:
 {
   "payments": {
     "application": {
+      "application": "circle",
       "program": "CONFIRMED_PAYMENT_PROGRAM",
       "code_hash": "SHA256_OF_DECODED_PROGRAM_BYTECODE",
       "factory": "CONFIRMED_DEPLOYMENT_FACTORY",
       "factory_code_hash": "SHA256_OF_DECODED_FACTORY_BYTECODE",
-      "domain": "FULL_CHAIN_ORIGIN_PAYMENT_DOMAIN",
+      "domain": "CIRCLE_KIND_FULL_CHAIN_ORIGIN_DOMAIN",
       "operator_circle": "PUBLIC_OFFER_CIRCLE",
       "offer": 0
     },
@@ -44,10 +45,28 @@ An operator's BFT node selects `payments` instead of `vpn`:
 }
 ```
 
+A nonvoting observer serving paid VPN traffic adds
+`"claim_rpc_url": "https://.../rpc"` under `payments`. It is required for
+observer deployments because local observer admission is read-only. The node
+signs each exact claim once per durable attempt and sends that signed
+transaction to the configured RPC for intake. A successful intake response
+does not buy bytes: only the observer's own authenticated canonical state can
+advance the purchased-byte floor and permit forwarding. Voting nodes submit
+locally and omit this field. The URL must use HTTPS, with loopback HTTP allowed
+for isolated tests.
+
 These placeholders must come from one confirmed deployment. The domain is
 `vpn::payments::network_domain` over the full chain origin; an RPC hostname does
 not establish identity. Operator identity is the actual node wallet. Its stake
 must be active and its exact public Circle tariff available at the serving head.
+Before creating an offer, the operator must call
+`register_operator_receipt_key` with a base64 Ed25519 public key and its
+signature over `Octranet operator key v1|DOMAIN|PAYMENT_CIRCLE|OPERATOR|GENERATION`.
+The Rust node requires this key to derive the operator wallet address used in
+the tariff and signed status. The contract pins it for the whole bond
+generation. Retain it durably;
+after unstaking or slashing, rebonding requires another registration. Offers
+without a pinned key are rejected.
 
 There is no operator credit window. Escrow and a purchase signature alone grant
 no traffic. The native service waits for the exact cumulative byte purchase in
@@ -69,17 +88,24 @@ after its Circle asset expires; this never grants forwarding from an expired
 asset. Program pins, keys, budgets, classes and deadlines are rechecked.
 
 After registering the receipt key and opening a funded, confirmed plan,
-construct a JSON accepted plan with these six fields. A plan can use existing
+construct a JSON accepted plan with these seven fields. A plan can use existing
 exit earnings directly; no withdrawal/deposit round trip is needed:
 
 ```text
 binding: deployment {domain, program}, payer, generation, plan, offer, manifest_hash
 tariff: exact canonical tariff JSON (version, operator, classes, selectors)
+operator_generation: canonical bond generation pinned by the offer
 original_budget_ou: original allocation, including already purchased amounts
 prepaid_bytes: explicit cumulative byte purchase target for each tariff class
 control_url: operator HTTPS origin, or loopback HTTP for local tests
 wireguard_endpoint: operator host:port
 ```
+
+A private control service may also supply `control_ca_pem`, the PEM-encoded
+root certificate explicitly accepted for that HTTPS origin. The client then
+trusts only that root for this control connection and still verifies the server
+hostname. An invalid, oversized or HTTP-only CA configuration is refused before
+journal creation. Omit the field to use the built-in public certificate roots.
 
 `prepaid_bytes` has exactly one entry per class; their cumulative tariff cost
 must fit the original budget. For example, `[1048576, 0]` buys one MiB of the
@@ -97,6 +123,13 @@ intact journal, binding budget, tariff, key, plan and purchase targets. The clie
 persists exact purchase signatures before sending them and retries those same
 authorizations after lost responses. It waits for purchase confirmation before
 opening the traffic interface. Old postpaid journals are rejected.
+
+For a continuously managed single-exit client, add `--reconnect` (and
+`--resume` after the first process restart). A transient HTTP refusal or
+connection timeout closes the TUN and packet driver, then retries the same
+durable plan with a one-to-30-second backoff. Reconnection cannot enlarge the
+prepaid byte target or sign a new purchase. A withdrawn plan keeps refusing
+traffic; stop the command with Ctrl-C and create a new accepted plan.
 
 Packet reservations are durable before handoff. Confirmed, pending and uncertain
 bytes consume the prepaid allowance; neither reconnect nor process death resets
@@ -148,25 +181,55 @@ Operator unstaking stops forwarding and holds stake for seven days from the
 first request. Retries cannot extend that deadline. Releasing a stopped plan's
 unspent reservation needs no 24-hour hold.
 
-Use the existing signed-transaction CLI for a withdrawal, selecting the verified
-deployment, RPC, private wallet file and transaction OU limit explicitly:
+Use the signed Circle-call CLI for a withdrawal, selecting the verified
+Circle, RPC, private wallet file and transaction OU limit explicitly:
 
 ```sh
-octra cast send "$PAYMENTS_PROGRAM" withdraw_remaining \
-  --key "$WALLET_KEY_FILE" --rpc-url "$OCTRA_RPC" --fee "$TRANSACTION_OU_LIMIT"
+octra cast circle send "$PAYMENTS_CIRCLE" withdraw_remaining \
+  --key "$WALLET_KEY_FILE" --rpc-url "$OCTRA_RPC" --ou "$TRANSACTION_OU_LIMIT"
 ```
 
 For a partial withdrawal, call `withdraw_channel` with an integer amount in the
 application's smallest OCT units. Verify the confirmed receipt and new payer
 generation before creating another plan. Never print wallet-file contents or
 infer a confirmed withdrawal from transaction intake alone.
+Legacy Program deployments use `octra cast send` with their own deployment and
+receipt domain.
 
-A successful purchase credits withdrawable operator earnings immediately. It is
-not a refundable escrow for unused purchased bytes. No trustless proof or slash
-for arbitrary Internet non-delivery is implemented. Seven-day unstaking alone
-cannot insure outstanding delivery obligations. A product promising insured
-delivery would additionally need an objectively verifiable breach predicate and
-compensation rules. See the
+A successful payer-signed byte purchase moves its exact charge from the payer's
+funds to the offer owner's earnings inside the payment Circle. Merely opening a
+connection or viewing a content Circle does not pay that Circle's owner. The
+operator can leave earnings in its channel to buy traffic itself, or withdraw
+them to its wallet:
+
+```sh
+octra cast circle send "$PAYMENTS_CIRCLE" withdraw_earnings "$EARNED_OU" \
+  --key "$OPERATOR_KEY_FILE" --rpc-url "$OCTRA_RPC" --ou "$TRANSACTION_OU_LIMIT"
+```
+
+Verify the confirmed receipt and new `get_earnings(operator)` value before
+accounting for the withdrawal. Purchased bytes are final even if unused; the
+protocol takes no commission. The payment Circle now
+verifies two contradictory, operator-signed service byte statements for the
+same plan/class/sequence and reserves the operator bond for that plan's payer.
+The payer calls `withdraw_slash_award(operator, generation)` only after the
+original unstake deadline or seven days from a pre-unstake slash.
+`octravpn-core::payments::SignedServiceReceipt::slash_params` constructs the
+call arguments from verified statements. The paid transport now emits one
+statement per class with a durable sequence, and the client retains the latest
+verified statement in its private payment journal. If it sees conflicting
+totals in one slot, the journal retains both statements in `service_conflict`
+and the client stops; extract the pair and verify `slash_params` before calling
+`slash_double_service_receipt`. Stop the client, then run
+`octravpn service-evidence --journal /private/path/payment-journal` to print
+the verified deployment, operator generation and exact Circle call parameters.
+This read-only command requires the journal writer lease to be free. The
+[public devnet Circle](../rust-node/checkpoints/2026-10-18/devnet-circle-deployment.json)
+has a bonded offer and a bounded accounting canary with confirmed operator
+earnings withdrawal and payer exit. It has no combined public paid-traffic
+qualification. No trustless
+proof or slash for arbitrary Internet non-delivery is implemented. Seven-day
+unstaking alone cannot insure outstanding delivery obligations. See the
 [payment specification](../architecture/octranet-payment-tier.md).
 
 ## Embedded clients

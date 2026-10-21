@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-exclude = ["proofs/kani", "fuzz", "vendor/ark-relations", "vendor/octra-circle-wasm-host", "vendor/octra-lmdb", "vendor/libsqlite3-sys"]
+exclude = ["proofs/kani", "fuzz", "vendor/ark-relations", "vendor/octra-circle-wasm-host", "vendor/octra-lmdb", "vendor/libsqlite3-sys", "experimental/private-payments"]
 members = [
     "crates/octravpn-analytics",
     "crates/octravpn-audit-chain",

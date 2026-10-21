@@ -1,5 +1,7 @@
 # OctraVPN documentation
 
+[Private devnet alpha and accepted deployment pins](operators/devnet-private-alpha.md)
+
 This directory holds every long-form doc for OctraVPN — the
 decentralized Tailscale-style mesh VPN coordinated by AppliedML
 programs on Octra. The top-level [`../README.md`](../README.md) is

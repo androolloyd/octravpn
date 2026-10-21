@@ -507,6 +507,7 @@ pub(crate) struct Publisher {
 }
 pub(crate) struct Service {
     submission: Arc<Submission>,
+    remote: Option<RemoteSubmission>,
     payments: Arc<Payments>,
     key: SigningKey,
     operator: Vec<u8>,
@@ -514,6 +515,92 @@ pub(crate) struct Service {
     disk: Arc<Disk>,
     wake: Arc<Notify>,
     running: Arc<AtomicBool>,
+}
+struct RemoteSubmission {
+    url: reqwest::Url,
+    client: reqwest::Client,
+}
+impl RemoteSubmission {
+    fn new(raw: &str) -> Result<Self> {
+        let url = reqwest::Url::parse(raw).context("invalid claim RPC URL")?;
+        let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
+        ensure!(
+            (url.scheme() == "https" || (url.scheme() == "http" && local))
+                && url.host_str().is_some()
+                && url.username().is_empty()
+                && url.password().is_none()
+                && url.query().is_none()
+                && url.fragment().is_none(),
+            "claim RPC requires HTTPS or loopback HTTP without credentials or query"
+        );
+        Ok(Self {
+            url,
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .redirect(reqwest::redirect::Policy::none())
+                .no_proxy()
+                .build()?,
+        })
+    }
+
+    async fn submit(&self, tx: &Transaction) -> Result<()> {
+        let signed: serde_json::Value = serde_json::from_slice(&tx.to_json_bytes()?)?;
+        let response = self
+            .client
+            .post(self.url.clone())
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "octra_submit",
+                "params": [signed]
+            }))
+            .send()
+            .await
+            .context("remote claim intake unavailable")?;
+        ensure!(
+            response.status().is_success(),
+            "remote claim intake HTTP error"
+        );
+        const MAX_RESPONSE: usize = 65_536;
+        ensure!(
+            response
+                .content_length()
+                .is_none_or(|len| len <= MAX_RESPONSE as u64),
+            "remote claim intake response too large"
+        );
+        let mut response = response;
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await? {
+            ensure!(
+                body.len().saturating_add(chunk.len()) <= MAX_RESPONSE,
+                "remote claim intake response too large"
+            );
+            body.extend_from_slice(&chunk);
+        }
+        let reply: serde_json::Value = serde_json::from_slice(&body)?;
+        ensure!(
+            reply.get("error").is_none_or(serde_json::Value::is_null),
+            "remote claim intake rejected"
+        );
+        let result = reply
+            .get("result")
+            .context("remote claim intake omitted result")?;
+        let accepted = result
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|status| matches!(status, "accepted" | "confirmed"));
+        let hash = result
+            .get("tx_hash")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        ensure!(
+            accepted && hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "remote claim intake did not accept signed transaction"
+        );
+        // Intake is never purchase finality. The claim journal retires only
+        // after our own authenticated canonical byte floor covers the voucher.
+        Ok(())
+    }
 }
 async fn covered(payments: &Payments, usage: &SignedUsage) -> Result<(Plan, bool)> {
     let plan = payments.claim_plan(usage.usage.plan).await?;
@@ -534,7 +621,9 @@ impl Service {
         key: SigningKey,
         directory: PathBuf,
         fee_budget_ou: u64,
+        claim_rpc_url: Option<&str>,
     ) -> Result<(Arc<Publisher>, Self)> {
+        let remote = claim_rpc_url.map(RemoteSubmission::new).transpose()?;
         let operator_key = STANDARD.encode(key.verifying_key().as_bytes()).into_bytes();
         let operator = transaction::address_from_public_key(&operator_key);
         ensure!(
@@ -575,6 +664,7 @@ impl Service {
             publisher,
             Self {
                 submission,
+                remote,
                 payments,
                 key,
                 operator,
@@ -718,7 +808,12 @@ impl Service {
             return Ok(());
         }
         fresh.claim_increment(&authorization)?;
-        self.submission.submit_operator(tx, now, wallet).await?;
+        if let Some(remote) = &self.remote {
+            let _wallet = wallet;
+            remote.submit(&tx).await?;
+        } else {
+            self.submission.submit_operator(tx, now, wallet).await?;
+        }
         Ok(())
     }
     pub(crate) async fn run(self, mut shutdown: watch::Receiver<bool>) -> Result<()> {
@@ -883,6 +978,77 @@ mod tests {
             authorization,
             transaction: String::from_utf8(tx.to_json_bytes().unwrap()).unwrap(),
         }
+    }
+
+    #[tokio::test]
+    async fn observer_claim_rpc_posts_only_the_signed_transaction() {
+        use axum::{routing::post, Json, Router};
+        let (sender, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let router = Router::new().route(
+            "/rpc",
+            post(move |Json(body): Json<serde_json::Value>| {
+                let sender = sender.clone();
+                async move {
+                    sender.send(body).unwrap();
+                    Json(serde_json::json!({
+                        "jsonrpc": "2.0", "id": 1,
+                        "result": {"status": "accepted", "tx_hash": "ab".repeat(32)}
+                    }))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let (signed, _) = tx(&usage(1, 1024));
+        let rpc = RemoteSubmission::new(&format!("http://{address}/rpc")).unwrap();
+        rpc.submit(&signed).await.unwrap();
+        let body = received.recv().await.unwrap();
+        assert_eq!(body["method"], "octra_submit");
+        assert_eq!(
+            body["params"][0],
+            serde_json::from_slice::<serde_json::Value>(&signed.to_json_bytes().unwrap()).unwrap()
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn observer_claim_rpc_bounds_chunked_response_before_accumulating_it() {
+        use axum::{
+            body::{Body, Bytes},
+            routing::post,
+            Router,
+        };
+        let router = Router::new().route(
+            "/rpc",
+            post(|| async {
+                let chunks = futures::stream::iter([
+                    Ok::<_, std::io::Error>(Bytes::from(vec![b'x'; 32_768])),
+                    Ok(Bytes::from(vec![b'y'; 32_769])),
+                ]);
+                Body::from_stream(chunks)
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let (signed, _) = tx(&usage(1, 1024));
+        let rpc = RemoteSubmission::new(&format!("http://{address}/rpc")).unwrap();
+        assert!(rpc
+            .submit(&signed)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("response too large"));
+        server.abort();
+    }
+
+    #[test]
+    fn observer_claim_rpc_rejects_unsafe_targets() {
+        assert!(RemoteSubmission::new("http://example.com/rpc").is_err());
+        assert!(RemoteSubmission::new("https://user:pass@example.com/rpc").is_err());
+        assert!(RemoteSubmission::new("https://example.com/rpc?method=other").is_err());
+        assert!(RemoteSubmission::new("https://example.com/rpc#fragment").is_err());
     }
 
     // These tests cover disk/encoding boundaries, not canonical grant or public

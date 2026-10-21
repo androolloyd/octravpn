@@ -10,10 +10,10 @@ commission**.
 [Documentation](docs/README.md) · [Node status](docs/rust-node/status.md) ·
 [Payment model](docs/architecture/circle-prepaid.md) · [octra.to](https://octra.to)
 
-> **Development preview.** The payment and portal Circles are published on
-> public devnet. Sustained public VPN service, funded private multi-hop recovery
-> and accounting are still being qualified. The alpha is not open to testers
-> yet; Mainnet deployment is not qualified.
+> **Devnet alpha candidate.** Funded private two-hop traffic, recovery,
+> exhaustion and accounting pass in isolated Linux kernels. The public operator
+> is staged; approved ingress and the funded public canary are still required
+> before inviting testers. Mainnet is not qualified.
 
 ## What it does
 

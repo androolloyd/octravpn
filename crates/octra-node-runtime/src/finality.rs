@@ -527,12 +527,12 @@ impl<A: ValidatorHistory> Publisher<A> {
     }
 
     async fn retained_record(&self, sequence: Sequence) -> Result<RetainedRecord> {
-        let previous = sequence
-            .0
-            .checked_sub(1)
-            .ok_or_else(|| invalid("genesis has no finalized record"))?;
-        let base = self.store.retained_head(Sequence(previous)).await?;
-        let head = self.store.retained_head(sequence).await?;
+        if sequence.0 == 0 {
+            return Err(invalid("genesis has no finalized record"));
+        }
+        let retained = self.store.retained_finality(sequence).await?;
+        let base = retained.base;
+        let head = retained.head;
         let epoch = self
             .store
             .source()
@@ -543,13 +543,14 @@ impl<A: ValidatorHistory> Publisher<A> {
         if epoch.cursor != head.cursor || epoch.parent_root != base.cursor.state_root {
             return Err(invalid("canonical outbox binding differs"));
         }
-        let certificate = self.store.certificate(sequence).await?;
+        let certificate = retained.certificate;
         let finalized = decode(&certificate)?;
         if head.cursor.epoch.0 != next_epoch(&base, &finalized)? {
             return Err(invalid("retained epoch differs from finality"));
         }
-        let receipts = self.store.consensus_receipts(sequence).await?;
-        let (proposal, reward) = self.store.reward_source(sequence).await?;
+        let receipts = retained.receipts;
+        let proposal = retained.proposal;
+        let reward = retained.reward;
         if proposal != finalized.proposal_id {
             return Err(invalid("retained reward proposal differs from finality"));
         }

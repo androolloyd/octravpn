@@ -151,6 +151,63 @@ verifies the responder handshake and reports the first post-handshake frame;
 an ACK alone does not prove the peer retained or admitted the observer session.
 The connector uses the CONNECT exchange from [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928.html).
 
+## Paid exit underlay
+
+`paid_underlay.py` prepares the separate `octrapay0` paid exit in an owned
+Linux container namespace. Run it before starting the paid service, using a
+namespace-sharing helper with `NET_ADMIN`, `ip`, `wg`, `iptables` and
+`ip6tables`. It does not configure the relay or its cloud firewall.
+
+The configuration pins the namespace, Docker address, relay and private key:
+
+```json
+{
+  "namespace": "net:[<owned-node-namespace-inode>]",
+  "outer_ipv4": "<node-Docker-IPv4>",
+  "relay_ipv4": "<relay-public-IPv4>",
+  "relay_public_key": "<relay-WireGuard-public-key>",
+  "private_key_file": "/keys/node.key"
+}
+```
+
+The key must be a root-owned private regular file with one link. The namespace
+must have only `lo` and `eth0`, forwarding enabled, reverse-path filtering
+disabled (`net.ipv4.conf.all.rp_filter=0` and
+`net.ipv4.conf.default.rp_filter=0`), and its original Docker default route.
+Run `python3 paid_underlay.py --config /config/paid-underlay.json` there.
+
+Create a public-network container with explicit public IPv4 resolvers, for
+example `--dns 1.1.1.1 --dns 9.9.9.9`. Docker's inherited resolver may be a
+private bridge address, which the relay correctly blocks after the default
+route moves into WireGuard. Verify DNS and a trusted HTTPS request through the
+underlay before starting paid service; retain the relay's non-public destination
+filter.
+
+The shared-relay deployment uses `paid_entrypoint.py` to keep the node stopped
+until its underlay check completes. It accepts a root-only, one-link readiness
+file in `/run`, bound to the current namespace, expected WireGuard public key
+and relay address. It rechecks the default route and IPv4/IPv6 forwarding guards
+before replacing itself with `octra-node`. An absent marker times out after
+three minutes. Write it only after the authenticated handshake and trusted HTTPS
+probe pass; never mount a marker retained from another container.
+
+This startup barrier supplies transport readiness. The node's canonical
+publication and purchased byte allowances still gate payment and forwarding.
+
+The helper installs the forwarding guard before creating WireGuard. Paid IPv4
+can leave only through `octra-wg`; paid IPv6 is dropped. Return traffic must
+arrive through that tunnel in an established connection. Removing WireGuard
+leaves the guard in place, so restoring a physical default route cannot open a
+paid fallback path. A partial setup must be inspected or its owned container
+recreated; rerunning the helper refuses an existing guard.
+
+`test_paid_underlay.py` exercises real isolated Linux namespaces and WireGuard:
+relay egress, UDP ingress, tunnel removal, a working physical-path control and
+the paid-drop counter. Its `SYS_ADMIN` capability is for the nested test lab;
+the installed helper requires only `NET_ADMIN`. This check does not establish
+canonical funding, public reachability or launch readiness. Qualify those
+separately before opening public paid ingress.
+
 ## Rollback
 
 Stop only the Octra container gracefully, then run `python3 relay.py down` on

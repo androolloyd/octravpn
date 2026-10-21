@@ -1,0 +1,25 @@
+{
+  "observed_at_utc": "2026-10-21T03:55:05.298392+00:00",
+  "consensus_changes": false,
+  "isolated_kernel_qualified": true,
+  "real_relay_handshake_and_official_rpc_tls": true,
+  "startup_barrier_regressions_passed": true,
+  "public_paid_service_active": false,
+  "public_paid_ingress_qualified": false,
+  "public_alpha_live": false,
+  "operator_underlay_public_key": "gZYGpH+gXtuyhTOEnBbRReHYsvrwqp+PBvdqtzCxqkI=",
+  "relay_public_key": "2lfnI4GSOTgjAjq1vKKDP4nWGv4euQLdPwRKh3QOGyQ=",
+  "relay_firewall_unchanged": true,
+  "scope": "Disposable container verifies the actual relay path and startup guards; private operator service not activated",
+  "checks": [
+    "WireGuard default route and authenticated handshake",
+    "Official devnet RPC with verified HTTPS through the underlay",
+    "Explicit public DNS required after replacing the Docker default route",
+    "Missing readiness, wrong namespace and missing IPv6 guard refuse startup"
+  ],
+  "evidence": "out/devnet-private-alpha-20261020/underlay-smoke-v3/result.json",
+  "source_sha256": {
+    "scripts/devnet-relay/paid_underlay.py": "6dd654ca9f802cfaccdfbdcc197ef9a297cf642eaeef745b95fc000883b82312",
+    "scripts/devnet-relay/paid_entrypoint.py": "9a09461101cfeff49a7e578f5ab6b37681b85e3a36365ea9bae3355b30efcb47"
+  }
+}

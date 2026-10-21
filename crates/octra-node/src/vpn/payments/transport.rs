@@ -4,7 +4,7 @@ use anyhow::{ensure, Result};
 use async_trait::async_trait;
 use octra_node_runtime::canonical::Head;
 use octravpn_core::payments::PlanBinding;
-use octravpn_node::payments::{Authority, Grant, Guard};
+use octravpn_node::payments::{Authority, Funds, Grant, Guard};
 use std::sync::Arc;
 
 struct Publication {
@@ -60,12 +60,15 @@ impl Payments {
         Ok(Grant {
             binding: actual,
             receipt_key: plan.receipt_key,
+            operator_generation: plan.operator_generation,
             tariff: plan.tariff.clone(),
-            original_budget_ou: plan.original_budget_ou,
-            remaining_ou: plan.remaining_ou,
+            funds: Funds::Channel {
+                original_budget_ou: plan.original_budget_ou,
+                remaining_ou: plan.remaining_ou,
+                claim_deadline_ms: plan.claim_deadline_ms,
+            },
             redeemed_totals: plan.redeemed_bytes.clone(),
             canonical_ms: plan.canonical_ms,
-            claim_deadline_ms: plan.claim_deadline_ms,
             // Eligibility is immutable state; lease revocation is separate.
             // Publication races suspend connections rather than retiring them.
             admissible: plan.eligible,

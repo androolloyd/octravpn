@@ -17,9 +17,11 @@ use octra_node_runtime::{circle_store, staging::Pool};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::{net::TcpListener, task::JoinHandle};
 
-struct Rpc {
+pub(super) struct Rpc {
     url: String,
-    pending: Arc<executor::Pending>,
+    pub(super) pending: Arc<executor::Pending>,
+    #[cfg(feature = "private-payments-experimental")]
+    pub(super) submission: Arc<Submission<Authority>>,
     task: Option<JoinHandle<()>>,
     context: Arc<crate::rpc::Context>,
 }
@@ -31,7 +33,19 @@ impl Drop for Rpc {
     }
 }
 impl Rpc {
-    async fn open(fixture: &Fixture, native: executor::Native) -> Self {
+    pub(super) async fn open(fixture: &Fixture, native: executor::Native) -> Self {
+        Box::pin(Self::with_pending(
+            fixture,
+            native,
+            Arc::new(executor::Pending::new(Pool::default())),
+        ))
+        .await
+    }
+    async fn with_pending(
+        fixture: &Fixture,
+        native: executor::Native,
+        pending: Arc<executor::Pending>,
+    ) -> Self {
         let endpoint = Endpoint {
             host: b"127.0.0.1".to_vec(),
             port: 1,
@@ -61,7 +75,6 @@ impl Rpc {
             payment_host::key(1),
         )
         .unwrap();
-        let pending = Arc::new(executor::Pending::new(Pool::default()));
         let submission = Arc::new(Submission {
             node: fixture.node.clone(),
             executor: native,
@@ -91,15 +104,21 @@ impl Rpc {
                 payment_host::key(1).verifying_key().to_bytes().to_vec(),
             )),
         });
+        Box::pin(pending.recover(&submission)).await.unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/rpc", listener.local_addr().unwrap());
         let context = submission.clone().context();
+        let http_submission = submission.clone();
         let task = tokio::spawn(async move {
-            axum::serve(listener, submission.router()).await.unwrap();
+            axum::serve(listener, http_submission.router())
+                .await
+                .unwrap();
         });
         Self {
             url,
             pending,
+            #[cfg(feature = "private-payments-experimental")]
+            submission,
             task: Some(task),
             context,
         }
@@ -121,13 +140,15 @@ impl Rpc {
         assert_eq!(response.status(), reqwest::StatusCode::OK);
         response.json().await.unwrap()
     }
-    async fn close(mut self) {
+    pub(super) async fn close(mut self) {
         let task = self.task.take().unwrap();
         task.abort();
         assert!(task.await.unwrap_err().is_cancelled());
     }
 }
 
+#[path = "pending_recovery_tests.rs"]
+mod pending_recovery_tests;
 #[path = "private_admission_tests.rs"]
 mod private_admission_tests;
 #[path = "visibility_tests.rs"]

@@ -192,6 +192,7 @@ pub struct Registry {
     rows: BTreeMap<Vec<u8>, Record>,
     ttl: f64,
     max_per_bucket: i64,
+    max_records: usize,
 }
 impl Default for Registry {
     fn default() -> Self {
@@ -200,10 +201,14 @@ impl Default for Registry {
 }
 impl Registry {
     pub fn new(ttl: f64, max_per_bucket: i64) -> Self {
+        Self::with_capacity(ttl, max_per_bucket, 256)
+    }
+    pub fn with_capacity(ttl: f64, max_per_bucket: i64, max_records: usize) -> Self {
         Self {
             rows: BTreeMap::new(),
             ttl,
             max_per_bucket,
+            max_records,
         }
     }
     pub fn clear(&mut self) {
@@ -221,6 +226,9 @@ impl Registry {
         self.prune(now);
         if !live(now, self.ttl, record.timestamp) {
             return Err("ttl".into());
+        }
+        if !self.rows.contains_key(&record.node_id) && self.rows.len() >= self.max_records {
+            return Err("registry_capacity".into());
         }
         if !allow_bucket(
             self.max_per_bucket,

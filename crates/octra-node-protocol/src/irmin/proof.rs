@@ -358,7 +358,7 @@ impl Environment {
             }
         }
     }
-    fn read(&self, mut key: Key, path: &[&[u8]]) -> Result<Option<Vec<u8>>> {
+    fn at(&self, mut key: Key, path: &[&[u8]]) -> Result<Option<Key>> {
         for (i, name) in path.iter().enumerate() {
             if key.kind == Kind::Contents {
                 return Ok(None);
@@ -377,6 +377,12 @@ impl Environment {
             };
             key = next;
         }
+        Ok(Some(key))
+    }
+    fn read(&self, key: Key, path: &[&[u8]]) -> Result<Option<Vec<u8>>> {
+        let Some(key) = self.at(key, path)? else {
+            return Ok(None);
+        };
         if key.kind == Kind::Node {
             Ok(None)
         } else {
@@ -394,6 +400,18 @@ impl Environment {
 pub fn verify(ledger_root: &[u8], path: &[&[u8]], encoded: &[u8]) -> Result<Option<Vec<u8>>> {
     let (env, key) = open(ledger_root, encoded)?;
     env.read(key, path)
+}
+/// Authenticate a subtree commitment. Its contents may stay blinded here;
+/// callers must independently restore an image with exactly this root.
+pub fn verify_tree(ledger_root: &[u8], path: &[&[u8]], encoded: &[u8]) -> Result<Option<Hash>> {
+    let (env, key) = open(ledger_root, encoded)?;
+    let Some(key) = env.at(key, path)? else {
+        return Ok(None);
+    };
+    if key.kind != Kind::Node {
+        return Err("proof subtree is contents".into());
+    }
+    Ok(Some(key.hash))
 }
 fn open(ledger_root: &[u8], encoded: &[u8]) -> Result<(Environment, Key)> {
     let raw = native_base64::decode(encoded)

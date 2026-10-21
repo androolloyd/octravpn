@@ -1,13 +1,16 @@
 # Prepaid custody in a Circle
 
-This experiment uses the unchanged adopted native OCTB Circle interpreter.
+The Circle-first payment candidate uses the unchanged adopted native OCTB Circle interpreter.
 It adds no consensus rule, opcode or WASM clock import. OCTB Circle calls already
 receive the admitted epoch timestamp in milliseconds, and native value effects
 are available only with active ProofExecution rules and matching code admission.
-The normal Program deployment and its receipt domain remain the default.
+Existing configurations retain the Program default for compatibility; new
+Octranet deployments explicitly select `application: "circle"`.
 
-`octra-node compile-circle-payments --domain DOMAIN --custody-cap 200000000
+`octra-node compile-circle-payments --config network.json --custody-cap 200000000
 --minimum-stake 100000000` derives source from `program/octranet-payments.aml`.
+The CLI derives the distinct Circle receipt domain from the configured full
+chain origin. `--domain` remains available for offline fixtures.
 Strict constructor/declaration markers and parsed public method names fail closed
 on source drift. All original method bodies remain unchanged behind an added
 initialization guard. The generated source and original/template hashes accompany
@@ -51,11 +54,32 @@ retained authenticated history. Claims use and durably bind `CircleCall`; legacy
 claims retain `ContractCall`. Neither an RPC response nor an operator assertion
 can substitute for a canonical prepaid byte floor.
 
+The custody Circle runs bonding, funded channels, offers, purchases, claims,
+withdrawals and operator earnings. An operator-owned Circle publishes the
+hash-pinned tariff, public site assets and any sealed endpoint policy. A portal
+Circle publishes the exact allowlisted unpaid onboarding assets. The native
+gateway reads those committed assets; the Rust transport worker owns WireGuard,
+TUN, packet classification and metering. Circle WASM can provide bounded query,
+update and HTTP-handler logic, but its host has no socket or TUN import; the
+current gateway uses committed assets, not a dynamic WASM portal handler.
+Keep the factory-owned custody Circle separate from operator-editable content
+so an operator cannot replace the code holding payer funds.
+
 Seven-day operator unstaking, instant channel withdrawals, immutable purchases,
 24-hour replacement-rate notice and zero protocol commission are retained from
 the common custody implementation. Native fixed Circle size limits still apply.
 Purchased service is not an insured-delivery promise; no arbitrary Internet
-non-delivery proof or automatic slash is introduced.
+non-delivery proof is introduced. Every new offer requires a bond-generation
+operator receipt key. Two different operator-signed byte totals for the same
+plan, class and sequence are an objective equivocation proof: anyone can submit
+both signatures while that generation's bond is still locked. The entire bond
+becomes an award for the affected payer, locked until the original unstake
+deadline or seven days after a slash that preceded unstaking. The operator
+stops serving, and that generation cannot be slashed again. A purchase
+signature or failed connectivity probe is not such proof. The seven-day unstake
+is the evidence-submission window; after stake withdrawal there is no bonded
+recourse for a late proof. Delaying award withdrawal prevents an operator from
+self-slashing through a second payer wallet to escape the seven-day lock.
 
 Qualification sources include real Circle transaction/ledger regressions, a
 signed-QC canonical Node fixture and an unchanged-native compiler/epoch oracle.

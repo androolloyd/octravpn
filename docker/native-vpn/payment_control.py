@@ -12,7 +12,8 @@ import time
 
 
 BODY_LIMIT = 131_072
-ROUTES = frozenset(('/payments/connect', '/payments/stock/connect', '/payments/status', '/payments/usage'))
+ROUTES = frozenset(('/payments/connect', '/payments/stock/connect', '/payments/status', '/payments/usage',
+                    '/shielded/purchase', '/shielded/connect', '/shielded/status', '/shielded/usage'))
 
 
 class _Server(ThreadingHTTPServer):
@@ -121,7 +122,7 @@ class _Handler(BaseHTTPRequestHandler):
         if len(body) != length:
             self._reply(400)
             return
-        kind = 'usage' if self.path == '/payments/usage' else 'status'
+        kind = 'usage' if self.path in ('/payments/usage', '/shielded/usage') else 'status'
         gate = proxy._gate if kind == 'usage' else proxy._status_gate
         proxy._count(kind + '_received')
         if not proxy._wait(gate, kind):

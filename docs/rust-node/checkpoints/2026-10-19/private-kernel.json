@@ -1,0 +1,404 @@
+{
+  "schema_version": 1,
+  "observed_at_utc": "2026-10-20T02:47:44.040585+00:00",
+  "status": "LOCAL_FUNDED_PRIVATE_SINGLE_HOP_KERNEL_AND_CANONICAL_EXEX_RECOVERY_QUALIFIED",
+  "base_commit": "db4861dce0ca80eb3afe29d908004191b64def56",
+  "goal_complete": false,
+  "consensus_rule_changes_this_stage": false,
+  "protocol_commission": 0,
+  "pushed": false,
+  "deployed": false,
+  "public_network_qualification": false,
+  "released_multihop_shielded_required_enabled": false,
+  "funded_private_single_hop_kernel_route_qualified": true,
+  "qualification": {
+    "qualified": true,
+    "container_exits": [
+      0,
+      0
+    ],
+    "scope": "canonical signed-QC private payments, pinned HTTPS, real WireGuard/TUN, isolated second kernel and client/operator restart; no public-network or multi-hop claim"
+  },
+  "implemented": [
+    "Reusable production Archive ExEx adapter, preserving devnet-archive checkpoint identity and immutable publication format",
+    "Explicitly ignored privileged Linux fixture and offline frozen-source disposable container runner",
+    "Actual native funding and private purchases followed by pinned HTTPS, WireGuard/TUN and a second kernel TCP/UDP/ICMP target",
+    "Encrypted client journal and operator wallet/service reopening with no further purchase and monotonically advancing committed counters",
+    "Production Archive registration, exact canonical native transaction/receipt comparison, durable SQLite checkpoint and canonical/ExEx-store reopen verification"
+  ],
+  "validation": {
+    "tests": [
+      {
+        "log": "out/private-kernel-20261020/run-v6/native-test.log",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "seconds": 297.01
+      },
+      {
+        "log": "out/private-kernel-20261020/run-v6/native-control.log",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "seconds": 291.6
+      }
+    ],
+    "distinct_tests_this_stage": 2,
+    "full_library_suite_rerun": false,
+    "strict_node_all_targets_clippy": {
+      "ordinary": "passed",
+      "private_kernel_feature": "passed"
+    },
+    "syntax_and_diff": {
+      "syntax": "passed",
+      "git_diff_check": "passed",
+      "unchanged_crypto_aml_lean_files": 8,
+      "changed_crypto_aml_lean_files": [],
+      "new_formal_theorem": false,
+      "native_crypto_oracle_rerun": false
+    },
+    "image_id": "sha256:f0af8429a85b060441d2ae95df74f86d90b99e282f65e75809f20308201c8925",
+    "test_sha256": "9039a066ca4b11273e3ae79e1b77f563de4715950be6386674dcf1be6b357197",
+    "selected_sources": 103,
+    "staged_source_files": 4914,
+    "source_inputs_verified_against_host_and_frozen_context": true,
+    "container_exits": [
+      0,
+      0
+    ],
+    "container_network": "none",
+    "container_root_filesystems": "read-only",
+    "owned_containers_removed": true,
+    "interfaces_after_each_case": [
+      "lo"
+    ],
+    "public_funds_used": false
+  },
+  "kernel": {
+    "before": {
+      "client_confirmed": [
+        20350,
+        0
+      ],
+      "client_held": [
+        0,
+        0
+      ],
+      "committed": [
+        20350,
+        0
+      ],
+      "connection_sequence": 5,
+      "held": [
+        0,
+        0
+      ],
+      "phase": 1,
+      "purchased": [
+        1048576,
+        0
+      ],
+      "route": {
+        "address": "198.19.0.75",
+        "client_route": "octraprivcli",
+        "mtu": 1280
+      },
+      "service_sequence": 2,
+      "traffic": {
+        "icmp_echoes": 1,
+        "retries": 0,
+        "tcp_echoed_bytes": 4864,
+        "udp_datagrams": 6,
+        "udp_echoed_bytes": 4670
+      }
+    },
+    "after": {
+      "client_confirmed": [
+        40700,
+        0
+      ],
+      "client_held": [
+        0,
+        0
+      ],
+      "committed": [
+        40700,
+        0
+      ],
+      "connection_sequence": 7,
+      "held": [
+        0,
+        0
+      ],
+      "phase": 2,
+      "purchased": [
+        1048576,
+        0
+      ],
+      "route": {
+        "address": "198.19.0.75",
+        "client_route": "octraprivcli",
+        "mtu": 1280
+      },
+      "service_sequence": 3,
+      "traffic": {
+        "icmp_echoes": 1,
+        "retries": 0,
+        "tcp_echoed_bytes": 4864,
+        "udp_datagrams": 6,
+        "udp_echoed_bytes": 4670
+      }
+    },
+    "client_journal_reopened": true,
+    "operator_wallet_and_service_reopened": true,
+    "target_udp_payload_bytes": 9340,
+    "target_tcp_payload_bytes": 9728,
+    "target_exit_sources": {
+      "udp": [
+        "192.0.2.1"
+      ],
+      "tcp": [
+        "192.0.2.1"
+      ]
+    },
+    "packet_link_errors": 0,
+    "packet_link_rejections": 0,
+    "purchased_capacity_after_restart_unchanged": true
+  },
+  "exex": {
+    "archive_files": 83,
+    "canonical_and_checkpoint_reopened": true,
+    "checkpoint": {
+      "epoch": 83,
+      "sequence": 83,
+      "state_root": [
+        18,
+        142,
+        204,
+        161,
+        59,
+        252,
+        193,
+        220,
+        117,
+        52,
+        169,
+        251,
+        147,
+        54,
+        201,
+        135,
+        32,
+        148,
+        61,
+        188,
+        171,
+        241,
+        118,
+        199,
+        241,
+        49,
+        45,
+        217,
+        50,
+        30,
+        102,
+        13
+      ]
+    },
+    "purchase_transactions": 2,
+    "retained_epochs_verified": 83,
+    "sink_files_unchanged": true,
+    "purchase_transactions_sha256": [
+      "c073da5148becf1f8f9cfaead46042b1a5f87fd305eb02ab14c0e0d4c8f8c757",
+      "c68cd8a0d33407c68e1526964a9602ddda7a4bbec21143e0a28b40527b1c3c06"
+    ],
+    "pool": "oct78PRfj3PJTVfhLkk3NVvdVYo9TGmfz5TbvkTggWAGCP3",
+    "canonical_receipt_address_key": "contract",
+    "archive_checkpoint_name": "devnet-archive"
+  },
+  "prior_attempts": [
+    {
+      "attempt": "v1",
+      "result": "cancelled before test execution to make privileged selection explicitly ignored"
+    },
+    {
+      "attempt": "v2",
+      "result": "failed",
+      "cause": "read-only runtime missing intermediate Cargo manifest directory; packaging fixed"
+    },
+    {
+      "attempt": "v3",
+      "result": "failed",
+      "cause": "fixture published after intentional service-stop revocation; explicit Node.resume added"
+    },
+    {
+      "attempt": "v4",
+      "result": "failed",
+      "cause": "fixture index stale after genuine new canonical epoch; explicit bounded sync added"
+    },
+    {
+      "attempt": "v5",
+      "result": "failed",
+      "cause": "fixture expected RPC program alias instead of canonical receipt contract key; strict canonical assertion corrected"
+    },
+    {
+      "attempt": "v6",
+      "result": "passed both exact tests on final frozen sources"
+    }
+  ],
+  "limits": [
+    "In-process canonical four-validator signed-QC fixture; not four independent node processes, public-chain qualification or sustained P2P availability",
+    "One private paid operator hop; automatic per-hop client/route orchestration and released shielded multihop remain unfinished",
+    "Graceful client/operator and canonical/ExEx-store reopen; not arbitrary power-loss, hostile full-directory rollback or production key-custody recovery",
+    "Finite payer consent remains caller-provisioned; automatic operator income attachment and private claims orchestration remain separate",
+    "Production proving-key ceremony, independent cryptographic review and broader native parity remain gates",
+    "VM receipts and signed operator counters are observations; neither independently proves physical delivery or chain finality",
+    "No new formal theorem, crypto oracle rerun, production release qualification, public deployment or Mainnet launch in this stage"
+  ],
+  "guide": "docs/rust-node/private-kernel.md",
+  "prior_payer_startup": "docs/rust-node/checkpoints/2026-10-19/private-payer-service.json",
+  "unchanged_crypto_and_aml": {
+    "reference": "docs/rust-node/checkpoints/2026-10-19/private-index.json",
+    "source_sha256": {
+      "program/shielded-pool-factory.aml": "c579c470a57f484b375eaded05793a5beb4ce6e32b530b36e1ccf32e11a0791f",
+      "program/shielded-pool.aml.in": "230a046c370fad7c4aa6ef83694ce504a830df032ab873c6b35f53eb21d4b834",
+      "proofs/Pool.lean": "f92d4c145548baf0f18991ca0c51b666a3057d4cb95113c737285465c347d7f5",
+      "src/pool/app.rs": "bce99997993736dfd88d82c0489e7356448244cc18a71691410b858e13c282e2",
+      "src/pool/circuit.rs": "50e3b298c098239358a7c7d9d99a4f1eed80b135c4ac2478a737fb4085263139",
+      "src/pool/envelope.rs": "bc812cf186c46b200e981bd27733286c0a91ab08007f31759f108f770c69d686",
+      "src/pool/hash.rs": "11fc77e170043b12e260ffd9a9c67c1d882996f87b73791c0124dd4080aa3ffa",
+      "src/pool/wire.rs": "59dc4f8020e67c400d0061dab89da9880c9b270e288badac370ae3b194c2d470"
+    },
+    "public_tree_export_changes": "Read-only leaf enumeration and root-rebuilding API; existing hashes, insert/path logic, circuit and proof input ordering unchanged",
+    "new_formal_theorem_claimed": false,
+    "native_oracle_cases_rerun_this_stage": 0
+  },
+  "source_sha256": {
+    "Cargo.lock": "c8706518cb922e40c34963e9075c3574483068df0a0c3e8a72ac558da684f277",
+    "Cargo.toml": "7e55763b676bdb61bfc065d6ba52b9eb41bc0571bfbbe10f5d83a6769ef18ede",
+    "crates/octra-node-protocol/src/irmin/proof.rs": "6ab39a7e0aa5fc99ef251c388e7d65fb4c6c579edd6266c0a39960e0a3785c06",
+    "crates/octra-node-protocol/src/rules.rs": "31524bedf6d397a5ce39a1f040f0351b79ddf9dc55a42349a2afdf46afd10441",
+    "crates/octra-node-runtime/src/canonical.rs": "ea3378cd617af5dcfe06458a649ab99d4c943dc498be3f4d6a83734e9c1e22d4",
+    "crates/octra-node-runtime/src/canonical/bootstrap.rs": "972aec390ea911dd86cfa690c2f3f20bedea478ed41707aee457071024035682",
+    "crates/octra-node-runtime/src/canonical/epochs.rs": "7d60e26d81250aa27a8dc853da074d12ec8afe9e87c255f887b7beeca3c5d80c",
+    "crates/octra-node-runtime/src/canonical/reader.rs": "5dbd6cc11ac883b729541dbcda5849537de986b218e690909f27b778714ff2cc",
+    "crates/octra-node-runtime/src/circle_assets.rs": "8f50c099fe90fd688b2137baa8185bdaa9373988b7ff2025e893a0d2a0a1ecac",
+    "crates/octra-node-runtime/src/circle_view.rs": "87482095a9c785dd0553a818c522b87305339fe061a4fb6cb48ff6d31757d60b",
+    "crates/octra-node-runtime/src/state_batch/proof.rs": "9a2f90bf922396af50716d065852df631baa54c982b6bc74adaa7132a06fcfdc",
+    "crates/octra-node-runtime/src/validator_history/authority.rs": "733ec471ffa712ae9480accb767b6393887d88c66d138e92377bf2a71aaeb82f",
+    "crates/octra-node/Cargo.toml": "ba19b1ea8d38822d9d2077381f44e6b8697bc6a3c0c5e0732cdb460b0019e9c8",
+    "crates/octra-node/src/archive.rs": "b152f32f6d46dbf7597dd16c71bda1a9be98e48725eea16b475a2974e6b1917e",
+    "crates/octra-node/src/bootstrap.rs": "4fcc64ce77df6dec32365f57b984c9678b7692bef6e00f2d8fe3d826e03e5e9f",
+    "crates/octra-node/src/bootstrap/export.rs": "c0c6fdd987e509c5412f92118dc809f81a3bf3580628cb797e447a0e133d178d",
+    "crates/octra-node/src/bootstrap/export/package.rs": "1adcb21c4da2a29f4abf3d00836e65375dff96f8f77d740a83fca9179009574c",
+    "crates/octra-node/src/devnet.rs": "94586b3fdcc4d95f9f631c1419dfe08250532bf5326060ce360c5c0593bb7a67",
+    "crates/octra-node/src/devnet/recovery.rs": "e0299f63ad956cc06736ac296671b6004e670b8653fd57cbe6e168b4183216d6",
+    "crates/octra-node/src/devnet/tests.rs": "f219883734761fecc15d07089c86698d7b0a983f6356a27baffde02c9cc5a747",
+    "crates/octra-node/src/launch.rs": "bc3f152b335062ca5fc5ec36238ead95c176700ef9fe2a3922c65a2076e176a8",
+    "crates/octra-node/src/lib.rs": "bc23e94397eed53bf8a2e15cd58c0e82bd090d8dd8838a0f5a903a3995babc92",
+    "crates/octra-node/src/main.rs": "78f72d538a412be787425e68aa912df30d025d09901888e4aef1e171c28f1a11",
+    "crates/octra-node/src/network.rs": "1ca9357d6f82e575925376e40c875df5af405b3f33c54355bbc9ba81194a4011",
+    "crates/octra-node/src/services.rs": "5c9846ed9d272d81f5e831ebec8f53310a3a5a5cf5ddef5a3d290344ac8377e3",
+    "crates/octra-node/src/snapshot_export.rs": "5a04fc192d548b83538b7c6091593b33af21a518da323541ccdb00bbebb893ef",
+    "crates/octra-node/src/vpn/payments.rs": "ccbe35670427872d9c2cb525ba4b8f1e70df5cd3229258a181880337a0a1c9d4",
+    "crates/octra-node/src/vpn/payments/canonical_tests.rs": "91e4c36451d0d24d8b3cabe10f361d1fb392ff1aec244901f1eedb71d0d7b83d",
+    "crates/octra-node/src/vpn/payments/offers.rs": "697c85e7df266fc2b32b03444e7b0abec8fc26262193bd12bcd7285f3ab38e20",
+    "crates/octra-node/src/vpn/payments/shielded.rs": "9fa7eb1d685ba377d0acd9b344b266de2fe2e9603f04beb93cade29f9725c986",
+    "crates/octra-node/src/vpn/payments/shielded/bootstrap_tests.rs": "edf2a786f463f757ce5885f3d2f8a114c684624b9594167ba31b0b85de526c46",
+    "crates/octra-node/src/vpn/payments/shielded/history/image.rs": "61d0dbebe29a70c767fb8982d0b10db8046f339bfdb96450a5cf1c7030c239e4",
+    "crates/octra-node/src/vpn/payments/shielded/history/mod.rs": "dde503ff82748ec90a52d3c1e799210c90ff793fd5dd170069531cf3cd9143bd",
+    "crates/octra-node/src/vpn/payments/shielded/history/storage.rs": "ee79ec116b0ac200c79d93cf515a139c02a98e9bfecc45dd3f647f7fdc0fd83f",
+    "crates/octra-node/src/vpn/payments/shielded/income_floor_tests.rs": "bcb5f8b71543cafeec1f4d10f901af2f0cbed7fad5622bb58be24e98deb47f83",
+    "crates/octra-node/src/vpn/payments/shielded/income_tests.rs": "0f575712b00000ab4b582b1aca7de8e38bb0cf5ff02998c6bca24d029179e8e1",
+    "crates/octra-node/src/vpn/payments/shielded/index.rs": "081433bcaf7a465e1eed6ed400bd4a0d11ec9bb2e0bafb39c78f908b22594a40",
+    "crates/octra-node/src/vpn/payments/shielded/index/hints.rs": "b3936914c9055413697da44a05b4671d33d7dfb6ba3c3687d4e11debc31567ae",
+    "crates/octra-node/src/vpn/payments/shielded/index/seed.rs": "e19c9fe8e8558e118852f88f58412fa3260ce29f131961bc6bd8170d3c758ad3",
+    "crates/octra-node/src/vpn/payments/shielded/index_tests.rs": "3e1b4d7d777be19076b746568cfe93acd80df7854726aa6e11c55079099d58f3",
+    "crates/octra-node/src/vpn/payments/shielded/movement_tests.rs": "d3c43182c3b8213029e1d71cb8c1fafd47993238278b31d3400d01434ac29ece",
+    "crates/octra-node/src/vpn/payments/shielded/native_journal_tests.rs": "a48f76bbc6f9017a45705ecde71573cdbdc883040699d59c552ec453b9463547",
+    "crates/octra-node/src/vpn/payments/shielded/payer.rs": "5c679b1efcb2b60b84a10b317f42480c6f6f7b0e3480ca4bef72ef7e3d930b6b",
+    "crates/octra-node/src/vpn/payments/shielded/payer/control.rs": "6941d173032c5d0f12c656b2c977f444ec73f5768d7e0c7cf97ccc96a9838a36",
+    "crates/octra-node/src/vpn/payments/shielded/payer/funding.rs": "951ec9adda867d426690db0686b7be5f869992c4c20aa5c8a7c168c73361515c",
+    "crates/octra-node/src/vpn/payments/shielded/payer/income.rs": "0b117c49f937ef5d5644a7242d698e5687277db549adbc1408d07ae7b55a9490",
+    "crates/octra-node/src/vpn/payments/shielded/payer/ledger.rs": "7cfbecbd39ad3f180d771b40b51c025eee6abc5f9270e40625bec4ce6e27c75e",
+    "crates/octra-node/src/vpn/payments/shielded/payer/movement.rs": "80766a029a3b18129c67f575ad7f307e5a8b18a35ab060780b841619f8a427dc",
+    "crates/octra-node/src/vpn/payments/shielded/payer/native.rs": "0513bec01c286b51ea4c0a2c56d04a4b90536339f9e5f2b242886ee147ab33f2",
+    "crates/octra-node/src/vpn/payments/shielded/payer/native/journal.rs": "628207f404b53879b7f1ac284c1143c013bf4075379cd1ebf1aec0f7cf42f58a",
+    "crates/octra-node/src/vpn/payments/shielded/payer/purchase.rs": "19282259c3355fd4fd672b4840a1013fec605821d0fdfb88d9993848679f6946",
+    "crates/octra-node/src/vpn/payments/shielded/payer/records.rs": "4f61bbec7b7cf10487c982baae2b96964798641191a236305d00db49cf2cfa81",
+    "crates/octra-node/src/vpn/payments/shielded/payer/recovery.rs": "764f9640b27c1b9e56d61b424192a585351991e58d4ce4a4797b1a6608d4aa05",
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner.rs": "25f3c652ec3abf12395d2da21fe7bea93df0f88d37c65a03fda02cf4045094d2",
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner/catalog.rs": "01dbb0d659ca46e2745be3bdcd5dbde4fc93f9224d310c3e7716296c8dee35dc",
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner/control.rs": "33e1d01d9352c54d8d7cac9734f2f5acd03580eccfa0c1241fbed90f045e5645",
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner/settlement.rs": "79500f4c2739d0bdbcd35b294f69ae434850b689806d87955a61f7e279119d11",
+    "crates/octra-node/src/vpn/payments/shielded/payer/service.rs": "6195d7091c7a781075bc7af4728718e1978fa17338e871f285cf067f58c0905b",
+    "crates/octra-node/src/vpn/payments/shielded/payer/startup.rs": "e1a5df1ef4c4df6c946d1e8e48098c1ba1d15fc966363220b832d3f499ebf3de",
+    "crates/octra-node/src/vpn/payments/shielded/payer_tests.rs": "31d57e1be1f0c6bc3998abd401b7b7e0474a901e380d7cec0e76be01b6d6e040",
+    "crates/octra-node/src/vpn/payments/shielded/recovery_tests.rs": "54278478636d2b5bd228ad619f225a571064f528f67d39ec8ea82aad6b23d83a",
+    "crates/octra-node/src/vpn/payments/shielded/runner_tests.rs": "a969b58fa5146c049e0a111e44a6c452302915de8f9f8779eca4ea73f79a681e",
+    "crates/octra-node/src/vpn/payments/shielded/runner_tests/exex.rs": "c276f16d1a80fbc283581ad96c65e48b95b50a037f529b234d7c337deb5b919f",
+    "crates/octra-node/src/vpn/payments/shielded/runner_tests/funding.rs": "54377b83ec8526151b120a4ec90feb59215e7ad36b90423a2ba387184d7ded11",
+    "crates/octra-node/src/vpn/payments/shielded/runner_tests/kernel.rs": "4e1cee223b2541e3061cf85be14abe628125f632b5fae4945002899e8368fa9c",
+    "crates/octra-node/src/vpn/payments/shielded/runner_tests/tls.rs": "44d6a644dc109bb46477013896f55bf464e25e36d6b2e054c45407e4fc93c75e",
+    "crates/octra-node/src/vpn/payments/shielded/startup.rs": "25f644cc9bb499394c6e0afd2200e2cdaea24c10d5f7c3574f7abd131695d551",
+    "crates/octra-node/src/vpn/payments/shielded/startup_tests.rs": "c00f4e9c1325b3695526139946d89b7a91d33121f3b7e1eb02f41e7f6ef66b7a",
+    "crates/octra-node/src/vpn/payments/shielded/storage.rs": "4cff4791cc19b904f6cb30855e649da9504a07db032287583f580927239044e8",
+    "crates/octra-node/src/vpn/payments/shielded/wallet.rs": "521ea1aea4910261c363ac5e04eaefaa97f1462d39e1c66b54b3dd61a7cce4f4",
+    "crates/octra-node/src/vpn/payments/shielded/wallet/income.rs": "94476c8bb60e359e33e38cdf95cb922fae92f183008eba6fee45a6e5ff4eca0f",
+    "crates/octra-node/src/vpn/payments/shielded/wallet/recovery.rs": "cdad8636945e19d30aa01cc2b2ff06db13be77e8807ea1b9d5709e82e9acba93",
+    "crates/octra-node/src/vpn/payments/shielded/wallet/rpc.rs": "f45bf5545dd17af4131c24560531ab0546002af0557ec84d226d887798ccc87e",
+    "crates/octra-node/src/vpn/payments/shielded/wallet/transport.rs": "cc1de1a154428d0f60de857ed4279604b55a0f222228c094587c77515d593e88",
+    "crates/octra-node/src/vpn/payments/shielded_tests.rs": "1ed316660b514079a4d4aade27556b048a750ca4cb7eb54ece0ac45d3003d888",
+    "crates/octravpn-client/Cargo.toml": "357273c6779ed677eae19be4e62029e2e49a7c321808b2353b729b033748106c",
+    "crates/octravpn-client/src/lib.rs": "2523503bbfe63b23f8e190b078427b3c2237bebf7985bde227f7e0925283aea3",
+    "crates/octravpn-client/src/payment_runner.rs": "a65473c7ad3969495c1762c8196296031e60a7fad6212cd2b69ef090937d94c5",
+    "crates/octravpn-client/src/payment_runner/accounting.rs": "097a483435f88ffedf243fa39310ed3270f7fb24765eef21f3893d5964918349",
+    "crates/octravpn-client/src/payments.rs": "d29f8884806d6a1b9585e3bffc415bb8f871aa70e6fef1b90b1ebbbe7f4e7d16",
+    "crates/octravpn-client/src/payments/private.rs": "5a9ece2b9195248b8e5cc030419563f0baeecd6c9d7f65e7dc33b9b2f44d5e6f",
+    "crates/octravpn-client/src/payments/private/tests.rs": "a8d5e48ec24f69dce38e8cbed4437e4c39f9e0d611fb11d1146e7642b1e70953",
+    "crates/octravpn-client/src/payments/storage.rs": "0b2a8f83ef9f1f89837c3fe1dfd759844b85d707eb2eb2be83962bf239f50733",
+    "crates/octravpn-client/src/private_control.rs": "9c2a6b5c9d2cf5db42326c97142a8ab079f3c5c9a3c04523b95b2056b73a3a6d",
+    "crates/octravpn-client/src/private_runner.rs": "a2a89533917c8a5d92fbb574ce58533db05891f3a2e2af449dd9619bec45b395",
+    "crates/octravpn-client/src/private_runner/monitor.rs": "c5ef4ebe1e0d833d92db5d3ec2b12fd15dc9bb82f1174c507a8d0d6abc35512f",
+    "crates/octravpn-client/src/private_runner/tests.rs": "371fa8fb3d82bc246605200eeccf5e4e65f059aaab1c67f2e3443c60e0ec6320",
+    "crates/octravpn-core/src/payments.rs": "8c5c556a27c5c065c9787fc545d44d61c8a750152db06ea7f23cba5642c835bf",
+    "crates/octravpn-core/src/payments/private_purchase.rs": "9c59b63e15d1c46e7157ffa7221f9504736339f674d8f8ce114777d1a9bb7336",
+    "docker/native-vpn/Dockerfile": "d149e2628133c088a8ebfc3ec589b84c0266a4c8d994e848cbfbeae013ea04bb",
+    "docker/native-vpn/manifest.py": "d257abd33b453ae6e36ca01e2ee85199feb10525222537a1926b6d0d5a2b9004",
+    "docker/native-vpn/private-kernel.sh": "e62271cfd8fc9b0ae37f4ee64f5da06149c203796c56bd07922af8bd51809d0e",
+    "docker/native-vpn/private_context.py": "eea52c69adecc3db373a922b76e5f8cefe5ac5bf2e12cb4cdf7983c85f25d29f",
+    "docker/native-vpn/private_control.py": "8ef6205567b978819f3506c852f95ecdd42018437ced3a78e37e603483a6901e",
+    "docker/native-vpn/private_kernel.py": "9b8e730eb079562665c58feb1430ad5648e7c2262933a745ef5fa4de93a3fda6",
+    "docker/native-vpn/private_kernel_qualify.py": "8f21b78b0dd4d0a15363d81187b4086916943722769530404b1582d2ac2437b5",
+    "experimental/private-payments/Cargo.lock": "8d00f0f4e191d78c8d2a7c2613c8296ab5111bb273d785e47e5c92d3302a4e7d",
+    "experimental/private-payments/Cargo.toml": "3d7b1fe8e3e3a429a349921550a231bca9f3cd477ebfd7b2cd4b9b8bd81b9619",
+    "experimental/private-payments/src/pool/mod.rs": "bda8a086b7f3e9585a3a8dfb153c6f315608796fb5f08777fb216063e52bd12a",
+    "experimental/private-payments/src/pool/tests.rs": "21be0da55cfc2a5a703f4c2edbd86d5aa7b89b110faa642419fc9b1de8d624d3",
+    "experimental/private-payments/src/pool/tree.rs": "44d35b2303e32181fa2b7313e22211a1c6baaf13e91e98e133faa312e8630987",
+    "program/octranet-payments-circle-factory.aml": "f84efb5e37ae9806abe05c741dbc5b3191ab663aefe7b99b1bf3d910fecd0186",
+    "program/octranet-payments.aml": "cbfa3350e4c432bcfcfef411702483aed2a999c4c377f294702c9a622223efc5"
+  },
+  "evidence_sha256": {
+    "out/private-kernel-20261020/run-v6/qualification.json": "8c652d16a594701db9e2ce4f802e593af0bd8f89a83c6b3e549cc489d83d394a",
+    "out/private-kernel-20261020/run-v6/journal.json": "b9846fbbff1ad5c2acb68c45095b56fd1757d4b0de4ae308162652dd949fcacb",
+    "out/private-kernel-20261020/run-v6/native-test.log": "abbbbcc4e05588876890df0fa101e753fb33381ce62b5cfdf58a3eeed8e7786c",
+    "out/private-kernel-20261020/run-v6/native-control.log": "8e0ee808c79ed8ffdcfba747f71ce8fa9823c65d19e5ccfbc3e32190e144a318",
+    "out/private-kernel-20261020/run-v6/private-kernel.json": "f3aa78111967b9105af0c66e549784bb167fba6c4b097a6f8100f0b2d943f55e",
+    "out/private-kernel-20261020/run-v6/exex-reopen.json": "d236f95084d9da90c6fbb144e90a2b0d7c854ca64c1947bbb2e53e9e4428f943",
+    "out/private-kernel-20261020/run-v6/exex-final.json": "b8df68955ca0119adbc727182db1b6290f2fefe2aea5a9b3936d975054d1d3c5",
+    "out/private-kernel-20261020/run-v6/exex-purchases.json": "3caace19c14de967e348744dca6150443669f01ea77271a2251ecb22c9718a63",
+    "out/private-kernel-20261020/run-v6/target.json": "60cc89bf69ba750eefbd63410e93584d7adb5d30b598a2faa9932f9b79913c2e",
+    "out/private-kernel-20261020/run-v6/private-link.json": "71e6b7fa75fd28d819f9eb07f80666235c2c5d4c1d5970b31e73caa3df604c0a",
+    "out/private-kernel-20261020/run-v6/image.json": "4e5571851705983c8a39c40fe5685c1f6a796b0296088b266b87e45f5cf955f3",
+    "out/private-kernel-20261020/run-v6/base-images.json": "f97996a1a309e08930e5fab8cd83dd73ccc534159157ad1de9158cfb85c396e5",
+    "out/private-kernel-20261020/run-v6/containers.json": "c80d91926eefb8ebd7d329006605f83ca8f9976e40ee62418d30b97011af24d5",
+    "out/private-kernel-20261020/run-v6/source-context.json": "0c1d5310fb7bb67f7769cb35d806e41bb42a5b278dc5761c0b80200aa42e338a",
+    "out/private-kernel-20261020/run-v6/build.log": "f70255ebaf126e59989ac4ac086758ae2c7fdc51552d0c43204d36f13d96bdda",
+    "out/private-kernel-20261020/source-before.json": "48ccfe5d9974462266973df8680ffde8eef02140df06dd22bf36059da39611e6",
+    "out/private-kernel-20261020/source-verification-v6.json": "67e5e0e090b995e90cdd9a3ccecfc7b3a8b531ed8ed19af6b4f19c447ed23b29",
+    "out/private-kernel-20261020/static-verification-v6.json": "3f53e300e3686b95a96076d75239831cda8144cfc71525867715351cdae040b3",
+    "out/private-kernel-20261020/clippy-receipt.log": "7fb312b1ab380c4bc7abb43ad362b61d9a76b34e6f3e8b88caf0002cd2d84152",
+    "out/private-kernel-20261020/default-clippy.log": "58d42a94c9cf7d8ac5e2e357b18379034e7e04129750cd88d0e440a73a02157c"
+  }
+}

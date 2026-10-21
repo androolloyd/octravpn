@@ -1,26 +1,17 @@
-//! Stealth-output helpers — Octra-aligned X25519 ECDH scheme.
+//! VPN ECDH tag helpers and the legacy VPN amount-envelope format.
 //!
-//! Per `octra-labs/webcli/lib/stealth.hpp`:
+//! ECDH and the tag/claim-secret domains use Octra's conventions. The view-key
+//! derivation and amount envelopes in this module are VPN-specific: the view
+//! secret has its own derivation domain, and the envelope uses a derived
+//! ChaCha20-Poly1305 key with a big-endian amount. They do not match the native
+//! wallet's SHA-512 view derivation or direct-key AES-GCM/little-endian payload.
+//! Never submit `seal_payload` output as a native transaction's `enc_amount`.
+//! The native-compatible codec is isolated in `experimental/private-payments`.
 //!
-//!   1. Sender and recipient agree on a Curve25519 ECDH shared secret:
-//!      `shared = SHA256(X25519(sender_eph_sk, recipient_view_pub))`
-//!   2. The 16-byte stealth tag (output identifier) is:
-//!      `stealth_tag = SHA256(shared || "OCTRA_STEALTH_TAG_V1")[..16]`
-//!   3. A 32-byte claim secret + bound claim pubkey are derived with
-//!      domain separators `OCTRA_CLAIM_SECRET_V1` / `OCTRA_CLAIM_BIND_V1`.
-//!   4. Amount + blinding are sealed under `shared` with AES-256-GCM.
-//!
-//! ## Privacy contract
-//!
-//! The recipient publishes a view *public key* (`view_pubkey = view_secret · G`).
-//! With **only** that pubkey, an outside observer cannot link emitted
-//! stealth tags back to the recipient — the link requires either the
-//! sender's ephemeral secret (deleted post-send) or the recipient's
-//! `view_secret`. This matches the Monero "public view key" model.
-//!
-//! For OctraVPN's purposes (program-emitted private transfer), only
-//! steps 1-2 matter — the program emits a 16-byte stealth tag the
-//! recipient scans for via `octra_stealthOutputs`.
+//! An output tag requires an X25519 shared secret derived with the recipient's
+//! view secret or the sender's ephemeral secret. A public view key alone cannot
+//! reproduce it. This protects tag discovery; it does not hide a public native
+//! sender or claim transaction and does not authenticate a payment.
 
 use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, Key, KeyInit, Nonce};
 use rand::{rngs::OsRng, RngCore};
@@ -160,9 +151,9 @@ pub fn tag16(tag: &[u8; 32]) -> [u8; 16] {
 /// X25519(view_secret, R)) can recover it. Domain-separated and
 /// authenticated.
 ///
-/// Wire format of the returned blob: `nonce(12) || ciphertext(40)`
-/// — i.e. 12 bytes ChaCha20-Poly1305 nonce followed by
-/// `Encrypt(key=shared, plaintext = u64 amount || 32B blind)`.
+/// VPN wire format: `nonce(12) || ciphertext(40) || tag(16)`. The key is
+/// `derive_payload_key(shared)` and the amount is big-endian. This is not the
+/// native wallet's amount payload.
 pub fn seal_payload(shared: &[u8; 32], amount: u64, blind: &[u8; 32]) -> CoreResult<Vec<u8>> {
     let key = derive_payload_key(shared);
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));

@@ -215,15 +215,25 @@ impl Tunnel {
                     return;
                 }
             };
-            let Ok(parsed) = packet::parse(&buffer[..length]) else {
-                continue;
+            let parsed = match packet::parse(&buffer[..length]) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    tracing::debug!(%error, bytes = length, "VPN IP return parse refused");
+                    continue;
+                }
             };
             let path = self.routes.lock().get(&parsed.destination).cloned();
             let Some(path) = path else {
+                tracing::debug!(bytes = length, "VPN IP return has no retained route");
                 continue;
             };
             let assigned = packet::address(path.identity().0, path.identity().1);
             if !path.allowed() || parsed.destination != assigned {
+                tracing::debug!(
+                    bytes = length,
+                    retained = path.retained(),
+                    "VPN IP return grant unavailable"
+                );
                 continue;
             }
             let mut returned = None;

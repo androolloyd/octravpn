@@ -64,6 +64,11 @@ configured node interface. Native-node configuration uses
 `vpn.ip_tunnel = {"name":"octra-exit"}`; standalone operator TOML uses
 `[tun.ip_tunnel] name = "octra-exit"`. The node opens a dedicated TUN at
 `198.18.0.1/15`; clients derive a session/WG-bound address and open a `/32` TUN.
+On macOS, names such as `octra-exit` and `octrapay0` are logical labels: the
+kernel chooses the actual `utunN` interface, which the client and node report
+after opening it. A requested `utunN` name is passed through when that exact
+unit is needed. Configure routes and NAT against the reported interface name.
+macOS IPv4 interface configuration requires a privileged service or sudo.
 MTU is 1280. Complete IPv4 TCP, UDP and ICMP packets are checked for lengths,
 checksums, source ownership and public destinations. Options, fragments, IPv6,
 private destinations and source spoofing are refused. Address collisions are
@@ -212,6 +217,9 @@ in the node release gate. Independent native-client interoperability and public
 deployment remain separate gates.
 
 HTTP catch-up captures `OCTRA_JOIN_RPC` and `OCTRA_STATE_SYNC_SOURCES` once.
+Their URL lists are combined, so remove a stale source from both settings.
+Before launch, compare each source's `/state-sync/head` with an independent RPC
+head and the retained local epoch; omit sources behind the local history.
 Sources supply bounded native multipart ranges; head advertisements select work
 only after independent QC or consecutive-prefix verification. Every imported
 epoch still resolves local historical authority and executes against its actual
@@ -238,3 +246,180 @@ Local node tests cover stopped-generation joining, authenticated peer recovery,
 staged-queue replay and restart of canonical browser/VPN/ExEx services. Sustained
 public disconnect/rejoin, validator transitions, same-height lock/duty continuity
 and shutdown at every recovery boundary remain broader qualification gates.
+
+## Isolated application startup and checkpoint recovery
+
+The [private launcher qualification](checkpoints/2026-10-19/private-launcher.json)
+covers native Circle execution, export/import, restart and ExEx, plus a real
+four-process CLI network. It leaves public-network consensus and activation rules
+unchanged. The isolated launcher retains its loopback-only socket policy.
+
+```sh
+cargo build --release -p octra-node --features private-payments-experimental --bin octra-node
+target/release/octra-node init-devnet --directory /private/tmp/octra-private --activated-applications
+target/release/octra-node run --config /private/tmp/octra-private/node-0/config.json
+```
+
+Run the other three generated configurations in separate processes. The opt-in
+is part of the original genesis commitment; setting a flag on an existing chain
+cannot activate it. Startup derives the proof from the configured genesis after
+checking its folded root, and shares that graph with execution and views.
+
+Private offline exports use the existing `snapshot prepare` and `snapshot
+assemble` commands with an independently accepted bootstrap configuration and
+the exact native finalized anchor. Ordinary `canonical.db` sources are supported
+only for isolated private genesis exports. Preparing an image does not authorize
+it: native finality and exporter signatures are still verified. Public-network
+export/startup paths retain checkpoint authority requirements.
+
+After `bootstrap` installs a signed package into a new directory, point the
+private node configuration's `data` at that directory and set `checkpoint_trust`
+to the independently accepted bootstrap configuration's `network` object. Keep
+the original `genesis` unchanged. Trust identity and validators must match that
+genesis; downloaded `network.json` never chooses them. Imported stores use
+`canonical.sqlite`; both store filenames in one directory refuse. Missing trust
+or missing imported data also refuses rather than creating a new chain.
+
+For a new observer, generate a fresh identity and select `voting: false`. Moving
+an existing validator requires retaining its native signing records and floor;
+checkpoint import does not replace those records. Data/key/faucet paths resolve
+against the configuration file directory. Automatic private payer/client
+scheduling and funded private kernel routes remain
+separate qualification gates; released shielded traffic stays gated.
+
+## Experimental private operator wallet
+
+The [operator startup checkpoint](checkpoints/2026-10-19/private-operator-startup.json)
+adds an optional `shielded` object to the isolated BFT node configuration when
+built with `private-payments-experimental`. Public network configuration and
+ordinary builds reject this option. Keep `genesis.activated_applications` bound
+to the original private genesis.
+
+The object supplies the following fields:
+
+| Field | Value |
+| --- | --- |
+| `application` | Independently accepted Circle directory deployment pins and offer lineage, in the existing payment `Config` shape. |
+| `pool` | Accepted shielded Circle/factory, custody ceiling, canonical verification key and its SHA-256 pin. |
+| `wallet` | Path to the encrypted operator wallet directory. |
+| `master_key` | Separate private 32-byte regular key file, outside wallet and transport recovery data. |
+| `purchases` | Explicit `max_channels`, `max_requests`, `max_ceiling_ou` and `max_invoice_lifetime_ms` limits. |
+| `ip_tunnel` | Optional existing IP tunnel configuration; `null` leaves kernel forwarding disabled. |
+
+Paths resolve against the configuration directory. The private transport journal
+uses `data/private-payments-transport`. Select this mode without legacy/public
+payment configuration or stock exit settings. Control HTTP stays on loopback
+behind the separately authenticated TLS transport.
+
+Generate a dedicated storage key with the existing identity tool; only its raw
+private file is used for wallet encryption. With accepted deployment pins in
+the configuration, initialize the wallet once while the node is stopped:
+
+```sh
+target/release/octra-node init-identity --key /private/path/operator-storage.key
+target/release/octra-node init-private-wallet --config /private/path/node.json
+target/release/octra-node run --config /private/path/node.json
+```
+
+Initialization creates only a new off-chain encrypted book and opens no service
+listeners. It does not deploy, fund, stake or validate delivery. Repeating it on
+an existing wallet refuses. Ordinary startup only resumes the existing book;
+missing data and incorrect keys never trigger recreation. Master-key files with
+shared permissions, symlinks, multiple hard links or incorrect length refuse.
+Protect the key separately from encrypted wallet/meter backups. Basic key-file
+custody does not add OS keychain integration or rollback/cloned-writer protection.
+
+Startup reuses canonical private purchase, replay and admission checks. A signed
+quote still buys no traffic until genuine funding passes canonical verification.
+The private operator configuration does not enable the released client shielded
+mode; routed client scheduling/recovery and funded per-hop kernel traffic remain gates.
+
+## Experimental private payer runner
+
+The [private payer checkpoint](checkpoints/2026-10-19/private-payer-runner.json)
+qualifies the reusable `shielded::payer::runner::Purchase` service. Its encrypted
+job binds independently accepted pool/directory/operator pins, bond generation,
+tariff hash, class, finite bytes, price ceiling, expiry and a separate native fee
+budget. Receipt identities derive locally per job and differ from the relayer.
+
+An application supplies an initialized payer book, canonical index, funded
+dedicated relayer and accepted prover. `Pool::offer` exposes canonical directory
+facts for constructing consent; an operator response cannot choose those pins.
+Keep the original random job ID in the application's durable configuration and
+use `Purchase::resume` after restart. Job discovery and a background route daemon
+are separate integration work.
+
+```rust,ignore
+let control = PrivateControl::new(&origin, target, &accepted_ca, accepted_spki)?;
+let purchase = Purchase::create(payer, job_id, accepted_terms).await?;
+let state = purchase.step(Services {
+    index: &index,
+    submission: &submission,
+    control: &control,
+    relayer: &relayer,
+    prover: &prover,
+}).await?;
+```
+
+Drive another step on canonical progress or an explicit retry. A step performs
+at most one control exchange or native submission. Requests retain their exact
+IDs and windows after uncertainty; expiry refuses implicit renewal. Native
+recovery scans the relayer's bounded encrypted journal before preparing another
+proof. An exact healthy staged envelope may be announced again without changing
+native duplicate-nonce rules or reserving another fee.
+
+`Submitted` is staging only. `Credited` requires original canonical inclusion,
+change reconciliation and the operator's matching receipt acknowledgement. It
+does not authorize forwarding: the transport still needs its current plan-bound
+funding guard. The released multihop mode remains gated pending per-hop client
+integration and funded kernel/restart/ExEx qualification.
+
+## Experimental private transport client
+
+The [private client checkpoint](checkpoints/2026-10-19/private-client.json)
+qualifies pinned HTTPS admission/status and encrypted client recovery against
+the real canonical operator service. `AcceptedPrivatePlan` specifies the accepted
+source, binding, tariff, bond generation, class caps, quote ceiling, TLS CA/SPKI
+pins and WireGuard endpoint. Its quote ceiling is an allocation limit, not a
+withdrawable native balance. Note purchases remain a separate native service;
+this client has only the per-job receipt key.
+
+```rust,ignore
+use octravpn_client::{JournalMode, PreparedPrivateClient, PrivatePaymentOptions};
+
+let prepared = PreparedPrivateClient::new(PrivatePaymentOptions {
+    plan: accepted_private_plan,
+    journal: original_journal_path,
+    receipt_key,
+    interface_name: "octraprivate0".into(),
+    mode: JournalMode::Resume,
+}).await?;
+let client = prepared.open().await?;
+// Provision explicit host routes using client.interface().
+let summary = client.run(caller_shutdown).await?;
+```
+
+Creation requires `JournalMode::Create` and a genuinely new directory. Resume
+requires the original key, plan and intact journal; missing data never implies
+creation. Preparation durably advances the connection watermark and authenticates
+the operator snapshot. It refuses a missing purchased floor before any UDP/TUN
+startup. `open()` rechecks admission before opening WireGuard and TUN. The client
+installs no host routes or global signal handlers.
+
+The whole private transport state is XChaCha20-Poly1305 sealed under a separately
+derived receipt-secret key and immutable plan/source scope. Public plaintext
+journals cannot be loaded as private records. Existing private permissions,
+single-writer leases, replacement detection, atomic/fsynced installation and
+poisoned-write handling apply. Interrupted handoffs stay held after recovery.
+Signed private observations preserve funding, delivery-slot, connection and
+canonical-clock floors without increasing local byte caps. A stale observation
+does not gain a new deadline when the caller starts its monitor later.
+
+Both client modes use the same conservative packet handoff driver and shutdown
+supervisor. Private summaries return byte counters, without an available-OCT
+claim. All 369 client unit/integration tests and 248 private node tests pass;
+strict ordinary and experimental checks pass. The canonical test uses pinned TLS
+for genuine purchases and client preparation before/after funding and restart.
+It opens no private payload tunnel or kernel interface. Linux private build,
+per-hop native purchase/route orchestration and funded kernel/restart/ExEx remain
+qualification work; the released multihop privacy selector stays gated.

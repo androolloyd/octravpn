@@ -15,52 +15,43 @@
   <main class="wrap subpage">
     <p class="eyebrow"><span class="signal"></span> PUBLIC DEVNET / TESTER GUIDE</p>
     <h1>Your path in.<br><em>On your terms.</em></h1>
-    <p class="lede narrow">octra.to is a bonded VPN operator on public devnet with a sealed prepaid offer. Joining still requires an operator-issued HTTPS login server and private, usually single-use enrollment key. Open self-service signup is not available yet.</p>
-    <div class="status-ribbon"><strong>Offer</strong><span>1,000 OU per MiB · devnet · class 0</span><strong>To join</strong><span>Get an operator-issued invitation</span></div>
+    <p class="lede narrow">The private devnet alpha is an invited developer test using the native Rust SDK. Start with a verified operator profile and a finite prepaid allowance. Custody and signing stay on your machine.</p>
+    <div class="status-ribbon"><strong>Offer</strong><span>1,000 OU per MiB · devnet · class 0</span><strong>Profile</strong><span>Invited native SDK testing</span></div>
     <div class="guide-grid">
       <div class="guide-main">
         <section class="guide-step">
           <span class="step-num">01 / GET THE INVITE</span>
-          <h2>Start with a trusted operator.</h2>
-          <p>Install the official Tailscale client for your device. The operator gives you an HTTPS login-server origin and a preauth key minted by their running control service. Ask for the network name, published OCT tariff and support contact at the same time.</p>
-          <p class="quiet">Do not use an offline fixture key or a server address copied from an unverified message. The key normally works once; keep it out of screenshots and public chat.</p>
+          <h2>Accept the network you intend.</h2>
+          <p>Your operator provides the chain, published tariff, pool and authenticated transport pins. The private profile uses a dedicated Linux client or VM. Open self-service signup and stock Tailscale private-payment onboarding are not available here.</p>
+          <a class="inline-link" href="https://github.com/androolloyd/octravpn/blob/main/docs/operators/devnet-private-alpha.md" rel="noreferrer">Read the private alpha guide <span aria-hidden="true">↗</span></a>
         </section>
         <section class="guide-step">
-          <span class="step-num">02 / JOIN THE MESH</span>
-          <h2>Use the Tailscale you know.</h2>
-          <p>Replace both placeholders with the values your operator provided. This command is for macOS or Linux; Windows uses the same flags without <code>sudo</code>.</p>
-          <pre><code>sudo tailscale up \
-  --login-server https://YOUR-OPERATOR.example \
-  --authkey YOUR-SINGLE-USE-KEY</code></pre>
-          <p>Check the result with <code>tailscale status</code>. On later restarts, do not reuse the single-use key; your Tailscale installation keeps the device registration.</p>
+          <span class="step-num">02 / KEEP YOUR KEYS</span>
+          <h2>Prepare your wallet locally.</h2>
+          <p>Build the accepted Rust client and initialize its protected wallet and recovery journals. Generate your own credentials. An invitation provides accepted configuration and proving material; it never requires uploading your wallet seed, spend key or transaction signer.</p>
         </section>
         <section class="guide-step">
-          <span class="step-num">03 / SEE THE FREE FRONT DOOR</span>
+          <span class="step-num">03 / CHECK THE OFFER</span>
           <h2>Orient before you pay.</h2>
-          <p>The operator’s bounded portal can show this Circle site after registration, even without a paid allowance. It can explain the offer and funding path. It cannot browse arbitrary Circles, sign a transaction or carry general Internet traffic for free.</p>
-          <p class="quiet">The devnet source Circle is <code>octC9XpV4K4LJWFzc16zvaS1Rk3z8nyiqS7xwswH84Tca7E</code>. That identifies the published site; it is not a wallet or funding address.</p>
+          <p>This Circle-hosted portal explains the network and funding path for free. Our published directory is <code>oct4qzVq1RsPQnnoYpbXNuqjHYpPPs2LPdDK2inWZDwYCoP</code>, offer <code>0</code>, operated by <code>oct1JBUrYbeTQazQ39LQn4ZjnPLHfDpLGXouqon1jZhJfYP</code>.</p>
+          <p>The sealed default rate is <strong>1,000 OU per MiB</strong> (0.001 devnet OCT/MiB). Verify the offer against canonical chain state. Your operator sets its prices; the protocol takes no commission.</p>
         </section>
         <section class="guide-step">
           <span class="step-num">04 / BUY FINITE TRAFFIC</span>
-          <h2>Fund locally. Review the rate.</h2>
-          <p>Our published payment Circle is <code>oct4qzVq1RsPQnnoYpbXNuqjHYpPPs2LPdDK2inWZDwYCoP</code>, offer <code>0</code>, owned by <code>oct1JBUrYbeTQazQ39LQn4ZjnPLHfDpLGXouqon1jZhJfYP</code>. Its sealed default rate is <strong>1,000 OU per MiB</strong> (0.001 OCT/MiB). Verify these facts against canonical devnet state before accepting a plan; rates can change with notice. The local client uses your public <code>nodekey:</code> identity, private receipt key and a durable journal:</p>
-          <pre><code>octravpn stock-payments \
-  --plan accepted-plan.json \
-  --journal /private/path/plan-journal \
-  --receipt-key /private/path/receipt.key \
-  --node-key nodekey:YOUR-PUBLIC-NODE-KEY</code></pre>
-          <p>Paid forwarding starts only after the byte purchase is confirmed. The operator chooses the rate; the protocol takes no commission. You can withdraw available channel OCT, while settled byte purchases stay final.</p>
+          <h2>Fund. Confirm. Connect.</h2>
+          <p>Review a finite deposit and byte purchase in your local client. Forwarding requires actual successful native execution and canonical confirmation. A signed quote or HTTP success alone does not buy capacity. This alpha uses a test-setup shielded pool capped at one devnet OCT.</p>
+          <p>Available owned funds remain withdrawable. Settled purchases stay final. There are no automatic top-ups or operator credit lines.</p>
         </section>
         <section class="guide-step">
           <span class="step-num">05 / USE YOUR ROUTE</span>
-          <h2>Browse and exit when admitted.</h2>
-          <p>Choose the operator’s advertised exit in Tailscale. On a paid route with trusted DNS and TLS, public Circles open as regular HTTPS pages at <code>circles.octra.to</code>. Purchased bytes are finite: the connection pauses on exhaustion rather than extending credit.</p>
-          <a class="inline-link" href="browse.html">See the Circle URL format <span aria-hidden="true">↗</span></a>
+          <h2>Test the connection you paid for.</h2>
+          <p>The accepted launcher installs routing, DNS and physical-path guards. Confirm your exit IP and paid HTTPS traffic, then test restart with the original journal. Exhaustion closes the traffic path. The public deployment starts with one operator; separate operators are required for a public multi-hop route.</p>
+          <a class="inline-link" href="browse.html">Understand Circle browsing <span aria-hidden="true">↗</span></a>
         </section>
       </div>
       <aside class="guide-aside">
-        <div class="aside-card"><span class="eyebrow">KEEP THIS PRIVATE</span><h3>Your wallet stays yours.</h3><p>Never paste wallet secrets, receipt keys or enrollment credentials into a Circle page. The site is read-only. Funding and signing happen in the local client.</p></div>
-        <div class="aside-card light"><span class="eyebrow">BEFORE YOU START</span><h3>Ask for four things.</h3><ol><li>HTTPS login server</li><li>Private enrollment key</li><li>Published tariff and plan</li><li>Operator support contact</li></ol><p>Until we can provide all four, you can inspect this public Circle but cannot finish joining from this page alone.</p><a href="operators.html">Prefer your own node? Start here →</a></div>
+        <div class="aside-card"><span class="eyebrow">KEEP THIS PRIVATE</span><h3>Your wallet stays yours.</h3><p>Never paste wallet secrets, receipt keys or enrollment credentials into a Circle page. This site is read-only. Funding and signing happen locally.</p></div>
+        <div class="aside-card light"><span class="eyebrow">BEFORE YOU START</span><h3>Get the accepted profile.</h3><ol><li>Network and deployment pins</li><li>Published tariff and finite limits</li><li>HTTPS and WireGuard endpoint pins</li><li>Test instructions and support contact</li></ol><p>Mainnet and production proving-setup qualification remain separate work.</p><a href="operators.html">Prefer your own node? Start here →</a></div>
       </aside>
     </div>
   </main>

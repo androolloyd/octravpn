@@ -22,6 +22,8 @@ use std::{
 };
 
 use anyhow::{bail, Result};
+mod network;
+pub use network::Network;
 
 /// An armed route lease. Dropping it does not release the kill switch.
 /// Call `disconnect` only for a user-requested, clean disconnect.
@@ -51,13 +53,68 @@ impl CompositeRouteGuard {
         #[cfg(target_os = "linux")]
         {
             Ok(Self {
-                lease: linux::multi::Lease::arm(entry, controls, peers, interfaces)?,
+                lease: linux::multi::Lease::arm(entry, controls, peers, interfaces, false)?,
             })
         }
         #[cfg(not(target_os = "linux"))]
         {
             let _ = (entry, controls, peers, interfaces);
             bail!("composite paid routes require Linux crash-safe route management")
+        }
+    }
+    pub(crate) fn reserve_chain(
+        entry: SocketAddrV4,
+        controls: &[SocketAddrV4],
+        peers: &[SocketAddrV4],
+        interfaces: &[String],
+        mark: u32,
+        previous: Option<&Network>,
+    ) -> Result<Self> {
+        #[cfg(target_os = "linux")]
+        {
+            Ok(Self {
+                lease: linux::multi::Lease::reserve(
+                    entry, controls, peers, interfaces, true, mark, previous,
+                )?,
+            })
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (entry, controls, peers, interfaces, mark, previous);
+            bail!("coordinated paid routes require Linux")
+        }
+    }
+    pub(crate) fn network(&self) -> Result<Network> {
+        #[cfg(target_os = "linux")]
+        {
+            self.lease.network()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            match self.unavailable {}
+        }
+    }
+    #[cfg_attr(not(target_os = "linux"), allow(clippy::needless_pass_by_ref_mut))]
+    pub(crate) fn activate(&mut self) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            self.lease.activate()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            match self.unavailable {}
+        }
+    }
+    #[cfg_attr(not(target_os = "linux"), allow(clippy::needless_pass_by_ref_mut))]
+    pub(crate) fn chain(&mut self, entry: &crate::Interface) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            self.lease.chain(entry)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = entry;
+            match self.unavailable {}
         }
     }
     #[cfg_attr(not(target_os = "linux"), allow(clippy::needless_pass_by_ref_mut))]
@@ -200,7 +257,7 @@ impl PaidRouteGuard {
     }
 }
 
-fn validate_interface(name: &str) -> Result<()> {
+pub(crate) fn validate_interface(name: &str) -> Result<()> {
     if name.is_empty()
         || name.len() > 15
         || !name
@@ -216,6 +273,7 @@ fn validate_interface(name: &str) -> Result<()> {
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod linux {
     pub(super) mod multi;
+    mod packet;
     use std::{fs::File, net::SocketAddrV4, os::unix::fs::MetadataExt, process::Command};
 
     use anyhow::{anyhow, bail, Context, Result};
@@ -276,7 +334,7 @@ mod linux {
         routes: Vec<Route>,
     }
 
-    pub(super) fn preflight() -> Result<()> {
+    fn require_host_capabilities() -> Result<()> {
         let status = std::fs::read_to_string("/proc/self/status")
             .context("read Linux effective capabilities")?;
         let effective_uid = status
@@ -295,6 +353,11 @@ mod linux {
         if caps & (1 << 12) == 0 {
             bail!("paid host exit requires CAP_NET_ADMIN before opening escrow");
         }
+        Ok(())
+    }
+
+    pub(super) fn preflight() -> Result<()> {
+        require_host_capabilities()?;
         match std::fs::symlink_metadata("/run/octravpn-paid-exit.lock") {
             Ok(metadata) => verify_lock_metadata(&metadata)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}

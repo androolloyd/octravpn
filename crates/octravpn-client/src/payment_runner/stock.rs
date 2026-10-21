@@ -41,18 +41,15 @@ impl StockClient {
             .map_err(|_| anyhow::anyhow!("invalid stock key"))?;
         ensure!(public != [0; 32], "zero stock public key");
         let origin = plan.origin()?;
+        let http = plan.control_http()?.build()?;
         let accepted = plan.clone();
         let journal = Accounting::new(
             tokio::task::spawn_blocking(move || Journal::open_stock(&path, &accepted, key, mode))
                 .await??,
         );
         let connect = journal.with(move |journal| journal.connect(public)).await?;
-        let http = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(60))
-            .no_proxy()
-            .build()?;
-        let initial = Observation::new(status_mode(&http, &origin, &connect, &plan, true).await?);
+        let initial =
+            Observation::new(status_mode(&http, &origin, &connect, &plan, &journal, true).await?);
         let initial = prepay_mode(&http, &origin, &connect, &plan, &journal, initial, true).await?;
         Ok(Self {
             plan,
@@ -76,12 +73,15 @@ impl StockClient {
             initial,
         } = self;
         let (stop, stopped) = tokio::sync::watch::channel(false);
+        let monitoring = journal.clone();
         // Stock transport delivery is operator-metered; this controller never
         // fabricates local packet counters from signed operator status.
         supervise(
             journal,
             std::future::pending(),
-            control_mode(http, origin, connect, plan, initial, stopped, true),
+            control_mode(
+                http, origin, connect, plan, monitoring, initial, stopped, true,
+            ),
             stop,
             shutdown,
         )

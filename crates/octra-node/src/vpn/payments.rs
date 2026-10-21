@@ -6,12 +6,8 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use octra_exex::ChainIdentity;
 use octra_node_protocol::{aml::emit::internal_key, transaction::decode_base64};
 use octra_node_runtime::{
-    account_store,
-    canonical::Reader,
-    circle_assets, circle_store,
-    finality::history::History,
-    program::store,
-    state_batch::{Snapshot, StateBatch},
+    canonical::Reader, circle_assets, circle_store, finality::history::History, program::store,
+    state_batch::Snapshot,
 };
 use octravpn_core::{
     parse_native_address,
@@ -29,8 +25,14 @@ use std::{
 
 use crate::Committed;
 pub mod build;
+mod offers;
+#[cfg(test)]
+use octra_node_runtime::{account_store, state_batch::StateBatch};
+pub use offers::{Offer, OfferData};
 #[cfg(test)]
 mod circle_tests;
+#[cfg(feature = "private-payments-experimental")]
+pub mod shielded;
 #[cfg(test)]
 #[path = "../../../octra-node-runtime/tests/common/payments_host.rs"]
 #[allow(dead_code)]
@@ -92,6 +94,10 @@ pub struct ServiceConfig {
     pub ip_tunnel: octravpn_node::embedded::IpTunnelConfig,
     /// Lifetime relayer fee ceiling for this durable claim directory.
     pub max_claim_fees_ou: u64,
+    /// Observer-only intake for already signed claims. Canonical state still
+    /// decides whether a purchase completed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_rpc_url: Option<String>,
 }
 
 /// Full-chain origin, rather than an RPC hostname or short network label.
@@ -318,22 +324,7 @@ impl Payments {
         let serving = self.shared.current()?;
         let expires = serving.observed_at + PLAN_MAX_AGE;
         ensure!(Instant::now() < expires, "Octranet canonical head is stale");
-        if self.config.application == Application::Circle {
-            let (graph, history) = self
-                .circle_authority
-                .as_ref()
-                .context("Octranet Circle execution authority is missing")?;
-            let rules = octra_node_runtime::circle_view::canonical_with_graph(
-                &serving.committed.assets,
-                graph,
-                history.as_ref(),
-            )
-            .await?;
-            ensure!(
-                rules.proof_exec == octra_node_protocol::transaction::RuleMode::Active,
-                "Octranet Circle value effects are inactive"
-            );
-        }
+        self.check_value_effects(&serving.committed).await?;
         let mut result = if claim_only {
             let fields = Fields::new(serving.committed.state(), &self.config);
             ensure!(
@@ -364,6 +355,26 @@ impl Payments {
             expires,
         });
         Ok(result)
+    }
+
+    async fn check_value_effects(&self, view: &Committed) -> Result<()> {
+        if self.config.application == Application::Circle {
+            let (graph, history) = self
+                .circle_authority
+                .as_ref()
+                .context("Octranet Circle execution authority is missing")?;
+            let rules = octra_node_runtime::circle_view::canonical_with_graph(
+                &view.assets,
+                graph,
+                history.as_ref(),
+            )
+            .await?;
+            ensure!(
+                rules.proof_exec == octra_node_protocol::transaction::RuleMode::Active,
+                "Octranet Circle value effects are inactive"
+            );
+        }
+        Ok(())
     }
 
     async fn canonical_time(&self, view: &Committed) -> Result<u64> {
@@ -397,22 +408,33 @@ impl Payments {
     async fn project(&self, view: &Committed, plan: u64) -> Result<Plan> {
         let now = self.canonical_time(view).await?;
         let plan = self.read_state(view.state(), plan, now)?;
+        self.visible_tariff(view, &plan.manifest_hash, &plan.tariff)
+            .await?;
+        // With the production archive attached, durability precedes the grant.
+        // Failed retention therefore prevents forwarding on this publication.
+        self.retain_tariff(plan.offer, plan.tariff.clone()).await?;
+        Ok(plan)
+    }
+
+    async fn visible_tariff(
+        &self,
+        view: &Committed,
+        manifest: &str,
+        tariff: &Tariff,
+    ) -> Result<()> {
         // The storage primitive above binds bytes; the canonical resolver also
         // enforces Circle visibility, activation, expiry and revocation policy.
         use octra_browser::AssetResolver;
         let url = octra_browser::OctUrl::parse(&format!(
             "oct://{}/offers/{}/tariff.json",
-            self.config.operator_circle, plan.manifest_hash
+            self.config.operator_circle, manifest
         ))?;
         let asset = view.assets.resolve(&url).await?;
         ensure!(
-            asset.bytes.as_ref() == plan.tariff.canonical_bytes()?,
+            asset.bytes.as_ref() == tariff.canonical_bytes()?,
             "Octranet public tariff differs"
         );
-        // With the production archive attached, durability precedes the grant.
-        // Failed retention therefore prevents forwarding on this publication.
-        self.retain_tariff(plan.offer, plan.tariff.clone()).await?;
-        Ok(plan)
+        Ok(())
     }
 
     fn read_state(&self, snapshot: &Snapshot, plan: u64, now: u64) -> Result<Plan> {
@@ -427,79 +449,14 @@ impl Payments {
         retained: Option<Tariff>,
     ) -> Result<Plan> {
         let claim_only = retained.is_some();
-        check_application(
-            self.config.application,
-            snapshot,
-            &self.config.program,
-            &self.config.code_hash,
-            Some(self.config.factory.as_bytes()),
-        )?;
-        check_application(
-            self.config.application,
-            snapshot,
-            &self.config.factory,
-            &self.config.factory_code_hash,
-            None,
-        )?;
-        let state = Fields::new(snapshot, &self.config);
-        if self.config.application == Application::Circle {
-            ensure!(
-                state.uint(b"circle_initialized", &[])? == 1,
-                "Octranet Circle is not initialized"
-            );
-        }
-        ensure!(
-            state.text(b"domain", &[])? == self.config.domain,
-            "Octranet deployment domain differs"
-        );
+        let state = self.directory(snapshot)?;
         ensure!(
             plan < state.uint(b"plan_count", &[])?,
             "Octranet plan not found"
         );
         let plan_key = plan.to_string();
         let offer = state.uint(b"plan_offer", &[&plan_key])?;
-        ensure!(
-            offer < state.uint(b"offer_count", &[])?,
-            "Octranet offer differs"
-        );
-        let offer_key = offer.to_string();
-        let series = state.uint(b"offer_series", &[&offer_key])?;
-        let series_key = series.to_string();
-        ensure!(
-            series == self.config.offer
-                && series < state.uint(b"offer_count", &[])?
-                && state.uint(b"offer_series", &[&series_key])? == series,
-            "Octranet offer lineage differs"
-        );
-        let operator = state.text(b"offer_owner", &[&offer_key])?;
-        ensure!(
-            operator == self.operator.display(),
-            "Octranet offer operator differs"
-        );
-        ensure!(
-            state.uint(b"offer_sealed", &[&offer_key])? == 1,
-            "Octranet offer not sealed"
-        );
-        let manifest = state.text(b"offer_manifest", &[&offer_key])?;
-        digest(&manifest)?;
-        let tariff = if let Some(tariff) = retained {
-            ensure!(
-                tariff.hash_hex()? == manifest,
-                "Octranet retained tariff hash differs"
-            );
-            tariff
-        } else {
-            self.tariff(snapshot, &manifest)?
-        };
-        ensure!(
-            tariff.operator() == &self.operator,
-            "Octranet tariff operator differs"
-        );
-        let classes = state.uint(b"offer_classes", &[&offer_key])?;
-        ensure!(
-            classes == tariff.classes().len() as u64,
-            "Octranet class count differs"
-        );
+        let quoted = self.offer_fields(&state, offer, now, retained)?;
         let payer_text = state.text(b"plan_payer", &[&plan_key])?;
         let payer = parse_native_address(&payer_text)?;
         let generation = state.uint(b"plan_generation", &[&plan_key])?;
@@ -517,18 +474,14 @@ impl Payments {
             key.try_into()
                 .map_err(|_| anyhow::anyhow!("Octranet receipt key size differs"))?,
         );
-        let mut redeemed_bytes = Vec::with_capacity(tariff.classes().len());
-        let mut redeemed_ou = Vec::with_capacity(tariff.classes().len());
-        for (class, terms) in tariff.classes().iter().enumerate() {
+        let mut redeemed_bytes = Vec::with_capacity(quoted.data.tariff.classes().len());
+        let mut redeemed_ou = Vec::with_capacity(quoted.data.tariff.classes().len());
+        for class in 0..quoted.data.tariff.classes().len() {
             let class_key = class.to_string();
-            ensure!(
-                state.uint(b"offer_rate", &[&offer_key, &class_key])? == terms.rate_ou_per_mib,
-                "Octranet class rate differs"
-            );
             let bytes = state.uint(b"class_bytes", &[&plan_key, &class_key])?;
             let paid = state.uint(b"class_paid", &[&plan_key, &class_key])?;
             ensure!(
-                tariff.charge(u8::try_from(class)?, bytes)? == paid,
+                quoted.data.tariff.charge(u8::try_from(class)?, bytes)? == paid,
                 "Octranet redeemed charge differs"
             );
             redeemed_bytes.push(bytes);
@@ -554,32 +507,9 @@ impl Payments {
         );
         let reserved = state.uint(b"reserved", &[&payer_text])?;
         let funds = state.uint(b"funds", &[&payer_text])?;
-        let minimum = state.uint(b"min_operator_stake", &[])?;
-        let locked = state.uint(b"locked_value", &[])?;
-        let cap = state.uint(b"max_locked_value", &[])?;
-        ensure!(
-            minimum >= 100_000_000 && cap > minimum && locked <= cap && reserved <= funds,
-            "Octranet custody accounting differs"
-        );
-        let liquid = account_store::load(
-            &StateBatch::from_snapshot(snapshot.clone()),
-            self.config.program.as_bytes(),
-        )?
-        .is_some_and(|account| account.balance >= locked.into());
-        let provider_generation = state.uint(b"offer_generation", &[&offer_key])?;
-        ensure!(
-            state.text(b"offer_owner", &[&series_key])? == operator
-                && state.uint(b"offer_generation", &[&series_key])? == provider_generation,
-            "Octranet offer lineage operator differs"
-        );
-        let provider_current = state.uint(b"operator_generation", &[&operator])?;
-        let provider_key = provider_generation.to_string();
-        let stopped = state.uint(b"operator_stopped", &[&operator, &provider_key])?;
+        ensure!(reserved <= funds, "Octranet custody accounting differs");
+        let stopped = quoted.data.operator_stopped_ms;
         let user_deadline = state.uint(b"exit_deadline", &[&payer_text])?;
-        ensure!(
-            stopped == 0 || stopped <= now,
-            "Octranet operator stop clock differs"
-        );
         ensure!(
             user_deadline == 0 || user_deadline <= now,
             "Octranet payer exit clock differs"
@@ -590,23 +520,7 @@ impl Payments {
             (exit, 0) => Some(exit),
             (exit, stop) => Some(exit.min(stop)),
         };
-        let offer_start_ms = state.uint(b"offer_start_ms", &[&offer_key])?;
-        let offer_end_ms = state.uint(b"offer_end_ms", &[&offer_key])?;
-        let cancelled = state.uint(b"offer_cancelled", &[&offer_key])?;
-        ensure!(
-            offer_start_ms > 0
-                && (offer_end_ms == 0 || offer_end_ms > offer_start_ms)
-                && cancelled <= 1,
-            "Octranet offer quote clock differs"
-        );
-        let quote_started = now >= offer_start_ms && cancelled == 0;
-        let purchase_open = quote_started && (offer_end_ms == 0 || now < offer_end_ms);
-        let available = active && liquid && remaining <= reserved && remaining <= funds;
-        let provider_available = provider_generation > 0
-            && provider_generation == provider_current
-            && stopped == 0
-            && state.uint(b"operator_unlock", &[&operator])? == 0
-            && state.uint(b"operator_stake", &[&operator])? >= minimum;
+        let available = active && quoted.liquid && remaining <= reserved && remaining <= funds;
         Ok(Plan {
             data: PlanData {
                 deployment: self.deployment.clone(),
@@ -615,11 +529,11 @@ impl Payments {
                 generation,
                 plan,
                 offer,
-                operator_generation: provider_generation,
-                offer_start_ms,
-                offer_end_ms,
-                manifest_hash: manifest,
-                tariff,
+                operator_generation: quoted.data.operator_generation,
+                offer_start_ms: quoted.data.offer_start_ms,
+                offer_end_ms: quoted.data.offer_end_ms,
+                manifest_hash: quoted.data.manifest_hash,
+                tariff: quoted.data.tariff,
                 original_budget_ou: budget,
                 remaining_ou: remaining,
                 redeemed_bytes,
@@ -630,10 +544,13 @@ impl Payments {
             },
             eligible: !claim_only
                 && available
-                && provider_available
+                && quoted.provider_available
                 && user_deadline == 0
-                && quote_started,
-            claim_eligible: available && provider_available && user_deadline == 0 && purchase_open,
+                && quoted.quote_started,
+            claim_eligible: available
+                && quoted.provider_available
+                && user_deadline == 0
+                && quoted.purchase_open,
             lease: None,
         })
     }

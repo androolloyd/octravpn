@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::watch;
 
 #[derive(Clone)]
-pub(super) struct Accounting {
+pub(crate) struct Accounting {
     inner: Arc<Mutex<Journal>>,
     activity: watch::Sender<usize>,
 }
@@ -19,7 +19,7 @@ impl Drop for InFlight {
 }
 
 impl Accounting {
-    pub(super) fn new(journal: Journal) -> Self {
+    pub(crate) fn new(journal: Journal) -> Self {
         let (activity, _) = watch::channel(0);
         Self {
             inner: Arc::new(Mutex::new(journal)),
@@ -27,7 +27,7 @@ impl Accounting {
         }
     }
 
-    pub(super) async fn with<R, F>(&self, operation: F) -> Result<R>
+    pub(crate) async fn with<R, F>(&self, operation: F) -> Result<R>
     where
         R: Send + 'static,
         F: FnOnce(&mut Journal) -> Result<R> + Send + 'static,
@@ -58,7 +58,7 @@ impl Accounting {
     /// The owner must first stop producers. This waits for already registered
     /// work, including workers whose async JoinHandle wait has been cancelled;
     /// it does not prevent a future caller from starting another operation.
-    pub(super) async fn wait_idle(&self) -> Result<()> {
+    pub(crate) async fn wait_idle(&self) -> Result<()> {
         let mut activity = self.activity.subscribe();
         activity
             .wait_for(|active| *active == 0)

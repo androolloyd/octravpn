@@ -1,0 +1,21 @@
+{
+  "schema": "octranet_macos_tun_name_gate_v1",
+  "observed_at_utc": "2026-10-19T02:55:12Z",
+  "source_sha256": {
+    "crates/octravpn-tun/src/lib.rs": "d68c7d28eee6cb5551594dc0a52df292267156e232e8002a50c917bf58775f31",
+    "docs/rust-node/native-vpn.md": "443709090bdc8318c6aef4769135b99f0c8335223d101db3573be44596c2defc"
+  },
+  "finding": "tun-rs 2.8.3 rejects arbitrary named macOS utun devices, while documented paid client and operator configurations use logical names such as octrapay0.",
+  "change": "Logical macOS names now let the kernel choose utunN; valid explicit utunN names remain fixed requests. The opened kernel name is required for route setup. Doctor checks effective UID through the system id command instead of mutable environment variables.",
+  "validation": {
+    "cargo_fmt_package_check": true,
+    "cargo_test_tun_lib": {
+      "passed": 85,
+      "failed": 0
+    },
+    "cargo_clippy_tun_all_targets_deny_warnings": true,
+    "cargo_check_client_operator_node": true,
+    "git_diff_check": true
+  },
+  "scope": "Source and compile qualification on macOS. A privileged live utun open, route/NAT setup, and public paid forwarding have not been exercised by this gate."
+}

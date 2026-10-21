@@ -4,7 +4,7 @@ mod ready;
 pub use ready::read_verified;
 
 use crate::{import::Executor, Host, Node};
-use anyhow::{ensure, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use ed25519_dalek::SigningKey;
 use octra_node_protocol::{
     consensus::{catchup, hash, CatchupEpochRecord},
@@ -13,14 +13,15 @@ use octra_node_protocol::{
     transaction::Transaction,
 };
 use octra_node_runtime::{canonical::Head, validator_history::CanonicalValidators};
-use reqwest::Url;
-use std::{path::Path, time::Duration};
-use tokio::time::Instant;
+use reqwest::{header::RETRY_AFTER, StatusCode, Url};
+use std::{collections::HashMap, path::Path, sync::Arc, time::Duration};
+use tokio::{sync::Mutex, time::Instant};
 
 #[derive(Clone)]
 pub struct Client {
     sources: Vec<Url>,
     http: reqwest::Client,
+    rate_limits: Arc<Mutex<HashMap<String, Instant>>>,
 }
 pub struct Report {
     pub synced: bool,
@@ -66,6 +67,7 @@ impl Client {
                 .connect_timeout(Duration::from_secs(10))
                 .timeout(Duration::from_secs(20))
                 .build()?,
+            rate_limits: Arc::new(Mutex::new(HashMap::new())),
         })
     }
     pub fn configured(&self) -> bool {
@@ -88,8 +90,33 @@ impl Client {
         ))?)
     }
     async fn get(&self, url: Url, deadline: Instant) -> Result<Vec<u8>> {
+        let origin = url.origin().ascii_serialization();
+        {
+            let mut limits = self.rate_limits.lock().await;
+            if limits
+                .get(&origin)
+                .is_some_and(|until| *until > Instant::now())
+            {
+                bail!("join source cooling down after HTTP 429");
+            }
+            limits.remove(&origin);
+        }
         let request = async {
             let mut response = self.http.get(url).send().await?;
+            if response.status() == StatusCode::TOO_MANY_REQUESTS {
+                let seconds = response
+                    .headers()
+                    .get(RETRY_AFTER)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .unwrap_or(60)
+                    .clamp(30, 300);
+                self.rate_limits
+                    .lock()
+                    .await
+                    .insert(origin, Instant::now() + Duration::from_secs(seconds));
+                bail!("join HTTP response {}", response.status());
+            }
             ensure!(
                 response.status().is_success(),
                 "join HTTP response {}",
@@ -566,5 +593,51 @@ impl Client {
             source: None,
             error: last_error,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn rate_limited_source_cools_down_across_client_clones() {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let seen = requests.clone();
+        let router = axum::Router::new().route(
+            "/state-sync/range",
+            axum::routing::get(move || {
+                let seen = seen.clone();
+                async move {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                    (StatusCode::TOO_MANY_REQUESTS, [(RETRY_AFTER, "120")])
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let client = Client::capture(|name| {
+            (name == "OCTRA_JOIN_RPC").then(|| endpoint.as_bytes().to_vec())
+        })
+        .unwrap();
+        let url = Client::route(&client.sources[0], "/state-sync/range").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+
+        assert!(client.get(url.clone(), deadline).await.is_err());
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        let error = client.clone().get(url.clone(), deadline).await.unwrap_err();
+        assert!(error.to_string().contains("cooling down"));
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+
+        client.rate_limits.lock().await.insert(
+            url.origin().ascii_serialization(),
+            Instant::now() - Duration::from_millis(1),
+        );
+        assert!(client.get(url, deadline).await.is_err());
+        assert_eq!(requests.load(Ordering::SeqCst), 2);
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
     }
 }

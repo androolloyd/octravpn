@@ -69,13 +69,15 @@ def fixtures(build):
             float=False, math=True, circle_policy=False, wasm_compute=True))
     init = ('initialize', [], 0)
     bond = ('bond_operator', [], 100_000_000)
+    operator_key = ('register_operator_receipt_key', ['$OPERATOR_KEY', '$OPERATOR_SIGNATURE'], 0)
     register = ('register', ['$REGISTER_KEY', '$REGISTER_SIGNATURE'], 0)
     fund = ('fund', [calls.SENDER], 5_000_000)
     quote = [('create_offer', ['b'*64], 0), ('append_class', [0,10], 0),
              ('seal_offer', [0], 0), ('open_plan', [0,1000], 0)]
     claim = ('claim', [0,0,1,1_048_576,'$CLAIM_SIGNATURE'], 0)
-    add('parent-owned Circle prepaid custody', [init, init, bond, register, fund, *quote,
-        claim, claim, ('withdraw_channel', [5_000_001],0), ('withdraw_remaining',[],0),
+    overflow_claim = ('claim', [0,0,2,18_446_744_073_709_551_615,'$CLAIM_OVERFLOW_SIGNATURE'], 0)
+    add('parent-owned Circle prepaid custody', [init, init, bond, operator_key, register, fund, *quote,
+        claim, claim, overflow_claim, ('withdraw_channel', [5_000_001],0), ('withdraw_remaining',[],0),
         ('request_operator_unstake',[],0), ('request_operator_unstake',[],0),
         ('withdraw_operator_stake',[],0)])
     add('uninitialized Circle rejects financial calls', [bond, register, fund,
@@ -87,18 +89,25 @@ def fixtures(build):
     change = [('create_rate_change',[0,'c'*64],0),('append_class',[1,20],0),('seal_offer',[1],0)]
     day, week, start = 86_400_000, 604_800_000, 123_500
     add('rate activation and exact seven-day unstake',phases=[
-        (start,[init,bond,register,fund,*quote,claim,*change]),
+        (start,[init,bond,operator_key,register,fund,*quote,claim,*change]),
         (start+day-1,[('open_plan',[1,1],0),('open_plan',[0,1],0)]),
         (start+day,[('open_plan',[0,1],0),('open_plan',[1,1],0),('can_forward',[0],0),('request_operator_unstake',[],0)]),
         (start+day+week-1,[('request_operator_unstake',[],0),('withdraw_operator_stake',[],0)]),
         (start+day+week,[('withdraw_operator_stake',[],0)]),
     ])
     add('replacement cancellation and reschedule retain full notice',phases=[
-        (start,[init,bond,register,fund,*quote,*change]),
+        (start,[init,bond,operator_key,register,fund,*quote,*change]),
         (start+1000,[('create_rate_change',[0,'d'*64],0),('append_class',[2,30],0),('seal_offer',[2],0)]),
         (start+day,[('open_plan',[1,1],0),('open_plan',[2,1],0),('cancel_rate_change',[2],0),('open_plan',[0,1],0)]),
         (start+1000+day,[('open_plan',[2,1],0),('open_plan',[0,1],0)]),
     ])
+    slash = ('slash_double_service_receipt', [0,0,7,100,'$SERVICE_SIGNATURE_A',101,'$SERVICE_SIGNATURE_B'], 0)
+    award = ('withdraw_slash_award', ['$OPERATOR_ADDRESS',1], 0)
+    add('operator equivocation closes bond generation', phases=[
+        (start,[init,bond,operator_key,register,fund,*quote,
+            ('slash_double_service_receipt',[0,0,7,100,'$SERVICE_SIGNATURE_A',101,'$SERVICE_WRONG_SIGNATURE'],0),
+            slash,slash,('release_stopped_plan',[0],0),award]),
+        (start+week,[award,award])])
     return out
 
 def main():
@@ -140,15 +149,15 @@ def main():
             'scripts/node-port/octb-execution-fixtures.py','program/octranet-payments.aml',
             'program/octranet-payments-circle-init.aml.in','program/octranet-payments-circle-factory.aml',
             'crates/octra-node/src/vpn/payments/build.rs']},
-        scope='Unchanged native compiler and full epoch Circle host: source-derived immutable initialization, parent-owned deferred spawn, real value custody/withdrawal, Ed25519 advance purchase, repeated claim refusal, canonical epoch clock, retained multi-epoch exact day/week boundaries, rate cancellation/reschedule and rollback. No BFT admission, public deployment or delivery proof.')
+        scope='Unchanged native compiler and full epoch Circle host: source-derived immutable initialization, parent-owned deferred spawn, real value custody/withdrawal, Ed25519 advance purchase, operator-signed same-slot equivocation slash, locked award withdrawal and replay refusal, canonical epoch clock, retained multi-epoch exact day/week boundaries, rate cancellation/reschedule and rollback. No BFT admission, public deployment or arbitrary delivery proof.')
     # Keep the actual native output even when a scenario assertion fails.
     # A failed run is diagnostic evidence, never a promoted golden fixture.
     observed = args.out.with_name(args.out.stem + '.observed.json')
     if observed.exists():
         raise SystemExit('Require fresh observed output')
     observed.write_text(json.dumps(report, indent=2)+'\n')
-    expected_refusals = [[12,13,17],list(range(2,8)),[5],[],
-        [],[0],[0],[1],[],[],[],[0,1],[0]]
+    expected_refusals = [[13,14,15,19],list(range(2,8)),[5],[],
+        [],[0],[0],[1],[],[],[],[0,1],[0],[11,13,15],[1]]
     assert len(report['cases']) == len(expected_refusals)
     for case, rejected in zip(report['cases'],expected_refusals,strict=True):
         result = case['expected']['result']
@@ -159,8 +168,10 @@ def main():
         # the golden replay compares the real fee totals and ledger accounts.
         assert all(row['charged'] is False for row in result['rejected']), case['input']['name']
         assert len(result['confirmed']) + len(rejected) == len(case['input']['transactions'])
-    # Actual receipt clock, not process wall time, determines day/week boundaries.
     import base64
+    overflow_reason = report['cases'][0]['expected']['result']['rejected'][1]['reason']
+    assert b'charge intermediate exceeds uint64' in base64.b64decode(overflow_reason)
+    # Actual receipt clock, not process wall time, determines day/week boundaries.
     def events(case, name):
         receipts = [json.loads(base64.b64decode(row[1])) for row in case['expected']['receipts']]
         return [event['values'] for receipt in receipts for event in receipt['events'] if event['event']==name]
@@ -170,6 +181,9 @@ def main():
     assert deadlines and set(deadlines) == {str(123_500+86_400_000+604_800_000)}
     assert events(report['cases'][4],'RateChangeScheduled')[0][2] == str(123_500+86_400_000)
     assert events(report['cases'][10],'RateChangeScheduled')[0][2] == str(123_500+1000+86_400_000)
+    slash_event = events(report['cases'][13],'OperatorSlashed')[0]
+    assert slash_event[-2:] == ['100000000',str(123_500+604_800_000)]
+    assert events(report['cases'][14],'SlashAwardWithdrawn')[0][-1] == '100000000'
     # Preserve complete real outputs; refusal counts must not be replaced by
     # generated expectations. Runtime replay compares roots/fees/receipts.
     args.out.write_text(json.dumps(report, indent=2)+'\n')

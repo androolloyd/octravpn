@@ -303,6 +303,28 @@ async fn node_with_grace(
     read_idle: Duration,
     proposal_grace: GraceConfig,
 ) -> Node {
+    node_with_mode(
+        id,
+        n,
+        bootstrap,
+        restored,
+        timeouts,
+        read_idle,
+        proposal_grace,
+        false,
+    )
+    .await
+}
+async fn node_with_mode(
+    id: u8,
+    n: u8,
+    bootstrap: Vec<Endpoint>,
+    restored: Option<Proposal>,
+    timeouts: TimeoutConfig,
+    read_idle: Duration,
+    proposal_grace: GraceConfig,
+    receive_only: bool,
+) -> Node {
     let dir = tempfile::tempdir().unwrap();
     let journal = JournalOwner::open(dir.path()).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -389,7 +411,11 @@ async fn node_with_grace(
     let network = tokio::spawn(async move {
         network.run(listener, dispatch).await.unwrap();
     });
-    let driver = tokio::spawn(driver.run(shutdown));
+    let driver = tokio::spawn(if receive_only {
+        driver.receive_only().run(shutdown)
+    } else {
+        driver.run(shutdown)
+    });
     Node {
         authority,
         handle,
@@ -418,6 +444,34 @@ fn enable(nodes: &[Node]) {
         node.authority.ready.store(true, Ordering::SeqCst);
         node.handle.wake().unwrap();
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn receive_only_driver_starts_without_quorum_and_never_enables_votes() {
+    let observer = node_with_mode(
+        1,
+        4,
+        vec![],
+        None,
+        TimeoutConfig::default(),
+        Duration::from_secs(60),
+        GraceConfig::from_env(),
+        true,
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !observer.handle.status().borrow().started {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("receive-only driver waited for voting peers");
+    assert!(observer.swarm.peers().is_empty());
+    observer.authority.ready.store(true, Ordering::SeqCst);
+    observer.handle.wake().unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!observer.handle.status().borrow().voting);
+    assert!(observer.authority.commits.lock().unwrap().is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -347,6 +347,7 @@ pub struct Graph {
     /// later profile rules are derived from chain identity, as in Rule_graph.
     plans: [Option<Activation>; 20],
     isolated_applications: Option<(Activation, IsolatedApplicationProfile)>,
+    application_opt_in: Option<Vec<u8>>,
 }
 impl Graph {
     pub fn new(chain_id: Vec<u8>, ready_config_hash: Option<Vec<u8>>) -> Self {
@@ -356,6 +357,7 @@ impl Graph {
             ready_config_hash,
             plans,
             isolated_applications: None,
+            application_opt_in: None,
         }
     }
     /// Explicit application-only qualification profile for a new isolated
@@ -446,6 +448,39 @@ impl Graph {
         } else {
             Err("application fixture genesis opt-in differs")
         }
+    }
+    /// Carry the original private-network opt-in across a pruned checkpoint.
+    /// This authenticates genesis contents, never a later mutable flag.
+    pub fn with_application_opt_in_proof(
+        mut self,
+        ledger_root: &[u8],
+        index_root: &[u8],
+        proof: &[u8],
+    ) -> Result<Self, &'static str> {
+        let expected = self
+            .isolated_application_anchor()
+            .ok_or("application fixture is not configured")?;
+        if proof.len() > 1024 * 1024 {
+            return Err("application genesis proof exceeds limit");
+        }
+        let root = crate::epoch_index::folded_state_root(ledger_root, index_root)
+            .map_err(|_| "application genesis root malformed")?;
+        if hex::encode(root).as_bytes() != expected {
+            return Err("application genesis proof root differs");
+        }
+        let profile = self
+            .application_fixture()
+            .ok_or("application fixture profile missing")?;
+        let raw =
+            crate::irmin::proof::verify(ledger_root, &[b"meta", profile.metadata_key()], proof)
+                .map_err(|_| "application genesis proof invalid")?
+                .ok_or("application genesis opt-in missing")?;
+        self.check_application_opt_in(&raw)?;
+        self.application_opt_in = Some(raw);
+        Ok(self)
+    }
+    pub fn has_proven_application_opt_in(&self) -> bool {
+        self.application_opt_in.is_some()
     }
     pub fn chain_id(&self) -> &[u8] {
         &self.chain_id

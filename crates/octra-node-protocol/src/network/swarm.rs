@@ -27,8 +27,10 @@ use tokio::{
     task::JoinSet,
 };
 mod diagnostics;
+mod scope;
 mod service;
 pub use diagnostics::{Connections, Count as ConnectionCount, Outcome, Phase};
+pub use scope::{Lease as ScopeLease, Scope as TransportScope};
 
 pub type MessageFuture = Pin<Box<dyn Future<Output = Result<(), Error>> + Send>>;
 pub trait Handler: Send + Sync + 'static {
@@ -77,6 +79,8 @@ struct State {
     due: BTreeMap<Vec<u8>, f64>,
     relayed: super::peer_diag::Relayed,
     proxy: Option<std::net::SocketAddr>,
+    scope: scope::Scope,
+    scope_revision: u64,
     connections: diagnostics::Counters,
 }
 struct Inner {
@@ -86,6 +90,9 @@ struct Inner {
     state: Mutex<State>,
     stop: watch::Sender<bool>,
     wake: Notify,
+    scope: watch::Sender<scope::Request>,
+    scope_applied: watch::Sender<u64>,
+    scope_transition: tokio::sync::Mutex<()>,
 }
 #[derive(Clone)]
 pub struct Swarm(Arc<Inner>);
@@ -122,6 +129,8 @@ impl Swarm {
             due: BTreeMap::new(),
             relayed: super::peer_diag::Relayed::default(),
             proxy: None,
+            scope: scope::Scope::Public,
+            scope_revision: 0,
             connections: diagnostics::Counters::default(),
         };
         Ok(Self(Arc::new(Inner {
@@ -131,6 +140,13 @@ impl Swarm {
             state: Mutex::new(state),
             stop,
             wake: Notify::new(),
+            scope: watch::channel(scope::Request {
+                revision: 0,
+                scope: scope::Scope::Public,
+            })
+            .0,
+            scope_applied: watch::channel(0).0,
+            scope_transition: tokio::sync::Mutex::new(()),
         })))
     }
     fn state(&self) -> MutexGuard<'_, State> {
@@ -163,6 +179,7 @@ impl Swarm {
         if state.started {
             return Err("P2P proxy must be selected before swarm startup".into());
         }
+        state.scope.validate(true)?;
         state.proxy = Some(proxy);
         Ok(())
     }
@@ -290,10 +307,27 @@ impl Swarm {
             return Ok(());
         }
         s.validators = Some(keys);
-        for (id, p) in &s.peers {
-            p.peer
-                .set_peer_class(policy::role(s.validators.as_deref(), id));
-        }
+        let accepts_observers = self.accepts_observers(&s);
+        let validators = s.validators.clone();
+        let mut observers = 0;
+        s.peers.retain(|id, slot| {
+            let role = policy::role(validators.as_deref(), id);
+            let keep = slot.peer.is_connected()
+                && match role {
+                    PeerClass::Validator => true,
+                    PeerClass::Observer if accepts_observers && observers < 8 => {
+                        observers += 1;
+                        true
+                    }
+                    PeerClass::Observer => false,
+                };
+            if keep {
+                slot.peer.set_peer_class(role);
+            } else {
+                slot.peer.close();
+            }
+            keep
+        });
         s.registry.clear();
         s.due.clear();
         Ok(())
@@ -435,24 +469,29 @@ impl Swarm {
             return Ok(None);
         }
         let role = policy::role(s.validators.as_deref(), id);
+        let existing_connected = s.peers.get(id).is_some_and(|p| p.peer.is_connected());
         if let Some(existing) = s.peers.get(id) {
             if !policy::replace_existing(
                 self.node_id(),
                 id,
                 direction,
                 existing.direction,
-                existing.peer.is_connected(),
+                existing_connected,
             ) {
                 s.connections
                     .record(direction, Phase::Admission, Outcome::Duplicate);
                 return Ok(None);
             }
-            existing.peer.close();
-        } else if role == PeerClass::Observer && !self.accepts_observers(&s) {
+            if existing_connected {
+                existing.peer.close();
+            }
+        }
+        if !existing_connected && role == PeerClass::Observer && !self.accepts_observers(&s) {
             s.connections
                 .record(direction, Phase::Admission, Outcome::Observer);
             return Ok(None);
-        } else if !self.capacity(&s, role) {
+        }
+        if !existing_connected && !self.capacity(&s, role) {
             s.connections
                 .record(direction, Phase::Admission, Outcome::Capacity);
             return Ok(None);
@@ -548,12 +587,11 @@ impl Swarm {
                     upgrade::expected_binary(epoch, &config.binary_hash, config.upgrade.as_ref())
                 });
         for record in records {
-            match record.validate(
-                &config.chain_id,
-                &s.active_hash,
-                binary,
-                &config.allowed_public_keys,
-            ) {
+            let allowed = s
+                .validators
+                .as_deref()
+                .unwrap_or(&config.allowed_public_keys);
+            match record.validate(&config.chain_id, &s.active_hash, binary, allowed) {
                 Err(reason) => s.relayed.reject(reason.as_bytes()),
                 Ok(()) => {
                     if record.node_id == self.node_id() {
@@ -622,6 +660,7 @@ impl Swarm {
             p.peer.close();
         }
         self.0.stop.send_replace(true);
+        self.0.scope_applied.send_replace(u64::MAX);
     }
 }
 fn now() -> f64 {

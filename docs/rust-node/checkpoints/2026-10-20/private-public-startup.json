@@ -1,0 +1,144 @@
+{
+  "observed_at_utc": "2026-10-21T00:16:15.413015+00:00",
+  "status": "public devnet private-service wiring host qualified; public stateful activation unqualified",
+  "consensus_changes": false,
+  "supported_profiles": [
+    "native adopted public devnet with authenticated activation history",
+    "explicit isolated BFT application genesis"
+  ],
+  "refused_profiles": [
+    "Mainnet",
+    "unknown chain",
+    "isolated Single applications"
+  ],
+  "implementation": [
+    "Explicit optional shielded/payer/private_route public fields and config-relative paths",
+    "One shared native network preparation captures settings, trust, retained history and execution graph",
+    "Offline setup and finite consent use the same authority without peers, listeners, serving or transaction submission",
+    "Public CLI builds crypto workers from captured network file settings",
+    "Startup waits for current admission; financial Pool reads authenticate native ProofExecution anchors unchanged"
+  ],
+  "host": {
+    "node_tests_passed": 254,
+    "cli_tests_passed": 4,
+    "strict_experimental": "passed",
+    "strict_default": "passed",
+    "results": [
+      {
+        "check": "host-public-strict",
+        "exit_code": 0,
+        "seconds": 29.18
+      },
+      {
+        "check": "host-public-default-strict",
+        "exit_code": 0,
+        "seconds": 18.61
+      },
+      {
+        "check": "host-public-tests",
+        "exit_code": 0,
+        "seconds": 417.42
+      },
+      {
+        "check": "host-public-cli-tests",
+        "exit_code": 0,
+        "seconds": 50.9
+      }
+    ],
+    "final_factory_followup": [
+      {
+        "check": "host-public-factory-strict",
+        "exit_code": 0,
+        "seconds": 29.31
+      },
+      {
+        "check": "host-public-factory-tests",
+        "exit_code": 0,
+        "seconds": 90.2
+      },
+      {
+        "check": "host-public-factory-cli",
+        "exit_code": 0,
+        "seconds": 53.94
+      }
+    ]
+  },
+  "linux": {
+    "current_final_context": "out/private-funded-multihop-20261020/linux-v8/context",
+    "build_pending": false,
+    "previous_image": "sha256:c48e236828e9c90999571724524a55298ebb2a97459bcf51f1d1e86d451b5278",
+    "private_funded_profiles_pending": true,
+    "final_image": {
+      "observed_at_utc": "2026-10-21T00:14:27.528693+00:00",
+      "image_id": "sha256:b3dc8b6182e34d6dc66f4094a44c29935f343b9f6c1709705bdbb6042274d1d5",
+      "frozen_source_files_verified": 4980,
+      "binaries": {
+        "private-kernel-test": "af487871d82b288e9463d060ab0d8d9b212d9551910e7547852e1b2de275c88e",
+        "octra-node": "a0c28351ed977bacca024eaf46a2961de4355d45bc46b01b2b42cdab58c0e374"
+      },
+      "layers": [
+        "sha256:dca69811453d69d10b6c0345a5c49147162abe20a2f77802d66efc60667949ea",
+        "sha256:c82b6940442be2b46bbb850b02c9768d029c5853482d3a53cde3e1d5c861b26b",
+        "sha256:b9e07ab5875fd73ef3cff8292aa60650dfb3075053f4e9f04b91e8adb584df91",
+        "sha256:bd69fc2e3daad85e48082626f4bed3257b0f8d84bad0110a5fd324065109d78b",
+        "sha256:cb1bd7373e05a02262422d085343c457d3401d2d0d29175b6df0aa1b58b38b1f",
+        "sha256:0b26242a705768903ddb647ec0f40848c90e136463e48d6ce13744d9485a558a",
+        "sha256:27d2fdf5d905251c40a1b0984228b5915e753e14b43f7bb14945f869f8651ec4",
+        "sha256:c6c6c0c976149dd13c732aacc1c3cfc4b9324978fbf83b7d8e314859029d30ce",
+        "sha256:f945199c29d50b00a799231453597de5bc36c247a4d274e779793bbf2b8fc61e",
+        "sha256:82aa4d48382994f899c411d5b4c2a260800add3e9ce9af788a9048e417ec592c",
+        "sha256:7da8a47419a30ea89f16841116e34793893b53d4e8ed74baa3256cba9065f063",
+        "sha256:a4a84c342c2ecf028a66ccf09f79cea28597586dfadb6fc3b14fb732f9787a4a",
+        "sha256:c16634c0f547aa811267213095dd9f65033648ce2fde3b3b2ba745d27f762108",
+        "sha256:bb014cdb53a6cfc69db20ebd3a68613f7db67b7aea399feb412349c5b049516d",
+        "sha256:7ff8ebf3bc7f22acc6270c818de0672470923ac47ea7691b6e0722632c572d6b",
+        "sha256:c71e4a853f14c94155be27c06444d67aeb61435e66a677b25c5d187d82a33375",
+        "sha256:f44cba302d06e3caa130e38216460ccc56a316ef27a3148e1eaafde773d0ab4d",
+        "sha256:585353c2a6c32e0bd56085618a8e524c3216515c91a958d10e8d6d7741e983e6",
+        "sha256:c19a5c2da066a5c28e6245654449a008cadd6edd8a64fcaacd264789e6e6b561",
+        "sha256:8e65612ba9e26cd598f0ca543323a415fa818d2b15800bca54eec53152ea19b9",
+        "sha256:c6d847fb8792eaaf126074b82d27beaf0e95454ed8b244a6878daddb68c19078",
+        "sha256:bbcad184d0eccb5fe9601675c34bf0dbf56e4ba585f9e8809a7485e99f20173d",
+        "sha256:7a6644e8740e2c85d10566a9a4895aa64a36693b7296399c62dc36fe1f081688",
+        "sha256:0e8ec86e6e5aef9c386bde329b7a45bdad9bb82ae820f19ee15c65da0788687e",
+        "sha256:34d5b76d30c902018fd0c871317e431b4db61c35d5db318ba8d488a40bee5b4e",
+        "sha256:b081e89444d2126789031722cadf60af54054d8be08a4ff4c4d8d38d73a6ea6a",
+        "sha256:f5ed4cda78cf46170701bf54b50bef58549a0faf6ffba23db9e08929318a9a86",
+        "sha256:6badc5a03c0bf7ec78810f27b18bb3c1be50dbddf870ae7c1c552d0250cf9239",
+        "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+        "sha256:1205683c28c2ec8b48deb2bfaea33ff122ad13e7403234782ad4474b628bac51",
+        "sha256:6a807e987fbe25cbe9befa5bccb6339980eb0515ce4eff550bea3a817faf38b2",
+        "sha256:87be46cc2974a4703c8103ce14f5377bc49175f62c1565c0215c2020cc6f990c",
+        "sha256:3cb4a5d2a988fddfd1232b3578d121f3b0fb685a7fed2d591b4f4b601805b048",
+        "sha256:c1471f2a525c9f7445eb92f67946f55394359bdb85bc8c089a0cfe9f3f0e2c67",
+        "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+        "sha256:0291f8f4ea7e0cf6c17a9b102810d9ec48257d97e93eb12177a80a564d01993b",
+        "sha256:47725fd14e530d9372312fbc6e86e587babe3f2b78518ac73afb20e2e131f333",
+        "sha256:5c51341dfc06ad0ad782638672b27bce23edb44696be36cb326b55e5751e2c42",
+        "sha256:9d7aa6e6327e68e6c9c45de320cf6159b9979e53b507e0968e9a6533251aebad",
+        "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+        "sha256:6b49f0e3f257a3f588320f4af604a7676dd8ee7d58613b6a6dca31404cc8e3ba",
+        "sha256:477d6c6423447ffdb56d3c9252b9cec735507df2bfd998c9314bf59fdb4e4ff1",
+        "sha256:31f7e6ff2ae214a74d598f1c3b117e95e662faecb6eef5be59079d15c28c7186",
+        "sha256:b011590df8abf995583ecac29a0155ebca9483198001ba762df90fd4ce1f305b",
+        "sha256:98635f285420d0bcb537fe21f3f2093ec5d4b5311c3226cf01b47c933be0a5ac",
+        "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+      ],
+      "public_alpha_qualified": false
+    },
+    "startup_scope_tests_passed": 3,
+    "public_stateful_qualified": false
+  },
+  "public_alpha_qualified": false,
+  "full_goal_complete": false,
+  "source_sha256": {
+    "crates/octra-node/src/network.rs": "6a13a6f95c6a9f7898c89bcb5195fd0bf8ceb1f19b69612e0f1d163604ad2aca",
+    "crates/octra-node/src/devnet.rs": "f71fb72430315ec5f5c1f6fc0b4e0c4ef5245eefe49ad724010252c43a88b445",
+    "crates/octra-node/src/launch.rs": "3105c09d23b68370a98a69b894df5fed8e5b85d423edfef1f6c2e84c5d5027af",
+    "crates/octra-node/src/main.rs": "04115dd6f74e9ff4164e388f444618e0ba976662f1c82f062a4a04de5ce90626",
+    "crates/octra-node/src/vpn/payments/shielded/startup.rs": "90897f73e26490a8d3ceb34ab2e9caeb123508203d945fe254bf4b2137e64616",
+    "crates/octra-node/src/vpn/payments/shielded/startup/offline.rs": "3b287ffc632d232e4c4bca1192e8dfba8f70e8b9f691a5d14489c99143cb3224",
+    "crates/octra-node/src/vpn/payments/shielded/payer/startup.rs": "334a9dbce81624a5809c7d588155cf074fed540411df2d8dc8dddff2fdf38b90"
+  },
+  "evidence": "out/private-funded-multihop-20261020"
+}

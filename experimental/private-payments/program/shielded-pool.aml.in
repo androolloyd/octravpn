@@ -1,0 +1,129 @@
+// Experimental immutable shielded OCT custody. Raw OCTB in the existing Circle
+// host; no consensus opcode or voting change. Production release is disabled.
+program ShieldedPool {
+  const CHAIN: string = "$CHAIN"
+  const VK: string = "$VK"
+  const CAP: uint = $CAP
+  const EMPTY_NOTES: string = "$NOTES"
+  const EMPTY_SPENT: string = "$SPENT"
+  const ZERO: string = "0000000000000000000000000000000000000000000000000000000000000000"
+  const HALF: string = "00000000000000000000000000000000"
+  const HEX: string = "0123456789abcdef"
+  const B64: string = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+  state {
+    initialized: uint
+    domain: string
+    notes: string
+    spent: string
+    count: uint
+    locked: uint
+  }
+
+  event ShieldedTransition(notes: string, spent: string, count: uint, nullifier0: string, nullifier1: string, output0: string, output1: string, box0: string, box1: string, quote: string, context: string)
+
+  fn initialize(): bool {
+    if self.initialized == 1 { return true }
+    require(self.initialized == 0, "invalid pool initialization")
+    self.domain = sha256(concat(concat(concat("Octranet shielded pool v1|", CHAIN), "|"), self_addr))
+    self.notes = EMPTY_NOTES
+    self.spent = EMPTY_SPENT
+    self.count = 0
+    self.locked = 0
+    self.initialized = 1
+    return true
+  }
+
+  private fn digest(text: string) {
+    require(len(text) == 64, "invalid digest length")
+    let i = 0
+    while i < 64 {
+      require(index_of(HEX, substr(text, i, 1)) >= 0, "invalid digest")
+      i = i + 1
+    }
+  }
+
+  private fn packed(text: string): string {
+    return concat(concat(HALF, substr(text, 0, 32)), concat(HALF, substr(text, 32, 32)))
+  }
+
+  private fn scalar(number: uint): string {
+    let text = ""
+    let i = 0
+    while i < 64 {
+      text = concat(substr(HEX, number % 16, 1), text)
+      number = number / 16
+      i = i + 1
+    }
+    return text
+  }
+
+  private fn inputs(raw: string): string {
+    // 17 canonical scalars = 544 bytes; the final base64 group has two '='.
+    require(len(raw) == 1088, "invalid pool input shape")
+    let padded = concat(raw, "0000")
+    let encoded = ""
+    let i = 0
+    while i < 1088 {
+      let a = index_of(HEX, substr(padded, i, 1)) * 16 + index_of(HEX, substr(padded, i + 1, 1))
+      let b = index_of(HEX, substr(padded, i + 2, 1)) * 16 + index_of(HEX, substr(padded, i + 3, 1))
+      let c = index_of(HEX, substr(padded, i + 4, 1)) * 16 + index_of(HEX, substr(padded, i + 5, 1))
+      encoded = concat(encoded, substr(B64, a / 4, 1))
+      encoded = concat(encoded, substr(B64, (a % 4) * 16 + b / 16, 1))
+      if i + 2 < 1088 { encoded = concat(encoded, substr(B64, (b % 16) * 4 + c / 64, 1)) }
+      else { encoded = concat(encoded, "=") }
+      if i + 4 < 1088 { encoded = concat(encoded, substr(B64, c % 64, 1)) }
+      else { encoded = concat(encoded, "=") }
+      i = i + 6
+    }
+    return encoded
+  }
+
+  private fn check_box(output: string, box: string) {
+    if output == ZERO { require(len(box) == 0, "box without output") }
+    else { require(len(box) == 137 && substr(box, 44, 1) == ".", "invalid note box") }
+  }
+
+  payable fn exchange(new_notes: string, new_spent: string, new_count: uint, withdraw: uint, payout: address, valid_from: uint, expires: uint, quote: string, authorization: string, nullifier0: string, nullifier1: string, output0: string, output1: string, box0: string, box1: string, proof: string): bool {
+    require(self.initialized == 1, "pool is not initialized")
+    require(valid_from < expires && expires <= 9223372036854775807 && expires - valid_from <= 86400000, "invalid validity window")
+    require(epoch_time >= valid_from && epoch_time < expires, "pool call expired or premature")
+    require(new_count >= self.count && new_count <= 4294967296 && new_count - self.count <= 2, "invalid note count")
+    require(self.locked <= CAP && value <= CAP - self.locked, "pool custody cap exceeded")
+    let available = self.locked + value
+    require(withdraw <= available && withdraw <= 9223372036854775807, "insufficient pool custody")
+    require(balance(self_addr) >= available, "native value custody is inactive")
+    digest(new_notes)
+    digest(new_spent)
+    digest(quote)
+    digest(authorization)
+    digest(nullifier0)
+    digest(nullifier1)
+    digest(output0)
+    digest(output1)
+    check_box(output0, box0)
+    check_box(output1, box1)
+    require(len(proof) == 352, "invalid pool proof size")
+    let transcript = concat(concat(concat(concat(concat("Octranet shielded call v2|", CHAIN), "|"), self_addr), "|"), caller)
+    transcript = concat(concat(transcript, "|"), quote)
+    transcript = concat(concat(transcript, "|"), to_string(valid_from))
+    transcript = concat(concat(transcript, "|"), to_string(expires))
+    transcript = concat(concat(transcript, "|"), to_string(value))
+    transcript = concat(concat(transcript, "|"), to_string(withdraw))
+    transcript = concat(concat(transcript, "|"), payout)
+    transcript = concat(concat(transcript, "|"), box0)
+    transcript = concat(concat(transcript, "|"), box1)
+    let context = sha256(transcript)
+    let raw = concat(concat(concat(concat(concat(packed(self.domain), self.notes), new_notes), self.spent), new_spent), scalar(self.count))
+    raw = concat(concat(concat(concat(concat(raw, scalar(new_count)), scalar(value)), scalar(withdraw)), packed(context)), authorization)
+    raw = concat(concat(concat(concat(raw, nullifier0), nullifier1), output0), output1)
+    require(groth16_verify_bn254(VK, proof, inputs(raw)), "invalid shielded transition")
+    self.notes = new_notes
+    self.spent = new_spent
+    self.count = new_count
+    self.locked = available - withdraw
+    if withdraw > 0 { require(transfer(payout, withdraw), "native withdrawal failed") }
+    emit ShieldedTransition(new_notes, new_spent, new_count, nullifier0, nullifier1, output0, output1, box0, box1, quote, context)
+    return true
+  }
+}

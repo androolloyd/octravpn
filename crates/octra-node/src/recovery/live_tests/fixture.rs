@@ -217,8 +217,14 @@ impl Tasks {
         &mut self,
         start: impl FnOnce(watch::Receiver<bool>) -> F,
     ) {
-        self.handles
-            .push(tokio::spawn(start(self.stop.subscribe())));
+        let service = start(self.stop.subscribe());
+        self.handles.push(tokio::spawn(async move {
+            let result = service.await;
+            if let Err(error) = &result {
+                eprintln!("live recovery fixture service failed: {error:#}");
+            }
+            result
+        }));
     }
     pub(super) fn healthy(&self) {
         assert!(

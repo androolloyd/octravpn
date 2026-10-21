@@ -1,0 +1,38 @@
+{
+  "observed_at_utc": "2026-10-21T02:40:57.985750+00:00",
+  "status": "root cause isolated; regression and full client suite pass; funded post-fix gates pending",
+  "consensus_changes": false,
+  "root_cause": "admit awaited journal IO inside a select timer branch, suspending an opening future holding the same single-connection book",
+  "fix": [
+    "Poll journal monitoring and the opening future concurrently in the same owned select",
+    "Recheck the journal and chain lease after opening finishes, before traffic handoff",
+    "Preserve priority for an existing carrier failure and retain kernel blockers on failure"
+  ],
+  "regressions_passed": 3,
+  "client_library_tests_passed": 361,
+  "runtime_authority_tests_passed": 9,
+  "native_pool_connection_limit_changed": false,
+  "fee_budgets_changed": false,
+  "cases_before_fix": {
+    "matrix-hop0-v15": {
+      "qualified": false,
+      "cleanup_verified": true,
+      "entry_tun_opened": true,
+      "error": "Route journal acquisition timed out while the admission timer paused its opening future"
+    },
+    "matrix-hop1-v15": {
+      "qualified": false,
+      "cleanup_verified": true,
+      "entry_tun_opened": true,
+      "error": "Route journal acquisition timed out while the admission timer paused its opening future"
+    }
+  },
+  "source_sha256": {
+    "crates/octravpn-client/src/multihop/service.rs": "67142dcf950cc554d19cc761860ef2d1f6f77ad728fd2362b167b139fbc3e7ec",
+    "crates/octravpn-client/src/multihop/service/tests.rs": "ec0ff679ecb285fd690c82cb078ae2d55ca794ea918529a4ec8ebc990e5d7228"
+  },
+  "evidence": "out/private-funded-multihop-20261020",
+  "candidate_context": "out/private-funded-multihop-20261020/linux-v16/context",
+  "public_alpha_qualified": false,
+  "publicly_deployed": false
+}

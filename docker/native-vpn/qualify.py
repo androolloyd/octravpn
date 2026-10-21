@@ -36,7 +36,7 @@ def get(url,host=None):
 def until(fn,seconds=90,label='condition'):
     deadline=time.monotonic()+seconds; last=None
     while time.monotonic()<deadline:
-        stopped=[name for name,process in PROCESSES.items() if process.poll() is not None]
+        stopped={name:code for name,process in PROCESSES.items() if (code:=process.poll()) is not None}
         if stopped:raise RuntimeError(f'qualification processes stopped unexpectedly: {stopped}; inspect retained public logs')
         try:
             value=fn()
@@ -90,7 +90,7 @@ def view(program,method,params=None):
 def start(index):
     path=ROOT/'chain'/f'node-{index}'/'config.json'
     logfile=EVIDENCE/f'node-{index}.log';stream=logfile.open('a')
-    process=subprocess.Popen(['octra-node','run','--config',str(path)],stdout=stream,stderr=subprocess.STDOUT,cwd=ROOT,env={**os.environ,'RUST_LOG':'info'})
+    process=subprocess.Popen(['octra-node','run','--config',str(path)],stdout=stream,stderr=subprocess.STDOUT,cwd=ROOT,env={**os.environ,'RUST_LOG':os.environ.get('OCTRA_NATIVE_VPN_LOG','info')})
     PROCESSES[index]=process;FILES[index]=stream
 def stop(index):
     process=PROCESSES.pop(index);process.send_signal(signal.SIGTERM)

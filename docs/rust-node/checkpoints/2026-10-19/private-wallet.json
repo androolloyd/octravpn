@@ -1,0 +1,119 @@
+{
+  "schema": "octra_private_wallet_v1",
+  "observed_at_utc": "2026-10-19T16:39:33.309673+00:00",
+  "feature": "private-payments-experimental",
+  "consensus_changes": false,
+  "release_enabled": false,
+  "full_rust_node_complete": false,
+  "public_network_qualified": false,
+  "live_shielded_traffic_qualified": false,
+  "scope": "Experimental encrypted operator wallet and single-use purchased-byte ledger, actual local BFT Node/Native/QC funding and canonical-store reopening; encrypted shared meter and signed connection-admission storage. No private live authority, client/control or funded kernel route claim.",
+  "source_sha256": {
+    "Cargo.toml": "7e55763b676bdb61bfc065d6ba52b9eb41bc0571bfbbe10f5d83a6769ef18ede",
+    "Cargo.lock": "27c8bc5404d587ebf79ee1bf793faebc89c417c78ea60c4baf6cdc0a8138dc22",
+    "README.md": "c8819000a560b164168695007c8b77173790127928fb4e4ea34f815e32ebad36",
+    "crates/octra-node/Cargo.toml": "e73dd7aa5597cb8f949c2b2e53ea82b3bfdc90913e0ba171129a7c373789a149",
+    "crates/octra-node/src/native_tools/tests.rs": "33ccec97d8b7d10705c0966c7aca6febcb08e36a52659d59d76829dde932ab4f",
+    "crates/octra-node/src/vpn/payments.rs": "ccbe35670427872d9c2cb525ba4b8f1e70df5cd3229258a181880337a0a1c9d4",
+    "crates/octra-node/src/vpn/payments/offers.rs": "697c85e7df266fc2b32b03444e7b0abec8fc26262193bd12bcd7285f3ab38e20",
+    "crates/octra-node/src/vpn/payments/shielded.rs": "7aa53b9e88337ea79b4f22bcf8a1a883b2e0a5f1700265bfe0eb81093c9232ef",
+    "crates/octra-node/src/vpn/payments/shielded_tests.rs": "4447403c5a6dbcc661a935c77d120ec4f7ab5545972dfa20ce3cefc447c2ac90",
+    "crates/octra-node/src/vpn/payments/shielded/wallet.rs": "0848f69564280c84cc2299e6ca4976aab417a7de63ee35ffb4b97b63c0ed5528",
+    "crates/octra-node/src/vpn/payments/shielded/wallet/storage.rs": "9d15bac8b15f3cd54eded9646961bf8d8668c88fb15b125842e2385f517dca33",
+    "crates/octravpn-core/src/lib.rs": "7f5784c424030ccccc62b7bbbd4a4e42332850b2203f28c81d7b21e600051c6f",
+    "crates/octravpn-core/src/sealed.rs": "ee78d6c91a9cb35b76131bc8e3ea7e79737e89f5f854ced28677460a06c27fea",
+    "crates/octravpn-node/src/payment_meter.rs": "2d6eee0dbe3ab510ef435bfc771259fc1fda69fa45b324d2dfdaba4713a906f3",
+    "crates/octravpn-node/src/payment_meter/storage.rs": "ea68174ae86dfe3199365b67aabc7d7411e8fdb7d9c9b189643ca32d60f114cf",
+    "crates/octravpn-node/src/payment_meter/tests.rs": "dee4e1e9bb3c7fa6e238ac0d7b98aa94807eff1c59b9f11f1317ccbf5e8eafe3",
+    "crates/octravpn-node/src/payments.rs": "a1d14b9c4e5d48438546687b344b93ccd77aad6fbcb3f90d6f70080848fa4e0d",
+    "crates/octravpn-node/src/payments/service.rs": "d099db62fc2ce3ae368863a88c5bcaf01b62d6b7cebb372fef765606ecd53d25",
+    "crates/octravpn-node/src/payments/tests.rs": "0d5ae36b32e364348e42614499119c285f8a80138a1420eee46a9b56fd781d31",
+    "crates/octravpn-client/src/multihop.rs": "c3909737ccecf53ae4bbc4caf0d90451477af51526cc28bd798177220337d98c",
+    "experimental/private-payments/src/invoice.rs": "62621d19fd10b811bfb2fd5b29798df452aaf8414814145a4aabcefed907725e",
+    "experimental/private-payments/src/invoice/tests.rs": "d77e39af4fc233285bc6eef26b086de0deddfbb9a4df8e318b30834abebbe9c9",
+    "experimental/private-payments/README.md": "408a534ca61d1fd80eeb54d6d1626e4fae210575c151e94d0f1c04c8ecd99d2c",
+    "docs/architecture/shielded-circle-payments.md": "a763c4c86dc3578d28e071b494e108b3f168257027fa9d28b5586696962f266d"
+  },
+  "tests": {
+    "node_feature_library": 240,
+    "vpn_node_library": 583,
+    "core_library": 446,
+    "pool_unit": 25,
+    "pool_circle_integration": 1,
+    "total": 1295,
+    "failed": 0,
+    "ignored": 0,
+    "strict_integrated_all_targets_clippy": "passed",
+    "strict_pool_all_targets_clippy": "passed",
+    "normal_node_all_targets_check": "passed"
+  },
+  "implemented": [
+    "Separately held zeroizing master key; domain-separated wallet identity, database, row, claimant, spend, nonce and meter keys",
+    "Whole-record XChaCha20-Poly1305 encryption with fresh OS nonces and immutable scope AAD; wrong-key/scope, swaps and tampering refused",
+    "SQLite sees encrypted invoice, channel, credit and historical proof records plus scoped pseudorandom tags; WAL and FULL-synchronous atomic financial updates",
+    "Existing-only recovery and exclusive writer lease; missing lease, symlink paths and replaced database refuse accidental reset",
+    "Durable key-slot and quote-ceiling reservation precedes returning operator/claimant signatures",
+    "Within one wallet database, one canonical note credits once under concurrent retries; extra real payments to an invoice remain owned but cannot grant duplicate bytes",
+    "Recovered purchased-byte floors are revalidated against actual canonical private funding before meter use",
+    "Encrypted prepaid meter journals retain signed connection watermarks, consumed and uncertain bytes; wrong-key/plaintext fallback and purchase regression refuse",
+    "Encrypted meter selection in the shared service; signed connection admission storage/recovery regression uses an explicit canonical-host fixture",
+    "Actual Node/Native/QC test covers speculative refusal, encrypted wallet reopen, two genuine payments to one invoice, stable one-time key slots and full canonical/ExEx-store reopen"
+  ],
+  "remaining": [
+    "Private client/operator control and current-lease guarded live authority integration",
+    "Zero-price grants and self-carried traffic without dummy paid notes",
+    "Automatic key custody/backup tooling and spending received wallet notes through the wallet API",
+    "Concurrent root scheduling/retries and funded private multi-node/kernel/restart qualification",
+    "Public devnet/mainnet and alternate-host qualification, production ceremony and adversarial cryptographic review"
+  ],
+  "limits": [
+    "Available local quote ceiling is not an on-chain balance; invoice signatures alone grant no bytes",
+    "Encryption at rest does not protect an unlocked process or hide file sizes, record counts, row grouping or IO timing",
+    "No rollback protection against a privileged restore/cloned copy of the complete wallet and meter history; do not reactivate old backups as fresh live writers",
+    "Master key must be held separately; losing it loses access to derived one-time spend keys",
+    "Current released shielded_required route remains refused before reading keys/journals",
+    "No deployment, public source compilation or GitHub push performed in this stage"
+  ],
+  "prior_native_qualification": {
+    "report": "docs/rust-node/checkpoints/2026-10-19/private-funding-authority.json",
+    "native_proof_cases": 120,
+    "rerun_this_stage": false,
+    "unchanged_pool_circuit_aml_lean_sha256": {
+      "program/shielded-pool-factory.aml": "c579c470a57f484b375eaded05793a5beb4ce6e32b530b36e1ccf32e11a0791f",
+      "program/shielded-pool.aml.in": "230a046c370fad7c4aa6ef83694ce504a830df032ab873c6b35f53eb21d4b834",
+      "proofs/Pool.lean": "f92d4c145548baf0f18991ca0c51b666a3057d4cb95113c737285465c347d7f5",
+      "src/pool/app.rs": "bce99997993736dfd88d82c0489e7356448244cc18a71691410b858e13c282e2",
+      "src/pool/call.rs": "68dd9b7f3b3fbde9d2bdac74d2925708fb523c8b62184ccc145030260d5de44e",
+      "src/pool/circuit.rs": "50e3b298c098239358a7c7d9d99a4f1eed80b135c4ac2478a737fb4085263139",
+      "src/pool/envelope.rs": "bc812cf186c46b200e981bd27733286c0a91ab08007f31759f108f770c69d686",
+      "src/pool/hash.rs": "11fc77e170043b12e260ffd9a9c67c1d882996f87b73791c0124dd4080aa3ffa",
+      "src/pool/mod.rs": "7bfbd09c63d31914abe18cc93b1cc4516d4854ffbd8baa41698ba35a6e80716e",
+      "src/pool/purchase.rs": "df3a307b9691c89db65b8ff310e8166b57c79ef0dca54f7df109c68d3068a429",
+      "src/pool/tests.rs": "eb749ae00e023ad3ebde787abff0cd1c223d8ed580954be1cc5ad7c14b14a9a9",
+      "src/pool/tree.rs": "9c69865a2b9ff4e0c34758f585e49de783c8cb234dcb51deb7d49b5e9a0dda39",
+      "src/pool/wire.rs": "59dc4f8020e67c400d0061dab89da9880c9b270e288badac370ae3b194c2d470"
+    },
+    "reason": "This stage changes storage, private invoice codec and host wallet/meter accounting, not the proven pool circuit/AML/Lean sources."
+  },
+  "prior_test_failure": {
+    "log": "out/private-wallet-20261019/host-tests.log",
+    "passed": 239,
+    "failed": 1,
+    "cause": "Existing native-tool overflow fixture reached its one-second deadline before observing output under combined proof-suite load.",
+    "fix": "Only the overflow fixture now has ten seconds for startup; deadline branch remains one second and production limits are unchanged. Full suite rerun passed."
+  },
+  "evidence_sha256": {
+    "out/private-wallet-20261019/default-check.log": "b7cddbcfc601958790bdfcf24d51a4ff195f746e421c05ca3d6f806417459146",
+    "out/private-wallet-20261019/host-clippy-v2.log": "b2c5c3179af1d9431577c6c0c83ca185ebb19d219f9ea1e9c56491f8226c8ee2",
+    "out/private-wallet-20261019/host-clippy.log": "25902f6f7066f1017a2a9c12a6fd3fb4ab4791354596a2448f3d8d1339a895af",
+    "out/private-wallet-20261019/host-tests-v2.log": "0ba5c6d7f609233cb671e19b1776898c76c67d1eacd91b54be114c2b9dec35cd",
+    "out/private-wallet-20261019/host-tests.log": "0e3d459e3d8345c7d7172d329169dcbe80461e75ce30097640aa6d0a617dbb21",
+    "out/private-wallet-20261019/pool-clippy.log": "4db1894641b4d3967398724749f642d19d5f637e4a003501bbdee7970078b89b",
+    "out/private-wallet-20261019/pool-tests.log": "79f478afe833ef5de08aabba8ad36fd2fefa794d8507fbbdc21818ba9392caaf"
+  },
+  "macos_build_env": {
+    "DEVELOPER_DIR": "/Library/Developer/CommandLineTools",
+    "SDKROOT": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+    "note": "Command-scoped existing toolchain; no global Xcode setting or license acceptance changed"
+  }
+}

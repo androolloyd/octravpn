@@ -18,10 +18,13 @@ impl<H: Host, C: Publication> Driver<H, C> {
         step: RoundStep,
         request: bool,
     ) -> Result<(), Error> {
+        if self.receive_only {
+            return Ok(());
+        }
         let Some(public) = self.engine.validators().public_key(&self.address) else {
             return Ok(());
         };
-        if !request && !self.votes.allowed(self.host.readiness()) {
+        if !request && !self.votes.allowed(self.readiness()) {
             return Ok(());
         }
         let mut sync = RoundSync {
@@ -70,7 +73,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 &self.engine,
                 vote,
                 proposal,
-                self.host.readiness().finality_proof_needed,
+                self.readiness().finality_proof_needed,
                 move |record| async move { host.before_precommit(record).await },
             )
             .await?;
@@ -120,7 +123,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 })?;
         }
         let outputs = self.engine.drain_outputs();
-        if self.votes.allowed(self.host.readiness()) {
+        if self.votes.allowed(self.readiness()) {
             let mut votes = std::mem::take(&mut self.pending_votes)
                 .into_values()
                 .filter(|v| {
@@ -173,14 +176,14 @@ impl<H: Host, C: Publication> Driver<H, C> {
                                 &self.engine,
                                 &vote,
                                 proposal.as_ref(),
-                                self.host.readiness().finality_proof_needed,
+                                self.readiness().finality_proof_needed,
                                 move |r| async move { host.before_precommit(r).await },
                             )
                             .await?;
                     } else if vote.epoch_id == self.engine.state().height
                         && vote.epoch_id > self.engine.finalized_height()
                     {
-                        let allowed = self.votes.allowed(self.host.readiness());
+                        let allowed = self.votes.allowed(self.readiness());
                         self.save_vote(
                             &vote,
                             if allowed { proposal.as_ref() } else { None },
@@ -190,13 +193,13 @@ impl<H: Host, C: Publication> Driver<H, C> {
                     }
                 }
                 Output::RequestRoundEvidence(round) => {
-                    if self.votes.allowed(self.host.readiness()) {
+                    if self.votes.allowed(self.readiness()) {
                         self.round_sync(round, RoundStep::Prevote, true).await?;
                     }
                 }
                 Output::RequestProposal { round, proposal_id } => {
                     if self.engine.validators().is_validator(&self.address)
-                        && self.votes.allowed(self.host.readiness())
+                        && self.votes.allowed(self.readiness())
                     {
                         let fetch = driver_policy::ProposalFetch {
                             height: self.engine.state().height,

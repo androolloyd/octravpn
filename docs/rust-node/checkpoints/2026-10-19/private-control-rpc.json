@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "observed_at_utc": "2026-10-19T18:30:10.568292+00:00",
+  "status": "LOCAL_PRIVATE_CONTROL_QUALIFIED_RELEASE_GATED",
+  "base_commit": "db4861dce0ca80eb3afe29d908004191b64def56",
+  "working_tree": "Uncommitted experimental implementation; hashes below identify the tested surfaces",
+  "feature": "private-payments-experimental",
+  "released_shielded_required_enabled": false,
+  "consensus_changed_this_stage": false,
+  "protocol_commission": 0,
+  "public_network_qualification": false,
+  "funded_private_kernel_route_qualified": false,
+  "deployed": false,
+  "pushed": false,
+  "implemented": [
+    "Versioned receipt-key-signed private requests bind origin, pool/domain, directory, operator, random ID, method/arguments and canonical-time window",
+    "Opt-in same-node or standalone private purchase service requires explicit channel/request, ceiling and lifetime limits; no public payment routes are added",
+    "Opening an empty channel and issuing a dual-signed invoice atomically persist the encrypted request/result mapping with the allocation",
+    "Concurrent exact retries recover the original channel, claimant, invoice and response; changed terms under the same receipt-key/request-ID pair refuse",
+    "Quote and receipt methods enforce channel receipt-key ownership; canonical note confirmation alone credits prepaid bytes",
+    "Receipt retries deduplicate canonical credits across the credit/reply crash boundary; a speculative receipt cannot grant capacity",
+    "Bounded encrypted payer request outbox persists exact signed envelopes before caller-controlled transmission and survives restart",
+    "PrivateControl requires HTTPS, an independently accepted target, exactly one accepted CA and one to four accepted TLS SPKI pins; chain and hostname verification remain required",
+    "No proxies, redirects, system-root fallback or plaintext HTTP; request/reply signatures and bounded fixed-length or streamed response reads",
+    "Private RPC refusals expose a constant response without logging invoices, request IDs, note locations or internal errors",
+    "Authorization windows are checked against canonical publication and new quote/channel offer time; reply bounds support full native-sized tariffs"
+  ],
+  "tests": {
+    "combined_library_gate": {
+      "node": 241,
+      "client": 341,
+      "core": 449,
+      "vpn": 585,
+      "total": 1616,
+      "failed": 0,
+      "ignored": 0,
+      "log": "out/private-control-rpc-20261019/tests-v2.log"
+    },
+    "final_client_after_spki_hardening": {
+      "passed": 341,
+      "failed": 0,
+      "ignored": 0,
+      "log": "out/private-control-rpc-20261019/client-final.log"
+    },
+    "scope": "The combined gate preceded client-only SPKI hardening; node/core/VPN source surfaces are unchanged and the final client suite was rerun after hardening.",
+    "strict_all_four_crates_all_targets_clippy": "passed",
+    "normal_node_all_targets_check": "passed",
+    "git_diff_check": "passed"
+  },
+  "canonical_rpc_flow": {
+    "real_node_pool_proofs_signed_qcs_and_custody": true,
+    "empty_channel_no_funding": true,
+    "concurrent_open_and_quote_retries": true,
+    "changed_terms_wrong_owner_wrong_origin_and_policy_limit_refused": true,
+    "encrypted_payer_outbox_reopen": true,
+    "speculative_receipt_refused_before_publication": true,
+    "actual_canonical_purchase_then_receipt_credit": true,
+    "duplicate_receipts_no_duplicate_bytes": true,
+    "service_restart_and_operator_wallet_reopen_exact_response_replay": true,
+    "tighter_recovery_policy_allows_cached_results_and_refuses_new_allocations": true,
+    "native_purchase_submission": "Explicit local fixture transaction; not an automatic payer broadcast API"
+  },
+  "tls_client_flow": {
+    "actual_local_tls_handshakes": true,
+    "wrong_ca_refused_before_http": true,
+    "wrong_spki_refused_before_http": true,
+    "wrong_hostname_refused_before_http": true,
+    "wrong_target_refused_before_http": true,
+    "empty_pins_refused": true,
+    "redirect_refused": true,
+    "wrong_response_identity_refused": true,
+    "oversized_content_length_and_chunked_stream_refused": true,
+    "server_liveness_rechecked_after_refusals": true
+  },
+  "qualification_limits": [
+    "Canonical loopback HTTP RPC and real TLS client transport are separately qualified; no combined funded private routed/kernel or public-chain claim",
+    "Payer native broadcast/nonce recovery, native withdrawal and consolidation, operator income handoff and multi-operator wallet views remain unfinished",
+    "Released shielded_required still refuses before loading keys/journals; the reusable private control client is not a private tunnel runner",
+    "Local allocation caps bound storage but do not provide Sybil resistance; unrestricted public onboarding needs abuse controls",
+    "Private service-equivocation claims, zero-price grants, sponsored/mixed-spend adversarial paths and key custody/backup tooling remain unqualified",
+    "Production proving-key ceremony and independent cryptographic review remain required; local test setup is not suitable for real funds",
+    "No new formal theorem is claimed for RPC/network code. Existing pool AML, circuit and bounded accounting proof sources are unchanged",
+    "Deposits, withdrawals, relayer identity, timing and network metadata remain observable; payment does not prove physical delivery"
+  ],
+  "prior_evidence": {
+    "checkpoint": "docs/rust-node/checkpoints/2026-10-19/private-payer.json",
+    "native_upstream_cases_previously_passed": 120,
+    "native_upstream_cases_rerun_this_stage": 0
+  },
+  "unchanged_circuit_aml_crypto_sha256": {
+    "program/shielded-pool-factory.aml": "c579c470a57f484b375eaded05793a5beb4ce6e32b530b36e1ccf32e11a0791f",
+    "program/shielded-pool.aml.in": "230a046c370fad7c4aa6ef83694ce504a830df032ab873c6b35f53eb21d4b834",
+    "proofs/Pool.lean": "f92d4c145548baf0f18991ca0c51b666a3057d4cb95113c737285465c347d7f5",
+    "src/pool/app.rs": "bce99997993736dfd88d82c0489e7356448244cc18a71691410b858e13c282e2",
+    "src/pool/circuit.rs": "50e3b298c098239358a7c7d9d99a4f1eed80b135c4ac2478a737fb4085263139",
+    "src/pool/envelope.rs": "bc812cf186c46b200e981bd27733286c0a91ab08007f31759f108f770c69d686",
+    "src/pool/hash.rs": "11fc77e170043b12e260ffd9a9c67c1d882996f87b73791c0124dd4080aa3ffa",
+    "src/pool/tree.rs": "9c69865a2b9ff4e0c34758f585e49de783c8cb234dcb51deb7d49b5e9a0dda39",
+    "src/pool/wire.rs": "59dc4f8020e67c400d0061dab89da9880c9b270e288badac370ae3b194c2d470"
+  },
+  "source_sha256": {
+    "Cargo.toml": "7e55763b676bdb61bfc065d6ba52b9eb41bc0571bfbbe10f5d83a6769ef18ede",
+    "Cargo.lock": "76d8d9cdd1b1aaca10293e92f7950209e4508ee5bf9e93e1151e1123f931913f",
+    "crates/octravpn-client/Cargo.toml": "357273c6779ed677eae19be4e62029e2e49a7c321808b2353b729b033748106c",
+    "crates/octravpn-core/src/payments.rs": "a5d1cadd5cfc6eb925ef84a6a592053ec98b429f5360f35b6e39d92d751604c2",
+    "crates/octravpn-core/src/payments/private_purchase.rs": "0cfee644d24dae68097a6485818bd1d1bbab78c40e53e995872f8227f255f885",
+    "crates/octravpn-node/src/payments.rs": "154431c9362feee5e6775a724634e611c589a224731ffbd0beeac72eba4c9ba4",
+    "crates/octravpn-node/src/payments/service.rs": "2124a19c6499593fc8075d8897921244cf1cfa923792b0ad92c69e28f10ca72d",
+    "crates/octravpn-node/src/payments/tests.rs": "e72bfd1041e9d09ba9923e4f8e5de8d3b010d13f6dae1535c1b5b92988d92c4b",
+    "crates/octra-node/src/services.rs": "5c9846ed9d272d81f5e831ebec8f53310a3a5a5cf5ddef5a3d290344ac8377e3",
+    "crates/octra-node/src/vpn/payments/shielded.rs": "dbc94177ea40efae959e0f25601150c0c8500e801d1e608304937f69d7180dd4",
+    "crates/octra-node/src/vpn/payments/shielded/storage.rs": "5c3945c735a29edcb5fb7b76b8c001c7ce966ce82a361234b3470c9350d0e3fa",
+    "crates/octra-node/src/vpn/payments/shielded/wallet.rs": "42d885d20efaf89401e0c161fbb4286a918d7d0fd2bb48e14153fa67fea28b2f",
+    "crates/octra-node/src/vpn/payments/shielded/wallet/rpc.rs": "dcfe43bb52ab44f66b631b9ce977a6cc8b10dbbf6cf3a513839ff2a1752540bc",
+    "crates/octra-node/src/vpn/payments/shielded/wallet/transport.rs": "cc1de1a154428d0f60de857ed4279604b55a0f222228c094587c77515d593e88",
+    "crates/octra-node/src/vpn/payments/shielded/payer.rs": "3599a24e0747fdd33ab0d47898d484287f85ad555810dd69d3bdce0aab4693a5",
+    "crates/octra-node/src/vpn/payments/shielded/payer/control.rs": "804901a955710631ffd2618af0c1b3edfd465f8f9fb37480655460cad0a42cc7",
+    "crates/octra-node/src/vpn/payments/shielded/payer_tests.rs": "d495816e601d9ac75b20990c16c665619f13097423fb63a0bfe1d9f9d5183052",
+    "crates/octra-node/src/vpn/payments/shielded_tests.rs": "aec026e9f22477d9af114f7e25c346eefc43dfda664354597578b081876883bc",
+    "crates/octravpn-client/src/lib.rs": "e1b84111280011d9923bd8de49aa8557b80a8db385f3623f077dba9d24f78f5d",
+    "crates/octravpn-client/src/private_control.rs": "f47697000fd7a37f62341ff9fc4911988b9ab4589a5579f5d38fc0e46cdc60ae"
+  },
+  "evidence_sha256": {
+    "out/private-control-rpc-20261019/client-final.log": "6f325e5a8834322787cd6ffd9580f6e1369d67cf8799047ae96b68068565c7eb",
+    "out/private-control-rpc-20261019/clippy-final.log": "e7d3da5cefb1373b4cbe8f422f7aafe2da016cc5604daa3d4a9106c979b231ac",
+    "out/private-control-rpc-20261019/clippy-v2.log": "6a5c9cc8424059ad0fba9ae890834e66413b0336962d2920fb60a7cdd4dc0b00",
+    "out/private-control-rpc-20261019/clippy-v3.log": "1c9dcf42a968b179fac74369410e3a71d7e79edeec94b3c7837d698c9934c3fc",
+    "out/private-control-rpc-20261019/clippy-v4.log": "af596e82debbdf11b7231379c73e46b2e45e2fef7c627a18801c18cb8d90fc94",
+    "out/private-control-rpc-20261019/clippy-v5.log": "7e8ed9418124245435e6dde2272d82fda2f142d874039414035d4beb304de7b3",
+    "out/private-control-rpc-20261019/clippy.log": "bf0e586b9692e0f2e047de06a885ef1e4ff611d0c03ce6dc3044da89185a32c3",
+    "out/private-control-rpc-20261019/default-check.log": "741c1ceba707d2b2a2f783efa10d68604a72639b0c3b2d410538e3ba5947084f",
+    "out/private-control-rpc-20261019/source.json": "ef65043adcf235150b7648dfb98d45730e8e01732b39ec333c437ddb58ffb11b",
+    "out/private-control-rpc-20261019/tests-v2.log": "01e5162c829320f7fc21ed5b0fb273e190e9fa90b27c49dc038f42c8811a8076",
+    "out/private-control-rpc-20261019/tests.log": "dcb8c94ae5aeacf3267543cb94bad9db2ed8b8e834b0e71dda91828d5c7e88ae"
+  },
+  "prior_failed_gate": {
+    "log": "out/private-control-rpc-20261019/tests.log",
+    "passed": 240,
+    "failed": 1,
+    "cause": "The new service-restart fixture omitted audited node resume after embedded service shutdown suspended shared admission.",
+    "fix": "Explicitly resume canonical node admission after each intentional service stop. Production shutdown semantics are unchanged."
+  },
+  "build_environment": {
+    "DEVELOPER_DIR": "/Library/Developer/CommandLineTools",
+    "SDKROOT": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+    "global_settings_changed": false
+  },
+  "next_gate": "Native private submission/recovery and wallet withdrawal/earnings integration, then a funded private route with kernel, restart, no-bypass and ExEx qualification"
+}

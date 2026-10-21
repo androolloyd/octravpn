@@ -1,0 +1,48 @@
+{
+  "upstream_commit": "d3e834919bd586e81f947d0dae91becc6c43c756",
+  "source_fixture": "crates/octra-hfhe/tests/fixtures/proof-foundation.json",
+  "source_fixture_sha256": "0acbbdec0f3d36dd806a34c31506d02eb55a22f65c4d80ed19bf91f5e7bc81b2",
+  "oracle_sha256": "61049c1fa2c9f6d23aec426fea1bf91d4de73346ac6c17130310ec9ab89bd4ab",
+  "cases": [
+    {
+      "amount": 0,
+      "blind": "6fd2c2d807a421e192020aa5a9bfa71d6a81e70c8b039c783499d68e1428b376",
+      "commitment": "504a1ddcde01a77e6b0e6de64615d1ee506a5f9c93315086d4aee602d0ff016d"
+    },
+    {
+      "amount": 1,
+      "blind": "60da5194cc23458ef7a450b118b9f4abcf8e5f9f05f99dc6f7fe11983404eb5f",
+      "commitment": "6469f9ed7422f757d185f18f7a581b446bb01c17cb895aa553e3dc46c7d42a75"
+    },
+    {
+      "amount": 0,
+      "blind": "6cf7eac05d9b5d81534fe4b413aec1806d9981f5b4f603f16bec7732385266b0",
+      "commitment": "a270aea9dbaf77efe291d994a6d8fdfecf169b1c0261b9dce525de5a98049559"
+    },
+    {
+      "amount": 1,
+      "blind": "5abccfe87492c71dbe9db545d9f039a6ada1edc1f56beb5886e10a8563e5e1e6",
+      "commitment": "50a33d3615acda1372c6ed4780f422bb0df1a1739f5b3671907f6d2d96f38f06"
+    },
+    {
+      "amount": 0,
+      "blind": "a698898661da0f0837005476d5f5fafc04919a035ff3b39b273c63c42c46658a",
+      "commitment": "5ef7ba772b452af939dff7d2725601959e29919272adab12ea306e256f9f0438"
+    },
+    {
+      "amount": 1,
+      "blind": "5aa8917f1521c949d6e93c852dd25213f484e10b95e65717093e1a0d595b1eab",
+      "commitment": "9edb79b22516ffb126dd56a1cd187bc9b9db3a50e42a87b6dd017387c6691268"
+    },
+    {
+      "amount": 0,
+      "blind": "06d4c88ecd020e11a2bc2a807ffa7f0dc0764f17273ed9e595bf71fab053e1c0",
+      "commitment": "3c1b815c1ed45432c0a37cab7aa0fc7bff815d894b9a7fbcf72e2c45d56f0171"
+    },
+    {
+      "amount": 1,
+      "blind": "d28300d0417461fff249b44f18386436babcdea88d52929fc5b7c1262b96efa6",
+      "commitment": "e092c998183bdeda9fdb458797ec13d60d7f02580a356f0e9a6a83a547b0936f"
+    }
+  ]
+}

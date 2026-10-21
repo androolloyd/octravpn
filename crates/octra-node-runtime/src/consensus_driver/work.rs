@@ -130,7 +130,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
                     result,
                 }
             });
-        } else if self.votes.state(&self.engine, self.host.readiness()).0
+        } else if self.votes.state(&self.engine, self.readiness()).0
             && self.engine.am_i_leader()?
             && step == RoundStep::Propose
             && self.build_retry.is_none()
@@ -166,8 +166,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
             {
                 match result {
                     Ok(Some(plan))
-                        if self.votes.allowed(self.host.readiness())
-                            && self.engine.am_i_leader()? =>
+                        if self.votes.allowed(self.readiness()) && self.engine.am_i_leader()? =>
                     {
                         self.host
                             .verify_parent(height, plan.parent_commit.as_ref())?;

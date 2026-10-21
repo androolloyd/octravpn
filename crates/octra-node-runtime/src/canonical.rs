@@ -33,7 +33,7 @@ pub use transactions::{
     HistoryPage, HistoryQuery, HistoryReadError, RejectionPage, RejectionRecord,
 };
 mod vm_receipts;
-pub use reader::{Reader, RecordLengths, ReliefSource};
+pub use reader::{Reader, RecordLengths, ReliefSource, TreeRead};
 pub use records::{ProgramRecords, RecordError};
 pub use vm_receipts::VmReceipts;
 mod bootstrap;
@@ -124,6 +124,17 @@ pub struct AppliedEpoch {
     pub certificate: Vec<u8>,
     pub date: i64,
     pub message: Vec<u8>,
+}
+
+/// One SQLite statement captures the canonical finality rows for an audit.
+/// ExEx events are still loaded and checked through their source adapter.
+pub(crate) struct RetainedFinality {
+    pub base: Head,
+    pub head: Head,
+    pub certificate: Vec<u8>,
+    pub receipts: Vec<Vec<u8>>,
+    pub proposal: Vec<u8>,
+    pub reward: octra_node_protocol::consensus::RewardSource,
 }
 
 pub struct CanonicalStore {
@@ -499,6 +510,9 @@ impl CanonicalStore {
             self.anchor.cursor,
             self.snapshots.clone(),
             self.epoch_tag_keep,
+            self.bootstrap
+                .as_ref()
+                .map(|bootstrap| bootstrap.parent.clone()),
         )
     }
 
@@ -544,31 +558,46 @@ impl CanonicalStore {
         decode_head(&row)
     }
 
-    pub(crate) async fn consensus_receipts(&self, sequence: Sequence) -> Result<Vec<Vec<u8>>> {
+    pub(crate) async fn retained_finality(&self, sequence: Sequence) -> Result<RetainedFinality> {
         let number = i64::try_from(sequence.0).map_err(error)?;
-        let bytes: Vec<u8> =
-            sqlx::query_scalar("SELECT receipts FROM node_consensus_receipts WHERE sequence=?")
-                .bind(number)
-                .fetch_one(&self.pool)
-                .await
-                .map_err(error)?;
-        serde_json::from_slice(&bytes).map_err(error)
-    }
-
-    pub(crate) async fn reward_source(
-        &self,
-        sequence: Sequence,
-    ) -> Result<(Vec<u8>, octra_node_protocol::consensus::RewardSource)> {
-        let row = sqlx::query("SELECT proposal,source FROM node_epoch_rewards WHERE sequence=?")
-            .bind(i64::try_from(sequence.0).map_err(error)?)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(error)?;
-        let bytes: Vec<u8> = row.try_get("source").map_err(error)?;
-        let mut reader = octra_node_protocol::oce1::Reader::new(&bytes);
-        let source = octra_node_protocol::consensus::reward::get(&mut reader).map_err(error)?;
+        let row = sqlx::query(
+            r"SELECT base.sequence AS base_sequence, base.head AS base_head, base.root AS base_root,
+                      head.sequence AS head_sequence, head.head AS head_head, head.root AS head_root,
+                      head.certificate AS certificate, receipts.receipts AS receipts,
+                      rewards.proposal AS proposal, rewards.source AS reward
+               FROM node_epochs AS head
+               JOIN node_epochs AS base ON base.sequence = head.sequence - 1
+               JOIN node_consensus_receipts AS receipts ON receipts.sequence = head.sequence
+               JOIN node_epoch_rewards AS rewards ON rewards.sequence = head.sequence
+               WHERE head.sequence = ?",
+        )
+        .bind(number)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(error)?;
+        let base = decode_head_parts(
+            row.try_get("base_sequence").map_err(error)?,
+            row.try_get("base_head").map_err(error)?,
+            row.try_get("base_root").map_err(error)?,
+        )?;
+        let head = decode_head_parts(
+            row.try_get("head_sequence").map_err(error)?,
+            row.try_get("head_head").map_err(error)?,
+            row.try_get("head_root").map_err(error)?,
+        )?;
+        let receipts: Vec<u8> = row.try_get("receipts").map_err(error)?;
+        let reward: Vec<u8> = row.try_get("reward").map_err(error)?;
+        let mut reader = octra_node_protocol::oce1::Reader::new(&reward);
+        let reward = octra_node_protocol::consensus::reward::get(&mut reader).map_err(error)?;
         reader.finish().map_err(error)?;
-        Ok((row.try_get("proposal").map_err(error)?, source))
+        Ok(RetainedFinality {
+            base,
+            head,
+            certificate: row.try_get("certificate").map_err(error)?,
+            receipts: serde_json::from_slice(&receipts).map_err(error)?,
+            proposal: row.try_get("proposal").map_err(error)?,
+            reward,
+        })
     }
 
     pub(crate) async fn proposal_sequence(&self, proposal: &[u8; 32]) -> Result<Option<Sequence>> {
@@ -821,11 +850,18 @@ async fn write_head(
 }
 
 fn decode_head(row: &sqlx::sqlite::SqliteRow) -> Result<Head> {
-    let head: Head =
-        serde_json::from_slice(row.try_get::<&[u8], _>("head").map_err(error)?).map_err(error)?;
+    decode_head_parts(
+        row.try_get("sequence").map_err(error)?,
+        row.try_get("head").map_err(error)?,
+        row.try_get("root").map_err(error)?,
+    )
+}
+
+fn decode_head_parts(sequence: i64, bytes: &[u8], root: &[u8]) -> Result<Head> {
+    let head: Head = serde_json::from_slice(bytes).map_err(error)?;
     head.validate()?;
-    if row.try_get::<i64, _>("sequence").map_err(error)? != head.cursor.sequence.0 as i64
-        || row.try_get::<Vec<u8>, _>("root").map_err(error)? != hex_hash::<64>(&head.ledger_root)?
+    if sequence != head.cursor.sequence.0 as i64
+        || root != hex_hash::<64>(&head.ledger_root)?.as_slice()
     {
         return Err(error("canonical row binding differs"));
     }

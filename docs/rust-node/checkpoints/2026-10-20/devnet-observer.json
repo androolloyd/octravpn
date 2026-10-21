@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "observed_at_utc": "2026-10-20T04:53:19.828850+00:00",
+  "status": "RETAINED_NONVOTING_OBSERVER_RESTORED_PEERING_AND_ADVANCING_SUSTAINED_SERVING_UNQUALIFIED",
+  "goal_complete": false,
+  "consensus_rule_changes": false,
+  "public_paid_service_qualified": false,
+  "retained_state_and_identity_preserved": true,
+  "normal_image_id": "sha256:dae2796c3df990e94657f25d784cb31e48fe3d4da51a0d0a2efd838d51ab4758",
+  "experimental_private_payer_or_client_deployed": false,
+  "same_config_keys_ports_and_plan": true,
+  "rollback_snapshot_retained": true,
+  "observer_container": "octra-devnet-paid-candidate-20261020",
+  "cold_restore": {
+    "completed": true,
+    "large_queries_seconds": [
+      252.880281952,
+      210.567343035,
+      182.008769362,
+      147.703109645
+    ],
+    "indexed_query_patch_deployed": false
+  },
+  "five_minute_observation": {
+    "samples": 30,
+    "first_epoch": 1719435,
+    "last_epoch": 1719476,
+    "head_responses": 30,
+    "connected_min": 2,
+    "connected_max": 4,
+    "driver_reasons": {
+      "role": 5,
+      "driver_unavailable": 25
+    },
+    "unexpected_voting_samples": 0,
+    "errors": 0,
+    "source": "out/public-observer-20261020/soak.json",
+    "current_head_and_sustained_paid_admission_qualified": false
+  },
+  "official_rpc_status_probe": "HTTP 403; no current-head match claimed",
+  "claim_or_purchase_submitted_by_this_stage": false,
+  "evidence": {
+    "adoption": "out/public-observer-20261020/adoption.json",
+    "rpc": "out/public-observer-20261020/rpc-after-cold-start.json",
+    "soak": "out/public-observer-20261020/soak.json"
+  },
+  "remaining": [
+    "Reach and authenticate current public devnet head",
+    "Sustained active-head driver and paid service availability",
+    "Source-bound Linux qualification before storage patch adoption"
+  ]
+}

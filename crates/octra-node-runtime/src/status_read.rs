@@ -291,9 +291,13 @@ impl Service {
     }
     pub async fn enrollment(&self, head: &Head, proposal_id: Option<&[u8]>) -> Result<Vec<u8>> {
         use base64::Engine;
-        let tree = self.reader.snapshot_at(head).await.map_err(unavailable)?;
-        let registry = tree
-            .get(&[b"meta", registry::META_KEY])
+        let registry_bytes = self
+            .reader
+            .read_at_bounded(head, &[b"meta", registry::META_KEY], 16 * 1024 * 1024)
+            .await
+            .map_err(unavailable)?;
+        let registry = registry_bytes
+            .as_deref()
             .map(Registry::from_bytes)
             .transpose()
             .map_err(|e| fault(format!("committed validator registry invalid: {e}")))?
@@ -309,24 +313,37 @@ impl Service {
             .is_some_and(|r| r.settings.validators.lifecycle_enabled())
             && rules::at(chain, Rule::SetFold, next) == RuleMode::Active;
         let duty = if automatic {
-            let raw = tree
-                .get(&[b"meta", set_fold::META_KEY])
+            let raw = self
+                .reader
+                .read_at_bounded(head, &[b"meta", set_fold::META_KEY], 16 * 1024 * 1024)
+                .await
+                .map_err(unavailable)?
                 .ok_or_else(|| fault("committed validator duty is unavailable"))?;
             Some(
-                set_fold::State::from_bytes(raw)
+                set_fold::State::from_bytes(&raw)
                     .map_err(fault)?
                     .receipt(&self.address),
             )
         } else {
             None
         };
+        let active = self
+            .reader
+            .read_at_bounded(head, &[b"meta", update::ACTIVE_KEY], 16 * 1024 * 1024)
+            .await
+            .map_err(unavailable)?;
+        let pending = self
+            .reader
+            .read_at_bounded(head, &[b"meta", update::PENDING_KEY], 16 * 1024 * 1024)
+            .await
+            .map_err(unavailable)?;
         let pubkey = base64::engine::general_purpose::STANDARD.encode(&self.public_key);
         let member = Membership::of_values(
             epoch,
             &self.address,
             pubkey.as_bytes(),
-            tree.get(&[b"meta", update::ACTIVE_KEY]),
-            tree.get(&[b"meta", update::PENDING_KEY]),
+            active.as_deref(),
+            pending.as_deref(),
         )
         .map_err(fault)?;
         let config_hash = self.ready_config_hash(head).await?;
@@ -397,8 +414,26 @@ impl Service {
         max_bytes: usize,
     ) -> Result<Vec<u8>> {
         use base64::Engine;
+        if max_bytes == 0 {
+            return Err(Fault::response_limit());
+        }
         let root = self.signed_root(head).await?;
-        let tree = self.reader.snapshot_at(head).await.map_err(unavailable)?;
+        let prefix: &[&[u8]] = &[b"accounts", address];
+        let maximum = max_bytes
+            .saturating_mul(8)
+            .saturating_add(1024 * 1024)
+            .min(32 * 1024 * 1024);
+        let selected = self
+            .reader
+            .read_tree_at(head, prefix, maximum)
+            .await
+            .map_err(unavailable)?;
+        let mut projection = crate::state_batch::StateBatch::default();
+        projection.begin().map_err(fault)?;
+        if let Some(tree) = &selected.tree {
+            projection.graft(prefix, tree).map_err(fault)?;
+        }
+        let tree = projection.snapshot();
         let loaded = crate::account_store::load(
             &crate::state_batch::StateBatch::from_snapshot(tree.clone()),
             address,
@@ -434,9 +469,24 @@ impl Service {
                 ]
             }));
             let paths = paths.iter().map(Vec::as_slice).collect::<Vec<_>>();
-            tree.read_proof_paths(&paths).map_err(fault)?
+            let suffixes = paths.iter().map(|path| &path[2..]).collect::<Vec<_>>();
+            match &selected.tree {
+                Some(account) => self
+                    .reader
+                    .prove_tree_at(head, prefix, account, &suffixes, maximum)
+                    .await
+                    .map_err(unavailable)?,
+                None => selected.proof,
+            }
         } else {
-            tree.read_proof(&path, false).map_err(fault)?
+            match &selected.tree {
+                Some(account) => self
+                    .reader
+                    .prove_tree_at(head, prefix, account, &[&path[2..]], maximum)
+                    .await
+                    .map_err(unavailable)?,
+                None => selected.proof,
+            }
         };
         if proof.len() > max_bytes {
             return Err(Fault::response_limit());

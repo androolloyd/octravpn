@@ -2,7 +2,7 @@
 //!
 //! Backends:
 //!   - Linux: `/dev/net/tun` (needs `CAP_NET_ADMIN` or root)
-//!   - macOS: `utun` virtual interface (root)
+//!   - macOS: `utun` virtual interface (root for IPv4 configuration)
 //!   - Windows: `wintun.dll` (driver, admin)
 //!
 //! All platforms expose the same async send/recv API on the L3 IP packet
@@ -14,7 +14,7 @@
 //!   - **Linux**: install with cap-bound binary
 //!     (`setcap cap_net_admin+ep /usr/local/bin/octravpn-node`), or run
 //!     under systemd with `AmbientCapabilities=CAP_NET_ADMIN`.
-//!   - **macOS**: launchd service runs as root (only way to open utun).
+//!   - **macOS**: launchd service runs as root to configure the utun address.
 //!     Optional: use Network Extension API (out of scope for v1).
 //!   - **Windows**: SCM service runs as LocalSystem; wintun driver must
 //!     be installed once via `wintun.dll` registration.
@@ -58,9 +58,9 @@ impl TunAddress {
 /// Configuration handed to `open` to construct a TUN device.
 #[derive(Clone, Debug)]
 pub struct TunConfig {
-    /// User-visible interface name. On macOS this is advisory (the
-    /// kernel picks `utunN`); on Linux it becomes `ifr_name`; on
-    /// Windows it sets the wintun pool name.
+    /// User-visible interface name. On macOS a valid `utunN` requests that
+    /// interface; any other name is advisory and the kernel picks `utunN`.
+    /// On Linux it becomes `ifr_name`; on Windows it sets the wintun pool name.
     pub name: String,
     pub address: TunAddress,
     pub mtu: u16,
@@ -125,17 +125,23 @@ impl Tun {
     /// Open the TUN device per `cfg`. Returns an error if the OS API
     /// rejects (missing permissions, missing driver, etc.).
     pub fn open(cfg: &TunConfig) -> Result<Self> {
-        let mut builder = tun_rs::DeviceBuilder::new()
-            .name(&cfg.name)
+        let builder = tun_rs::DeviceBuilder::new()
             .ipv4(cfg.address.addr, cfg.address.prefix, None)
             .mtu(cfg.mtu);
+        #[cfg(target_os = "macos")]
+        let mut builder = match macos_fixed_name(&cfg.name) {
+            Some(name) => builder.name(name),
+            None => builder,
+        };
+        #[cfg(not(target_os = "macos"))]
+        let mut builder = builder.name(&cfg.name);
         if cfg.up_at_open {
             builder = builder.enable(true);
         }
         let dev = builder
             .build_async()
             .context("open TUN device (need CAP_NET_ADMIN / root / wintun driver)")?;
-        let name = dev.name().unwrap_or_else(|_| cfg.name.clone());
+        let name = dev.name().context("read opened TUN interface name")?;
         info!(tun = %name, addr = %cfg.address.addr, prefix = cfg.address.prefix, mtu = cfg.mtu, "TUN opened");
         Ok(Self { inner: dev, name })
     }
@@ -162,6 +168,17 @@ impl Tun {
     pub fn try_send(&self, packet: &[u8]) -> std::io::Result<usize> {
         self.inner.try_send(packet)
     }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_fixed_name(name: &str) -> Option<&str> {
+    let suffix = name.strip_prefix("utun")?;
+    // tun-rs adds one to this unit before connecting to the kernel control.
+    // Exclude malformed names and u32::MAX to avoid its unchecked addition.
+    (!suffix.is_empty()
+        && suffix.bytes().all(|byte| byte.is_ascii_digit())
+        && suffix.parse::<u32>().is_ok_and(|unit| unit < u32::MAX))
+    .then_some(name)
 }
 
 /// Tracks PMTUD state for a single path (or the device as a whole, if
@@ -268,11 +285,12 @@ pub fn doctor() -> Result<()> {
     }
     #[cfg(target_os = "macos")]
     {
-        // utun is a kernel control; the only true check is `open`.
-        // We just verify we have root or sudo since that's necessary.
+        // utun creation and IPv4 configuration are distinct kernel steps.
+        // This only checks the privilege needed for the configured address;
+        // opening the device remains the definitive probe.
         if !is_root() {
             return Err(anyhow::anyhow!(
-                "macOS utun requires root (sudo). Run via launchd or `sudo octravpn-node run`."
+                "configuring macOS utun IPv4 requires root. Run via launchd or sudo."
             ));
         }
         Ok(())
@@ -291,9 +309,10 @@ pub fn doctor() -> Result<()> {
 
 #[cfg(target_os = "macos")]
 fn is_root() -> bool {
-    // libc::geteuid is unsafe to call without a crate; check $USER/$UID
-    // env vars and the existence of /var/run/sudo as proxies.
-    std::env::var("USER").is_ok_and(|u| u == "root") || std::env::var("UID").is_ok_and(|u| u == "0")
+    std::process::Command::new("/usr/bin/id")
+        .arg("-u")
+        .output()
+        .is_ok_and(|output| output.status.success() && output.stdout == b"0\n")
 }
 
 #[cfg(test)]
@@ -311,6 +330,16 @@ mod tests {
         let c = TunConfig::default();
         assert!(c.mtu > 1000);
         assert_eq!(c.address.prefix, 24);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_logical_names_use_kernel_selected_utun() {
+        assert_eq!(macos_fixed_name("octrapay0"), None);
+        assert_eq!(macos_fixed_name("octravpn"), None);
+        assert_eq!(macos_fixed_name("utun42"), Some("utun42"));
+        assert_eq!(macos_fixed_name("utun"), None);
+        assert_eq!(macos_fixed_name("utun4294967295"), None);
     }
 
     /// Perf-Data-Plane #3: default MTU is the new 1420, not the legacy

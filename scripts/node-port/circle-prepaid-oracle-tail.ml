@@ -20,11 +20,24 @@ let hydrate domain input =
   let key = Mirage_crypto_ec.Ed25519.priv_of_octets (String.make 32 (Char.chr 21)) |> Result.get_ok in
   let public = Base64.encode_exn Mirage_crypto_ec.Ed25519.(pub_to_octets (pub_of_priv key)) in
   let sign message = Base64.encode_exn (Mirage_crypto_ec.Ed25519.sign ~key message) in
+  let operator_key = Mirage_crypto_ec.Ed25519.priv_of_octets (String.make 32 (Char.chr 31)) |> Result.get_ok in
+  let operator_public = Base64.encode_exn Mirage_crypto_ec.Ed25519.(pub_to_octets (pub_of_priv operator_key)) in
+  let operator_sign message = Base64.encode_exn (Mirage_crypto_ec.Ed25519.sign ~key:operator_key message) in
   let caller = "oct" ^ String.make 44 '2' in
+  let operator_registration = String.concat "|" ["Octranet operator key v1";domain;child;caller;"1"] in
   let registration = String.concat "|" ["Octranet register v1";domain;child;caller;"1"] in
   let purchase = String.concat "|" ["Octranet prepaid v1";domain;child;caller;"1";"0";"0";String.make 64 'b';"0";"1";"1048576"] in
+  let overflow_purchase = String.concat "|" ["Octranet prepaid v1";domain;child;caller;"1";"0";"0";String.make 64 'b';"0";"2";"18446744073709551615"] in
+  let service bytes = String.concat "|" ["Octranet service receipt v1";domain;child;caller;"1";"0";caller;"1";"0";String.make 64 'b';"0";"7";bytes] in
   let expand text = text |> replace "$REGISTER_KEY" public
+    |> replace "$OPERATOR_ADDRESS" caller
+    |> replace "$OPERATOR_KEY" operator_public
+    |> replace "$OPERATOR_SIGNATURE" (operator_sign operator_registration)
+    |> replace "$SERVICE_SIGNATURE_A" (operator_sign (service "100"))
+    |> replace "$SERVICE_SIGNATURE_B" (operator_sign (service "101"))
+    |> replace "$SERVICE_WRONG_SIGNATURE" (sign (service "101"))
     |> replace "$REGISTER_SIGNATURE" (sign registration)
+    |> replace "$CLAIM_OVERFLOW_SIGNATURE" (sign overflow_purchase)
     |> replace "$CLAIM_SIGNATURE" (sign purchase) in
   let rows = List.map (function `Assoc fields -> `Assoc (List.map (fun (name,value) ->
     if name="to" && bytes value="$child" then name,b64 child

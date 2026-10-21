@@ -25,6 +25,21 @@ struct Envelope {
 }
 #[derive(Clone)]
 pub(super) struct Lease(Arc<Mutex<Store>>);
+#[async_trait::async_trait]
+impl super::funded::Journal for Lease {
+    async fn check(&self) -> Result<()> {
+        Self::check(self).await
+    }
+    async fn network(&self) -> Result<Option<crate::PrivateRouteNetwork>> {
+        Ok(None)
+    }
+    async fn armed(&self, _: &crate::PrivateRouteNetwork) -> Result<()> {
+        Ok(())
+    }
+    async fn released(&self) -> Result<()> {
+        Ok(())
+    }
+}
 impl Lease {
     pub(super) fn open(options: &Options, pins: &[Pins], mtus: &[u16]) -> Result<Self> {
         let hops = options
@@ -44,9 +59,21 @@ impl Lease {
             })
             .collect::<Result<Vec<_>>>()?;
         let identity = serde_json::to_value(&hops)?;
+        Self::identity(&options.journal, options.mode, identity, None)
+    }
+    pub(super) fn identity(
+        path: &std::path::Path,
+        mode: crate::JournalMode,
+        identity: serde_json::Value,
+        protection: Option<octravpn_core::sealed::Protection>,
+    ) -> Result<Self> {
         let expected = digest(&identity)?;
-        let mut store = Store::open(&options.journal, options.mode)?;
-        if options.mode == crate::JournalMode::Create {
+        let mut store = if let Some(protection) = protection {
+            Store::open_private(path, mode, protection)?
+        } else {
+            Store::open(path, mode)?
+        };
+        if mode == crate::JournalMode::Create {
             store.commit(&serde_json::to_vec(&Envelope {
                 identity,
                 sha256: expected,

@@ -23,6 +23,12 @@ pub fn read(root: &Hash, tree: &[u8]) -> Vec<u8> {
     out.extend_from_slice(tree);
     out
 }
+/// Extract a locally produced tree body bound to this exact before/after root.
+pub fn read_body<'a>(root: &Hash, raw: &'a [u8]) -> Result<&'a [u8]> {
+    raw.strip_prefix(read(root, &[]).as_slice())
+        .filter(|body| !body.is_empty())
+        .ok_or_else(|| Error::from("read proof root differs"))
+}
 
 /// Children with `None` coverage are blinded. Revealed children are already
 /// native tree encodings. A caller must verify the finished proof before serving.
@@ -45,6 +51,54 @@ pub fn directory_for_reads(
         names.iter().map(|name| irmin::step_hash(name)).collect(),
         false,
     )
+}
+/// Native non-root inode page. The caller authenticates the page hash and
+/// routing prefix; the final read-proof verifier checks the complete result.
+pub fn inode_values(entries: &[(Entry, Option<Vec<u8>>)]) -> Result<Vec<u8>> {
+    if entries.is_empty()
+        || entries.len() > 32
+        || !entries
+            .windows(2)
+            .all(|pair| pair[0].0.name < pair[1].0.name)
+    {
+        return Err("invalid inode proof values".into());
+    }
+    let entries = entries
+        .iter()
+        .map(|(entry, proof)| (entry, proof.as_deref()))
+        .collect::<Vec<_>>();
+    let mut out = vec![1];
+    names(&mut out, &entries);
+    Ok(out)
+}
+/// Encode an already authenticated inode branch without flattening its blinded
+/// children. Child proofs use inode wire tags, rather than logical tree tags.
+pub fn inode_branch(
+    root: bool,
+    length: usize,
+    children: &[(u8, Hash, Option<Vec<u8>>)],
+) -> Result<Vec<u8>> {
+    if length <= if root { 256 } else { 32 }
+        || children.is_empty()
+        || children.len() > 32
+        || children.iter().any(|(slot, _, _)| *slot >= 32)
+        || !children.windows(2).all(|pair| pair[0].0 < pair[1].0)
+    {
+        return Err("invalid inode proof branch".into());
+    }
+    let mut out = vec![if root { 4 } else { 2 }];
+    irmin::varint(&mut out, length);
+    irmin::varint(&mut out, children.len());
+    for (slot, hash, proof) in children {
+        irmin::varint(&mut out, usize::from(*slot));
+        if let Some(proof) = proof {
+            out.extend_from_slice(proof);
+        } else {
+            out.push(0);
+            out.extend_from_slice(hash);
+        }
+    }
+    Ok(out)
 }
 fn directory_inner(
     entries: &[(Entry, Option<Vec<u8>>)],

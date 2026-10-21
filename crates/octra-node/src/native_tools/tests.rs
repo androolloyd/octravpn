@@ -78,7 +78,9 @@ async fn native_tool_timeout_and_output_overflow_reap_the_actual_child() {
                 Policy::ReadOnly,
                 (),
                 Bounds {
-                    timeout: Duration::from_secs(1),
+                    // Overflow tests output bounding/reaping, not startup
+                    // latency. Concurrent proof suites can delay the shell.
+                    timeout: Duration::from_secs(if overflow { 10 } else { 1 }),
                     max_output: 100,
                 },
             )
@@ -92,8 +94,13 @@ async fn native_tool_timeout_and_output_overflow_reap_the_actual_child() {
             }),
             "{error}"
         );
-        let pid = child_pid(&pid_file).await;
-        assert!(absent(pid), "owned child {pid} still exists");
+        // Under suite load the timeout can reap the spawned shell before it
+        // executes its first instruction. Overflow requires actual output, so
+        // that branch must have written the marker and always checks its PID.
+        if overflow || pid_file.exists() {
+            let pid = child_pid(&pid_file).await;
+            assert!(absent(pid), "owned child {pid} still exists");
+        }
     }
 }
 

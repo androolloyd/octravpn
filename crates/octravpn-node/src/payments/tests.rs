@@ -1,7 +1,7 @@
 //! Real signed control messages and durable meters; only canonical host state
 //! and the final kernel handoff are explicit fixtures. No public-chain or TUN
 //! qualification is inferred from this in-process control-plane coverage.
-use super::super::{Grant, Guard};
+use super::super::{Funds, Grant, Guard};
 use super::*;
 use axum::{
     body::{to_bytes, Body},
@@ -56,6 +56,7 @@ impl Guard for HostGuard {
 struct CanonicalPlan {
     binding: PlanBinding,
     receipt_key: octravpn_core::PublicKey,
+    operator_generation: u64,
     tariff: Tariff,
     original_budget_ou: u64,
     remaining_ou: u64,
@@ -74,12 +75,15 @@ impl Authority for Host {
         Ok(Grant {
             binding: plan.binding,
             receipt_key: plan.receipt_key,
+            operator_generation: plan.operator_generation,
             tariff: plan.tariff,
-            original_budget_ou: plan.original_budget_ou,
-            remaining_ou: plan.remaining_ou,
+            funds: Funds::Channel {
+                original_budget_ou: plan.original_budget_ou,
+                remaining_ou: plan.remaining_ou,
+                claim_deadline_ms: Some(plan.claim_deadline_ms),
+            },
             redeemed_totals: plan.redeemed_totals,
             canonical_ms: plan.canonical_ms,
-            claim_deadline_ms: Some(plan.claim_deadline_ms),
             admissible: plan.admissible,
             guard: plan.guard,
         })
@@ -186,6 +190,7 @@ impl Fixture {
         let host = Arc::new(Host(RwLock::new(CanonicalPlan {
             binding,
             receipt_key: payer.public,
+            operator_generation: 1,
             tariff,
             original_budget_ou: 10_000,
             remaining_ou: 10_000 - 3 * purchased_bytes,
@@ -214,19 +219,25 @@ impl Fixture {
         self.start_with_authority(self.host.clone())
     }
     fn start_with_authority(&self, authority: Arc<dyn Authority>) -> Arc<Control> {
+        self.start_with_storage(authority, None)
+    }
+    fn start_with_storage(
+        &self,
+        authority: Arc<dyn Authority>,
+        key: Option<octravpn_core::sealed::Key>,
+    ) -> Arc<Control> {
         let wireguard = [42; 32];
         let identity = serde_json::to_vec(&(2_u8, self.operator.public, wireguard)).unwrap();
         let writer = open_directory(&self.path, &identity).unwrap();
+        let mut registry = Registry::new(self.path.clone(), authority, Arc::new(writer));
+        registry.meter_key = key;
         Arc::new(Control {
-            registry: Arc::new(Registry::new(
-                self.path.clone(),
-                authority,
-                Arc::new(writer),
-            )),
+            registry: Arc::new(registry),
             settlement: self.settlement.clone(),
             operator: self.operator.clone(),
             wireguard,
             slots: Arc::new(Semaphore::new(32)),
+            purchases: None,
         })
     }
     fn connect(&self, sequence: u64, wireguard_key: [u8; 32]) -> SignedConnect {
@@ -254,6 +265,80 @@ struct PublishingHost {
     plans: RwLock<Vec<CanonicalPlan>>,
     unavailable: AtomicBool,
 }
+
+/// Pause the second admission check so the transport can be observed while an
+/// identical signed status request is in progress, without relying on timing.
+struct PausedGuard {
+    host: Arc<HostGuard>,
+    checks: AtomicUsize,
+    entered: std::sync::mpsc::SyncSender<()>,
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+}
+impl Guard for PausedGuard {
+    fn live(&self) -> bool {
+        if self.checks.fetch_add(1, Ordering::AcqRel) == 1 {
+            self.entered.send(()).unwrap();
+            self.release
+                .lock()
+                .recv_timeout(std::time::Duration::from_secs(20))
+                .unwrap();
+        }
+        self.host.live()
+    }
+    fn current(&self, action: &mut dyn FnMut() -> Result<()>) -> Result<()> {
+        self.host.current(action)
+    }
+}
+struct RefreshGuardHost {
+    host: Arc<Host>,
+    replacement: RwLock<Option<Arc<dyn Guard>>>,
+}
+#[async_trait::async_trait]
+impl Authority for RefreshGuardHost {
+    async fn plan(&self, binding: &PlanBinding) -> Result<Grant> {
+        let mut grant = self.host.plan(binding).await?;
+        if let Some(guard) = self.replacement.read().clone() {
+            grant.guard = guard;
+        }
+        Ok(grant)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn identical_signed_status_keeps_current_transport_live_during_recheck() {
+    let fixture = Fixture::new(256);
+    let authority = Arc::new(RefreshGuardHost {
+        host: fixture.host.clone(),
+        replacement: RwLock::new(None),
+    });
+    let control = fixture.start_with_authority(authority.clone());
+    let request = fixture.connect(1, [11; 32]);
+    let connection = connected(&control, &request).await;
+    let (entered, waiting) = std::sync::mpsc::sync_channel(1);
+    let (release, released) = std::sync::mpsc::sync_channel(1);
+    *authority.replacement.write() = Some(Arc::new(PausedGuard {
+        host: fixture.host.0.read().guard.clone(),
+        checks: AtomicUsize::new(0),
+        entered,
+        release: Mutex::new(released),
+    }));
+    let task = tokio::spawn(async move { control.registry.connect(request).await });
+    tokio::task::spawn_blocking(move || {
+        waiting
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .unwrap();
+    })
+    .await
+    .unwrap();
+    let live_during_retry = connection.live();
+    release.send(()).unwrap();
+    let retried = task.await.unwrap().unwrap();
+    assert!(Arc::ptr_eq(&connection, &retried));
+    assert!(
+        live_during_retry,
+        "an identical status request must not interrupt a paid transport"
+    );
+}
 #[async_trait::async_trait]
 impl Authority for PublishingHost {
     async fn plan(&self, binding: &PlanBinding) -> Result<Grant> {
@@ -271,12 +356,15 @@ impl Authority for PublishingHost {
         Ok(Grant {
             binding: plan.binding,
             receipt_key: plan.receipt_key,
+            operator_generation: plan.operator_generation,
             tariff: plan.tariff,
-            original_budget_ou: plan.original_budget_ou,
-            remaining_ou: plan.remaining_ou,
+            funds: Funds::Channel {
+                original_budget_ou: plan.original_budget_ou,
+                remaining_ou: plan.remaining_ou,
+                claim_deadline_ms: Some(plan.claim_deadline_ms),
+            },
             redeemed_totals: plan.redeemed_totals,
             canonical_ms: plan.canonical_ms,
-            claim_deadline_ms: Some(plan.claim_deadline_ms),
             admissible: plan.admissible,
             guard: plan.guard,
         })
@@ -662,6 +750,244 @@ async fn forward(connection: &Connection, bytes: &[u8], direction: Direction) {
 }
 
 #[tokio::test]
+async fn private_registry_recovers_encrypted_meter_and_refuses_plaintext_or_wrong_key() {
+    use octravpn_core::sealed::Key;
+    let fixture = Fixture::new(256);
+    let key = Key::from_bytes([71; 32]);
+    let control = fixture.start_with_storage(fixture.host.clone(), Some(key.clone()));
+    let connect = fixture.connect(1, [11; 32]);
+    let connection = connected(&control, &connect).await;
+    forward(&connection, &packet(false, false, 72), Direction::Outbound).await;
+    let before = connection.meter.snapshot().unwrap();
+    assert_eq!(before.committed_totals, [100, 0]);
+    let file = fixture
+        .path
+        .join(hex::encode(connection.session.as_bytes()))
+        .join("meter.json");
+    let cipher = std::fs::read(&file).unwrap();
+    assert!(cipher.starts_with(b"OVPNSE01"));
+    drop(connection);
+    drop(control);
+    for key in [None, Some(Key::from_bytes([72; 32]))] {
+        let control = fixture.start_with_storage(fixture.host.clone(), key);
+        assert_ne!(
+            post(&control, "/payments/connect", &connect).await.0,
+            StatusCode::OK
+        );
+        assert!(control
+            .registry
+            .get(&connect.request.wireguard_key)
+            .is_none());
+        assert_eq!(std::fs::read(&file).unwrap(), cipher);
+    }
+    let control = fixture.start_with_storage(fixture.host.clone(), Some(key));
+    let connection = connected(&control, &connect).await;
+    assert_eq!(connection.meter.snapshot().unwrap(), before);
+    assert!(connection.meter.reserve_class(0, 157).await.is_err());
+}
+
+/// Wrong accounting under an otherwise authenticated host must not cross the
+/// public/private control boundary or create a meter/connection first.
+struct WrongMode {
+    host: Arc<Host>,
+    mode: super::super::Mode,
+}
+
+struct AvailablePrivateHost {
+    host: Arc<Host>,
+    temporary: AtomicBool,
+}
+#[async_trait::async_trait]
+impl Authority for AvailablePrivateHost {
+    fn mode(&self) -> super::super::Mode {
+        super::super::Mode::Shielded
+    }
+    async fn plan(&self, binding: &PlanBinding) -> Result<Grant> {
+        if self.temporary.load(Ordering::SeqCst) {
+            return Err(
+                octravpn_core::payments::Unavailable::new("fixture private view missing").into(),
+            );
+        }
+        let mut grant = self.host.plan(binding).await?;
+        grant.funds = Funds::Shielded {
+            quote_ceiling_ou: grant.funds.ceiling_ou(),
+            paid_ou: grant.tariff.total_charge(&grant.redeemed_totals)?,
+        };
+        Ok(grant)
+    }
+}
+
+#[tokio::test]
+async fn private_unavailability_is_503_but_invalid_auth_and_eligibility_stay_forbidden() {
+    let fixture = Fixture::new(256);
+    let host = Arc::new(AvailablePrivateHost {
+        host: fixture.host.clone(),
+        temporary: AtomicBool::new(true),
+    });
+    let control = fixture.start_with_storage(
+        host.clone(),
+        Some(octravpn_core::sealed::Key::from_bytes([71; 32])),
+    );
+    let connect = fixture.connect(1, [11; 32]);
+    assert_eq!(
+        post(&control, "/shielded/connect", &connect).await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert!(control.registry.meters.read().is_empty());
+    let mut invalid = connect.clone();
+    invalid.signature.0[0] ^= 1;
+    assert_eq!(
+        post(&control, "/shielded/connect", &invalid).await.0,
+        StatusCode::FORBIDDEN
+    );
+    host.temporary.store(false, Ordering::SeqCst);
+    assert_eq!(
+        post(&control, "/shielded/connect", &connect).await.0,
+        StatusCode::OK
+    );
+    let connection = control
+        .registry
+        .get(&connect.request.wireguard_key)
+        .unwrap();
+    let before = connection.meter.snapshot().unwrap();
+    host.temporary.store(true, Ordering::SeqCst);
+    assert_eq!(
+        post(&control, "/shielded/connect", &connect).await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    host.temporary.store(false, Ordering::SeqCst);
+    assert_eq!(
+        post(&control, "/shielded/connect", &connect).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(connection.meter.snapshot().unwrap(), before);
+    fixture.host.0.write().admissible = false;
+    assert_eq!(
+        post(&control, "/shielded/connect", &connect).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        private_error(&anyhow::anyhow!("canonical view busy"), "hidden").0,
+        StatusCode::FORBIDDEN
+    );
+}
+#[async_trait::async_trait]
+impl Authority for WrongMode {
+    fn mode(&self) -> super::super::Mode {
+        self.mode
+    }
+    async fn plan(&self, binding: &PlanBinding) -> Result<Grant> {
+        let mut grant = self.host.plan(binding).await?;
+        if self.mode == super::super::Mode::Public {
+            grant.funds = Funds::Shielded {
+                quote_ceiling_ou: 10_000,
+                paid_ou: 768,
+            };
+        }
+        Ok(grant)
+    }
+}
+#[tokio::test]
+async fn accounting_mode_mismatch_refuses_before_meter_or_transport_admission() {
+    use super::super::Mode;
+    for (mode, path) in [
+        (Mode::Public, "/payments/connect"),
+        (Mode::Shielded, "/shielded/connect"),
+    ] {
+        let fixture = Fixture::new(256);
+        let control = fixture.start_with_storage(
+            Arc::new(WrongMode {
+                host: fixture.host.clone(),
+                mode,
+            }),
+            Some(octravpn_core::sealed::Key::from_bytes([71; 32])),
+        );
+        let connect = fixture.connect(1, [11; 32]);
+        let response = post(&control, path, &connect).await;
+        assert_eq!(response.0, StatusCode::FORBIDDEN);
+        assert!(control.registry.connections.read().is_empty());
+        assert!(control.registry.meters.read().is_empty());
+        let meter = fixture.path.join(hex::encode(
+            connect.request.binding.session_id().unwrap().as_bytes(),
+        ));
+        assert!(!meter.exists());
+    }
+}
+
+#[tokio::test]
+async fn service_stop_closes_idle_and_incomplete_http_connections_and_releases_writer() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    for cancel in [false, true] {
+        let fixture = Fixture::new(256);
+        let service = Service::bind(
+            Config {
+                control_listen: "127.0.0.1:0".parse().unwrap(),
+                tunnel_listen: "127.0.0.1:0".parse().unwrap(),
+                data_dir: fixture.path.clone(),
+                operator_key: fixture.operator.clone(),
+                wireguard_secret: StaticSecret::from([42; 32]),
+                ip_tunnel: None,
+            },
+            fixture.host.clone(),
+            fixture.settlement.clone(),
+        )
+        .await
+        .unwrap();
+        let addr = service.control_addr().unwrap();
+        let (stop, stopped) = watch::channel(false);
+        let job = tokio::spawn(service.run(stopped));
+        let mut idle = tokio::net::TcpStream::connect(addr).await.unwrap();
+        idle.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        let mut buffer = [0; 1024];
+        assert!(idle.read(&mut buffer).await.unwrap() > 0);
+        let mut slow = tokio::net::TcpStream::connect(addr).await.unwrap();
+        slow.write_all(b"POST /payments/connect HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 100\r\nExpect: 100-continue\r\n\r\n").await.unwrap();
+        // 100 Continue proves the handler polled the incomplete body before
+        // shutdown, without a timing sleep or test-only server hook.
+        let mut interim = Vec::new();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !interim.ends_with(b"\r\n\r\n") {
+                let length = slow.read(&mut buffer).await.unwrap();
+                assert!(length > 0 && interim.len() + length <= 1024);
+                interim.extend_from_slice(&buffer[..length]);
+            }
+        })
+        .await
+        .unwrap();
+        assert!(interim.windows(12).any(|part| part == b"100 Continue"));
+        if cancel {
+            job.abort();
+            assert!(job.await.unwrap_err().is_cancelled());
+        } else {
+            stop.send(true).unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(5), job)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+        }
+        // Clients remain alive. Recovery cannot depend on them dropping their
+        // sockets; cancelled callers may finish their owned drain asynchronously.
+        let wireguard = PublicKey::from(&StaticSecret::from([42; 32])).to_bytes();
+        let identity = serde_json::to_vec(&(2_u8, fixture.operator.public, wireguard)).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(writer) = open_directory(&fixture.path, &identity) {
+                    drop(writer);
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(tokio::net::TcpStream::connect(addr).await.is_err());
+    }
+}
+
+#[tokio::test]
 async fn signed_status_binds_exact_plan_tariff_keys_sequence_and_counters() {
     let fixture = Fixture::new(256);
     let control = fixture.start();
@@ -679,7 +1005,14 @@ async fn signed_status_binds_exact_plan_tariff_keys_sequence_and_counters() {
     assert_eq!(status.status.redeemed_totals, [256, 256]);
     assert_eq!(status.status.canonical_ms, 1_000);
     assert_eq!(status.status.claim_deadline_ms, 86_401_000);
+    assert_eq!(status.service_receipts.len(), 2);
+    assert!(status
+        .service_receipts
+        .iter()
+        .all(|r| r.receipt.usage.sequence == 1));
     let connection = control.registry.get(&[11; 32]).unwrap();
+    let unchanged: SignedStatus = decode(&post(&control, "/payments/status", &connect).await);
+    assert_eq!(unchanged.service_receipts, status.service_receipts);
     let outgoing = packet(true, false, 4);
     let incoming = packet(true, true, 6);
     forward(&connection, &outgoing, Direction::Outbound).await;
@@ -690,9 +1023,38 @@ async fn signed_status_binds_exact_plan_tariff_keys_sequence_and_counters() {
         status.status.committed_totals,
         [0, (outgoing.len() + incoming.len()) as u64]
     );
+    assert!(status
+        .service_receipts
+        .iter()
+        .all(|r| r.receipt.usage.sequence == 2));
+    assert_eq!(
+        status.service_receipts[1].receipt.usage.total_bytes,
+        status.status.committed_totals[1]
+    );
+    assert!(octravpn_core::payments::SignedServiceReceipt::slash_params(
+        &unchanged.service_receipts[1],
+        &status.service_receipts[1],
+    )
+    .is_err());
     let mut tampered = status;
     tampered.status.connect_sequence += 1;
     assert!(tampered.verify().is_err());
+}
+
+#[tokio::test]
+async fn service_statement_sequence_survives_meter_restart() {
+    let fixture = Fixture::new(256);
+    let connect = fixture.connect(1, [11; 32]);
+    let control = fixture.start();
+    let connection = connected(&control, &connect).await;
+    forward(&connection, &packet(false, false, 4), Direction::Outbound).await;
+    let before: SignedStatus = decode(&post(&control, "/payments/status", &connect).await);
+    assert_eq!(before.service_receipts[0].receipt.usage.sequence, 2);
+    drop(connection);
+    drop(control);
+    let control = fixture.start();
+    let after: SignedStatus = decode(&post(&control, "/payments/connect", &connect).await);
+    assert_eq!(after.service_receipts, before.service_receipts);
 }
 
 #[tokio::test]
@@ -856,7 +1218,11 @@ async fn revoked_canonical_guard_and_service_stop_prevent_kernel_handoff_and_new
             .await
             .unwrap();
         if stop_service {
-            drop(Stop(control.registry.clone()));
+            let (signal, _) = watch::channel(false);
+            drop(Stop {
+                registry: control.registry.clone(),
+                signal,
+            });
         } else {
             fixture.host.0.read().guard.revoke();
         }

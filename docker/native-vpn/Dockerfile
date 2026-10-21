@@ -2,17 +2,26 @@ ARG BUILDER_IMAGE=octravpn-builder:latest
 FROM ${BUILDER_IMAGE} AS binaries
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
+ARG CARGO_BUILD_JOBS=2
+ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
 WORKDIR /work/octra
-RUN rm -rf crates program vendor tests pvac-sidecar scripts/node-port /work/octra-foundry /work/headscale-rs
+RUN rm -rf crates program vendor tests experimental pvac-sidecar scripts/node-port /work/octra-foundry /work/headscale-rs
 COPY octra-foundry /work/octra-foundry
 COPY headscale-rs /work/headscale-rs
 COPY octra/Cargo.toml octra/Cargo.lock octra/rust-toolchain.toml ./
 COPY octra/.cargo/config.toml ./.cargo/config.toml
 RUN rustup show active-toolchain
 COPY octra/crates ./crates
+COPY octra/experimental/private-payments/Cargo.toml octra/experimental/private-payments/Cargo.lock octra/experimental/private-payments/README.md ./experimental/private-payments/
+COPY octra/experimental/private-payments/src ./experimental/private-payments/src
+COPY octra/experimental/private-payments/program ./experimental/private-payments/program
+COPY octra/experimental/private-payments/tests ./experimental/private-payments/tests
+COPY octra/experimental/private-payments/proofs ./experimental/private-payments/proofs
+COPY octra/experimental/private-payments/tools ./experimental/private-payments/tools
 COPY octra/program ./program
 COPY octra/vendor ./vendor
 COPY octra/tests ./tests
+COPY octra/sites ./sites
 COPY octra/pvac-sidecar ./pvac-sidecar
 COPY octra/docs/rust-node/source-map.json octra/docs/rust-node/upstream.json octra/docs/rust-node/network-authority.json ./docs/rust-node/
 COPY octra/scripts/node-port ./scripts/node-port
@@ -20,10 +29,10 @@ RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/targ
     find crates /work/octra-foundry /work/headscale-rs -name '*.rs' -type f -exec touch {} + && \
     cargo build --locked -p octra-node -p octravpn-node -p octravpn-client && \
     mkdir /tmp/native-binaries && \
-    cp target/debug/octra-node target/debug/octravpn-node target/debug/octravpn /tmp/native-binaries/
+    cp target/debug/octravpn-node target/debug/octravpn /tmp/native-binaries/
 RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/target \
-    cargo build --locked --release -p octravpn-private-admin && \
-    cp target/release/octravpn-private-admin /tmp/native-binaries/
+    cargo build --locked --release -p octra-node -p octravpn-private-admin && \
+    cp target/release/octra-node target/release/octravpn-private-admin /tmp/native-binaries/
 RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/target \
     cargo test --locked -p octra-node-protocol --lib isolated_tests && \
     cargo test --locked -p octra-node-runtime --lib canonical::storage_tests && \
@@ -36,6 +45,7 @@ RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/targ
     cargo test --locked -p octra-node-runtime --lib canonical::reader::paths && \
     cargo test --locked -p octra-node-runtime --test canonical_assets -- --skip browser_fixture && \
     cargo test --locked -p octra-node-runtime --test live_consensus resource_gossip_reaches_actor_without_enabling_optional_committees && \
+    cargo test --locked -p octra-node-runtime --test live_consensus receive_only_driver_starts_without_quorum_and_never_enables_votes && \
     cargo test --locked -p octra-node-protocol --test optional_resource_parity --test resource_lanes_parity && \
     cargo test --locked -p octra-node-protocol --test vpn_compiler_parity && \
     cargo test --locked -p octra-browser --lib --tests && \
@@ -58,6 +68,7 @@ RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/targ
     cargo test --locked -p octra-node --lib retained_gateway_cache && \
     cargo test --locked -p octra-node --test services canonical_gateway_keeps && \
     cargo test --locked -p octra-node --lib explicit_observer_preserves_native_role_order && \
+    cargo test --locked -p octra-node --lib recovery::live_tests::nonvoting_observer_follows_finalized_peer_frame_without_signing && \
     cargo test --locked -p octra-node --test snapshot_service_parity && \
     cargo test --locked -p octra-node --test services http_join_deadline_preserves_committed_prefix_before_next_record
 RUN --mount=type=cache,id=octra-foundry-qualification-target,target=/work/octra-foundry/target \

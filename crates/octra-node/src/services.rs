@@ -41,6 +41,57 @@ impl Vpn {
 }
 
 impl<A: Host> Node<A> {
+    /// The browser and private VPN share this node's exact publication. No
+    /// second node or independently trusted RPC is used for admission.
+    #[cfg(feature = "private-payments-experimental")]
+    pub async fn bind_shielded(
+        &self,
+        browser_listen: SocketAddr,
+        config: octravpn_node::payments::Config,
+        wallet: &crate::vpn::payments::shielded::wallet::Wallet,
+    ) -> Result<Services> {
+        self.bind_shielded_mode(browser_listen, config, wallet, None)
+            .await
+    }
+    #[cfg(feature = "private-payments-experimental")]
+    pub async fn bind_shielded_purchases(
+        &self,
+        browser_listen: SocketAddr,
+        config: octravpn_node::payments::Config,
+        wallet: &crate::vpn::payments::shielded::wallet::Wallet,
+        policy: crate::vpn::payments::shielded::wallet::rpc::Policy,
+    ) -> Result<Services> {
+        self.bind_shielded_mode(browser_listen, config, wallet, Some(policy))
+            .await
+    }
+    #[cfg(feature = "private-payments-experimental")]
+    async fn bind_shielded_mode(
+        &self,
+        browser_listen: SocketAddr,
+        config: octravpn_node::payments::Config,
+        wallet: &crate::vpn::payments::shielded::wallet::Wallet,
+        policy: Option<crate::vpn::payments::shielded::wallet::rpc::Policy>,
+    ) -> Result<Services> {
+        anyhow::ensure!(
+            wallet.belongs_to(&self.shared),
+            "private wallet belongs to another node publication"
+        );
+        anyhow::ensure!(
+            browser_listen.ip().is_loopback(),
+            "browser must bind loopback"
+        );
+        let browser = TcpListener::bind(browser_listen).await?;
+        let vpn = if let Some(policy) = policy {
+            wallet.bind_purchase_service(config, policy).await?
+        } else {
+            wallet.bind_service(config).await?
+        };
+        Ok(Services {
+            browser,
+            vpn: Vpn::Payments(vpn),
+            shared: self.shared.clone(),
+        })
+    }
     /// Native payment-plan service; canonical admission and the browser share
     /// one publication. The settlement publisher must await canonical claims.
     pub async fn bind_payments(

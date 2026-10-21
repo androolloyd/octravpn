@@ -325,6 +325,12 @@ async fn captured_network_startup_uses_file_gc_and_worker_limits_once() {
             compute_provider: false,
             vpn: None,
             payments: None,
+            #[cfg(feature = "private-payments-experimental")]
+            shielded: None,
+            #[cfg(feature = "private-payments-experimental")]
+            payer: None,
+            #[cfg(feature = "private-payments-experimental")]
+            private_route: None,
             peers: vec![],
             voting: false,
             publisher: false,

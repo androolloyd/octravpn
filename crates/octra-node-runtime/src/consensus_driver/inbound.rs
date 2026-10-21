@@ -363,7 +363,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
         let height = self.engine.state().height;
         let mut current = None;
         if let Some(public) = self.engine.validators().public_key(&self.address) {
-            if self.votes.allowed(self.host.readiness()) {
+            if self.votes.allowed(self.readiness()) {
                 let mut reply = RoundSync {
                     chain_id: self.chain.clone(),
                     epoch_id: height,
@@ -427,7 +427,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
                     &self.engine,
                     &vote,
                     None,
-                    self.host.readiness().finality_proof_needed,
+                    self.readiness().finality_proof_needed,
                     move |r| async move { host.before_precommit(r).await },
                 )
                 .await?

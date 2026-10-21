@@ -5,7 +5,7 @@ use octra_exex::StateRoot;
 use octra_node_protocol::{circles, transaction::RuleMode};
 use octra_node_runtime::{canonical::CanonicalStore, circle_assets::CanonicalAssets};
 use octravpn_core::{
-    payments::{TrafficClass, Usage},
+    payments::{ServiceReceipt, SignedServiceReceipt, TrafficClass, Usage},
     KeyPair,
 };
 use serde_json::json;
@@ -177,6 +177,109 @@ fn receipt(plan: &Plan, sequence: u64, bytes: u64) -> SignedUsage {
 }
 
 #[tokio::test]
+async fn operator_service_statement_matches_compiled_aml_and_requires_same_slot() {
+    let (_directory, chain, reader, _store) = fixture().await;
+    let plan = reader
+        .read_state(
+            &chain.state.snapshot(),
+            0,
+            u64::try_from(chain.now).unwrap(),
+        )
+        .unwrap();
+    let usage = Usage {
+        deployment: plan.deployment.clone(),
+        payer: plan.payer.clone(),
+        generation: plan.generation,
+        plan: plan.plan,
+        offer: plan.offer,
+        manifest_hash: plan.manifest_hash.clone(),
+        traffic_class: 0,
+        sequence: 7,
+        total_bytes: 100,
+    };
+    let statement = ServiceReceipt {
+        usage,
+        operator: parse_native_address(&host::address(11)).unwrap(),
+        operator_generation: 1,
+    };
+    assert_eq!(
+        chain.view("get_service_message", json!([plan.plan, 0, 7, 100])),
+        statement.signing_message().unwrap()
+    );
+    let key = KeyPair::from_secret_bytes(&[11; 32]);
+    let first = SignedServiceReceipt::sign(statement.clone(), &key).unwrap();
+    let mut second_statement = statement;
+    second_statement.usage.total_bytes = 101;
+    let second = SignedServiceReceipt::sign(second_statement, &key).unwrap();
+    assert_eq!(
+        SignedServiceReceipt::slash_params(&first, &second).unwrap(),
+        json!([
+            plan.plan,
+            0,
+            7,
+            100,
+            STANDARD.encode(first.signature.0),
+            101,
+            STANDARD.encode(second.signature.0)
+        ])
+    );
+}
+
+#[tokio::test]
+async fn native_plan_refuses_a_bonded_service_key_unrelated_to_operator_wallet() {
+    let (_directory, mut chain, reader, _store) = fixture().await;
+    let operator = host::address(11);
+    let mut key = internal_key(b"map", b"operator_receipt_key");
+    key.push(b'/');
+    key.extend_from_slice(operator.len().to_string().as_bytes());
+    key.push(b'#');
+    key.extend_from_slice(operator.as_bytes());
+    chain
+        .state
+        .set(
+            &[b"contracts", chain.program.as_bytes(), b"storage", &key],
+            STANDARD
+                .encode(host::key(31).verifying_key().as_bytes())
+                .into_bytes(),
+        )
+        .unwrap();
+    let error = reader
+        .read_state(
+            &chain.state.snapshot(),
+            0,
+            u64::try_from(chain.now).unwrap(),
+        )
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("bonded receipt key differs from operator wallet"));
+}
+
+#[tokio::test]
+async fn compiled_claim_rejects_uint64_charge_intermediate_without_consuming_allowance() {
+    let (_directory, mut chain, reader, _store) = fixture().await;
+    let plan = reader
+        .read_state(
+            &chain.state.snapshot(),
+            0,
+            u64::try_from(chain.now).unwrap(),
+        )
+        .unwrap();
+    let before = chain.number("get_plan_remaining", json!([plan.plan]));
+    chain.denied(
+        13,
+        "claim",
+        receipt(&plan, 1, u64::MAX).claim_params().unwrap(),
+        0,
+        "charge intermediate exceeds uint64",
+    );
+    assert_eq!(
+        chain.number("get_plan_remaining", json!([plan.plan])),
+        before
+    );
+}
+
+#[tokio::test]
 async fn compiled_state_tariff_and_payer_signature_agree_on_exact_claim_increment() {
     let (_directory, mut chain, reader, _store) = fixture().await;
     let plan = reader
@@ -221,6 +324,100 @@ async fn compiled_state_tariff_and_payer_signature_agree_on_exact_claim_incremen
     assert!(plan
         .increment_at_snapshot(&receipt(&plan, 2, 100 * 1_048_576))
         .is_err());
+}
+
+#[tokio::test]
+async fn standalone_offer_needs_no_public_payer_and_shares_plan_security_checks() {
+    let (_directory, chain, reader, _store) = fixture().await;
+    let snapshot = chain.state.snapshot();
+    let now = chain.now as u64;
+    let offer = reader.read_offer(&snapshot, 0, now).unwrap();
+    assert!(offer.liquid && offer.provider_available && offer.purchase_open);
+    assert_eq!(
+        offer.data.receipt_key,
+        Some(KeyPair::from_secret_bytes(&[11; 32]).public)
+    );
+    assert_eq!(offer.data.operator_generation, 1);
+    assert_eq!(
+        offer.data.tariff,
+        reader.read_state(&snapshot, 0, now).unwrap().tariff
+    );
+    let mut no_plan = StateBatch::from_snapshot(snapshot.clone());
+    no_plan.begin().unwrap();
+    no_plan
+        .set(
+            &[
+                b"contracts",
+                chain.program.as_bytes(),
+                b"storage",
+                b"plan_count",
+            ],
+            b"0".to_vec(),
+        )
+        .unwrap();
+    assert!(reader.read_state(&no_plan.snapshot(), 0, now).is_err());
+    assert!(
+        reader
+            .read_offer(&no_plan.snapshot(), 0, now)
+            .unwrap()
+            .purchase_open
+    );
+
+    for (field, indices, value) in [
+        (b"offer_rate".as_slice(), vec!["0", "1"], "1"),
+        (b"offer_sealed", vec!["0"], "0"),
+        (b"offer_series", vec!["0"], "9"),
+        (b"offer_start_ms", vec!["0"], "0"),
+        (b"offer_cancelled", vec!["0"], "2"),
+        (
+            b"operator_receipt_key",
+            vec![reader.operator.display()],
+            "bad",
+        ),
+    ] {
+        let mut changed = StateBatch::from_snapshot(snapshot.clone());
+        changed.begin().unwrap();
+        let mut key = internal_key(b"map", field);
+        key.push(b'/');
+        for index in indices {
+            key.extend_from_slice(format!("{}#{index}", index.len()).as_bytes());
+        }
+        changed
+            .set(
+                &[b"contracts", chain.program.as_bytes(), b"storage", &key],
+                value.as_bytes().to_vec(),
+            )
+            .unwrap();
+        assert!(
+            reader.read_offer(&changed.snapshot(), 0, now).is_err(),
+            "offer accepted {field:?}"
+        );
+        assert!(
+            reader.read_state(&changed.snapshot(), 0, now).is_err(),
+            "plan accepted {field:?}"
+        );
+    }
+    let mut insolvent = StateBatch::from_snapshot(snapshot);
+    insolvent.begin().unwrap();
+    account_store::set(
+        &mut insolvent,
+        chain.program.as_bytes(),
+        &octra_node_protocol::state::Account::default(),
+        RuleMode::Prior,
+    )
+    .unwrap();
+    assert!(
+        !reader
+            .read_offer(&insolvent.snapshot(), 0, now)
+            .unwrap()
+            .liquid
+    );
+    assert!(
+        !reader
+            .read_state(&insolvent.snapshot(), 0, now)
+            .unwrap()
+            .eligible
+    );
 }
 
 #[tokio::test]

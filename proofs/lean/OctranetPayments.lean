@@ -14,6 +14,31 @@ namespace OctranetPayments
 
 def day : Nat := 86400000
 def operatorDelay : Nat := 604800000
+def maxUint : Nat := 18446744073709551615
+
+-- The source checks this bound before updating a plan reservation.
+theorem guarded_reservation_fits_uint (reserved budget : Nat)
+    (h_reserved : reserved ≤ maxUint)
+    (h_guard : budget ≤ maxUint - reserved) :
+    reserved + budget ≤ maxUint := by
+  omega
+
+-- The verifier-friendly subtraction form in open_plan is the same reservation
+-- update as adding budget, provided the channel has enough free OCT.
+theorem reservation_via_remaining_equals_add (funds reserved budget : Nat)
+    (h_reserved : reserved ≤ funds)
+    (h_budget : budget ≤ funds - reserved) :
+    funds - ((funds - reserved) - budget) = reserved + budget := by
+  omega
+
+theorem reservation_via_remaining_fits_uint (funds reserved budget : Nat)
+    (h_funds : funds ≤ maxUint)
+    (h_reserved : reserved ≤ funds)
+    (h_budget : budget ≤ funds - reserved) :
+    funds - ((funds - reserved) - budget) ≤ maxUint := by
+  have h_budget_uint : budget ≤ maxUint - reserved := by omega
+  rw [reservation_via_remaining_equals_add funds reserved budget h_reserved h_budget]
+  exact guarded_reservation_fits_uint reserved budget (by omega) h_budget_uint
 
 structure State where
   funds : Nat
@@ -71,6 +96,10 @@ def allocateEarnings (s : State) (amount : Nat) : Option State :=
   if amount > s.earned then none
   else some { s with funds := s.funds + amount, earned := s.earned - amount }
 
+def withdrawEarnings (s : State) (amount : Nat) : Option State :=
+  if amount = 0 ∨ amount > s.earned then none
+  else some { s with earned := s.earned - amount, locked := s.locked - amount }
+
 -- Other payees' earnings remain in custody but leave this channel's balance.
 def payOther (s : State) (amount : Nat) : Option State :=
   if amount > s.reserved ∨ amount > s.funds then none
@@ -79,6 +108,48 @@ def payOther (s : State) (amount : Nat) : Option State :=
 def withdrawOperator (s : State) (now : Nat) : Option State :=
   if s.stake = 0 ∨ s.operatorUnlock = 0 ∨ now < s.operatorUnlock then none
   else some { s with stake := 0, operatorUnlock := 0, locked := s.locked - s.stake }
+
+-- Abstract only: `evidence` assumes both Ed25519 checks and exact slot
+-- binding have already succeeded in the AML. The bond becomes a locked payer
+-- award; this does not prove signatures, clocks or who controls the payer.
+def slashBond (s : State) (evidence : Bool) : Option State :=
+  if evidence = false ∨ s.stake = 0 then none
+  else some { s with stake := 0, other := s.other + s.stake, operatorUnlock := 0 }
+
+theorem slashBond_keeps_custody_accounting (s : State)
+    (h : Invariant s) :
+    Invariant { s with stake := 0, other := s.other + s.stake, operatorUnlock := 0 } := by
+  rcases h with ⟨hr, hl, hc⟩
+  simp only [Invariant] at *
+  constructor
+  · exact hr
+  constructor
+  · omega
+  · omega
+
+theorem slashBond_keeps_value_locked (s : State) (hp : s.stake > 0) :
+    (slashBond s true).map State.locked = some s.locked := by
+  simp [slashBond, Nat.ne_of_gt hp]
+
+def withdrawAward (s : State) (amount : Nat) : Option State :=
+  if amount = 0 ∨ amount > s.other then none
+  else some { s with other := s.other - amount, locked := s.locked - amount }
+
+theorem withdrawAward_keeps_custody_accounting (s : State) (amount : Nat)
+    (h : Invariant s) (ha : amount ≤ s.other) :
+    Invariant { s with other := s.other - amount, locked := s.locked - amount } := by
+  rcases h with ⟨hr, hl, hc⟩
+  simp only [Invariant] at *
+  constructor
+  · exact hr
+  constructor
+  · omega
+  · omega
+
+theorem slashBond_replay_without_rebond_fails (s : State)
+    (hp : s.stake > 0) :
+    (slashBond s true).bind (fun after => slashBond after true) = none := by
+  simp [slashBond, Nat.ne_of_gt hp]
 
 def canForward (s : State) (payerGeneration providerGeneration minStake : Nat) : Bool :=
   s.userActive && decide (s.userDeadline = 0) &&
@@ -190,6 +261,23 @@ theorem earnings_allocation_preserves_custody (s s' : State) (amount : Nat)
   simp only [Invariant, channelBalance] at *
   try dsimp
   refine ⟨⟨by omega, ?_, by omega⟩, ?_, True.intro⟩ <;> omega
+
+theorem earnings_withdrawal_preserves_accounting (s s' : State) (amount : Nat)
+    (hi : Invariant s) (h : withdrawEarnings s amount = some s') :
+    Invariant s' ∧ s'.funds = s.funds ∧ s'.stake = s.stake ∧
+      s'.locked + amount = s.locked := by
+  unfold withdrawEarnings at h
+  split at h <;> simp_all
+  subst s'
+  simp only [Invariant] at *
+  try dsimp
+  refine ⟨⟨by omega, ?_, by omega⟩, True.intro, True.intro, ?_⟩ <;> omega
+
+theorem earnings_withdrawal_requires_no_unstake (s : State) (amount : Nat)
+    (hp : amount > 0) (he : amount ≤ s.earned) :
+    withdrawEarnings s amount =
+      some { s with earned := s.earned - amount, locked := s.locked - amount } := by
+  simp [withdrawEarnings, Nat.ne_of_gt hp, Nat.not_lt.mpr he]
 
 theorem partial_withdrawal_invalidates_old_generation (s s' : State)
     (amount now stop charge : Nat) (auth : Bool)

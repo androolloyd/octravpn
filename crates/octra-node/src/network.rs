@@ -57,6 +57,15 @@ pub struct Config {
     pub vpn: Option<crate::vpn::Config>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payments: Option<crate::vpn::payments::ServiceConfig>,
+    #[cfg(feature = "private-payments-experimental")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shielded: Option<crate::vpn::payments::shielded::startup::Config>,
+    #[cfg(feature = "private-payments-experimental")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payer: Option<crate::vpn::payments::shielded::payer::startup::Config>,
+    #[cfg(feature = "private-payments-experimental")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private_route: Option<crate::vpn::payments::shielded::payer::startup::route::Config>,
     #[serde(default)]
     pub peers: Vec<String>,
     #[serde(default)]
@@ -125,6 +134,18 @@ pub fn read(path: &Path) -> Result<Config> {
     }
     if let Some(mesh) = &mut config.mesh {
         mesh.resolve_paths(&parent);
+    }
+    #[cfg(feature = "private-payments-experimental")]
+    {
+        if let Some(private) = &mut config.shielded {
+            private.resolve_paths(&parent);
+        }
+        if let Some(payer) = &mut config.payer {
+            payer.resolve_paths(&parent);
+        }
+        if let Some(route) = &mut config.private_route {
+            route.resolve_paths(&parent);
+        }
     }
     Ok(config)
 }
@@ -224,6 +245,19 @@ pub async fn run_with_runtime_factory(
     make_runtime: impl FnOnce(&Settings) -> Result<CircleRuntime>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<()> {
+    if let Some(plan) = prepare(config, make_runtime, &mut shutdown).await? {
+        Box::pin(launch::run(plan, shutdown)).await?;
+    }
+    Ok(())
+}
+
+async fn prepare(
+    config: Config,
+    make_runtime: impl FnOnce(&Settings) -> Result<CircleRuntime>,
+    shutdown: &mut watch::Receiver<bool>,
+) -> Result<Option<launch::Plan>> {
+    #[cfg(feature = "private-payments-experimental")]
+    validate_private(&config)?;
     if let Some(proxy) = config.p2p_proxy {
         octra_node_protocol::network::proxy::validate(proxy)?;
     }
@@ -289,7 +323,7 @@ pub async fn run_with_runtime_factory(
     let authority = bootstrap::Authority::new(config.network.clone())?;
     let (store, migration) = tokio::select! {
         opened = authority.reopen_with_migration_with_retention(&config.data, retention) => opened?,
-        _ = shutdown.wait_for(|stopping| *stopping) => return Ok(()),
+        _ = shutdown.wait_for(|stopping| *stopping) => return Ok(None),
     };
     let migration = migration.map(Arc::new);
     let head = store.head().await?;
@@ -369,63 +403,165 @@ pub async fn run_with_runtime_factory(
         config.publisher,
         config.snapshot_limits,
     )?;
-    Box::pin(launch::run(
-        launch::Plan {
-            status_release: Some(profile.status_release()),
-            services: launch::Services {
-                data: config.data,
-                rpc: config.rpc,
-                browser: config.browser,
-                control: config.control,
-                tunnel: config.tunnel,
-                gateway: config.gateway,
-                stock_portal: config.stock_portal,
-                stock_circle_gateway: config.stock_circle_gateway,
-                mesh: config.mesh,
-            },
-            transport: launch::Transport {
-                listen: config.p2p,
-                proxy: config.p2p_proxy,
-                advertised,
-                peers,
-                maximum_peers: 32,
-                config_hash: Some(config_hash),
-                binary_hash,
-                require_binary_hash,
-                upgrade,
-                profiles: profile.transitions(chain)?,
-            },
-            store,
-            key,
-            journal,
-            environment,
-            receipts,
-            policy: Policy {
-                protocol,
-                genesis_time: None,
-            },
-            execution,
-            runtime: runtime.with_program_keys(profile.keys.clone()),
-            compute: octra_node_protocol::resource_compute::provider::Config::from_inputs(
-                config.compute_provider,
-                |name| settings.get(name).map(<[u8]>::to_vec),
-            )?,
-            vpn: config.vpn,
-            payments: config.payments,
-            voting,
-            state_sync: Some(state_sync),
-            minimum_peers: 1,
-            health: octra_node_protocol::consensus::health::Config::from_inputs(|name| {
-                settings.get(name)
-            }),
-            startup_timeout: Duration::from_secs(config.startup_seconds),
-            timeouts,
-            epoch_capacity: settings.proposal_ou.clone(),
-            stealth_slots: settings.stealth_slots as usize,
+    Ok(Some(launch::Plan {
+        status_release: Some(profile.status_release()),
+        services: launch::Services {
+            data: config.data,
+            rpc: config.rpc,
+            browser: config.browser,
+            control: config.control,
+            tunnel: config.tunnel,
+            gateway: config.gateway,
+            stock_portal: config.stock_portal,
+            stock_circle_gateway: config.stock_circle_gateway,
+            mesh: config.mesh,
         },
-        shutdown,
+        transport: launch::Transport {
+            listen: config.p2p,
+            proxy: config.p2p_proxy,
+            advertised,
+            peers,
+            maximum_peers: 32,
+            config_hash: Some(config_hash),
+            binary_hash,
+            require_binary_hash,
+            upgrade,
+            profiles: profile.transitions(chain)?,
+        },
+        store,
+        key,
+        journal,
+        environment,
+        receipts,
+        policy: Policy {
+            protocol,
+            genesis_time: None,
+        },
+        execution,
+        runtime: runtime.with_program_keys(profile.keys.clone()),
+        compute: octra_node_protocol::resource_compute::provider::Config::from_inputs(
+            config.compute_provider,
+            |name| settings.get(name).map(<[u8]>::to_vec),
+        )?,
+        vpn: config.vpn,
+        payments: config.payments,
+        #[cfg(feature = "private-payments-experimental")]
+        shielded: config.shielded,
+        #[cfg(feature = "private-payments-experimental")]
+        private_payer: config.payer,
+        #[cfg(feature = "private-payments-experimental")]
+        private_route: config.private_route,
+        voting,
+        state_sync: Some(state_sync),
+        minimum_peers: 1,
+        health: octra_node_protocol::consensus::health::Config::from_inputs(|name| {
+            settings.get(name)
+        }),
+        startup_timeout: Duration::from_secs(config.startup_seconds),
+        timeouts,
+        epoch_capacity: settings.proposal_ou.clone(),
+        stealth_slots: settings.stealth_slots as usize,
+    }))
+}
+
+#[cfg(feature = "private-payments-experimental")]
+fn validate_private(config: &Config) -> Result<()> {
+    use crate::vpn::payments::shielded::startup::check_profile;
+    if config.shielded.is_some() || config.payer.is_some() || config.private_route.is_some() {
+        check_profile(&Graph::new(
+            config.network.identity.chain_id.as_bytes().to_vec(),
+            None,
+        ))?;
+        ensure!(
+            config.vpn.is_none()
+                && config.payments.is_none()
+                && config.stock_portal.is_none()
+                && config.stock_circle_gateway.is_none()
+                && config
+                    .mesh
+                    .as_ref()
+                    .is_none_or(|mesh| mesh.stock_exit.is_none()),
+            "select private services without another payment or stock-exit mode"
+        );
+    }
+    if let Some(private) = &config.shielded {
+        private.validate()?;
+    }
+    if let Some(payer) = &config.payer {
+        payer.validate()?;
+    }
+    if let Some(route) = &config.private_route {
+        route.validate()?;
+        ensure!(
+            config.payer.is_none(),
+            "select the route owner or standalone payer scheduler"
+        );
+    }
+    Ok(())
+}
+
+/// Explicit offline initialization or consent uses the identical trust,
+/// retained history and native execution graph as ordinary public startup.
+/// No peer, RPC, voting or serving actor is started.
+#[cfg(feature = "private-payments-experimental")]
+pub async fn private_wallet_action(
+    config: Config,
+    runtime: CircleRuntime,
+    action: crate::vpn::payments::shielded::startup::Action,
+) -> Result<PathBuf> {
+    Box::pin(private_wallet_action_with_runtime_factory(
+        config,
+        |_| Ok(runtime),
+        action,
     ))
     .await
+}
+
+#[cfg(feature = "private-payments-experimental")]
+pub async fn private_wallet_action_with_runtime_factory(
+    config: Config,
+    make_runtime: impl FnOnce(&Settings) -> Result<CircleRuntime>,
+    action: crate::vpn::payments::shielded::startup::Action,
+) -> Result<PathBuf> {
+    use octra_node_runtime::validator_history::Authority;
+    let (_stop, mut shutdown) = watch::channel(false);
+    let plan = prepare(config, make_runtime, &mut shutdown)
+        .await?
+        .context("offline preparation cancelled")?;
+    let runtime = plan
+        .runtime
+        .with_public_keys(Arc::new(octra_node_runtime::pvac::Files(
+            plan.execution.pvac_dir.clone(),
+        )));
+    let authority = Authority::new(
+        plan.store.reader(),
+        plan.environment,
+        plan.receipts,
+        plan.journal,
+    );
+    let node = crate::Node::open(
+        plan.store,
+        authority,
+        runtime,
+        Arc::new(octra_browser::application::UnavailableHost),
+        Arc::new(
+            octra_exex::sqlite::SqliteCheckpoints::open(&plan.services.data.join("exex.db"))
+                .await?,
+        ),
+    )
+    .await?
+    .with_view_graph(plan.execution.graph)?;
+    let result = action
+        .apply(
+            &node,
+            &plan.key,
+            plan.shielded.as_ref(),
+            plan.private_payer.as_ref(),
+            plan.private_route.as_ref(),
+        )
+        .await;
+    node.shutdown().await?;
+    result
 }
 
 /// Rust configuration supplies an explicit BFT/observer role. The native

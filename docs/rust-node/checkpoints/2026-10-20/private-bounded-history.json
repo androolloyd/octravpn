@@ -1,0 +1,40 @@
+{
+  "observed_at_utc": "2026-10-21T05:08:23.091543+00:00",
+  "consensus_changes": false,
+  "publicly_deployed": false,
+  "public_alpha_live": false,
+  "changes": [
+    "Restore only bounded authenticated application subtrees for retained private funding and index history",
+    "Keep projected state separate from canonical execution/browser provenance",
+    "Preserve native account-proof wire bytes using authenticated subtree composition",
+    "Read enrollment metadata directly instead of restoring a historical ledger tree",
+    "Force selected hashes to drive indexed SQLite lookups"
+  ],
+  "runtime_library": {
+    "passed": 115,
+    "failed": 0,
+    "ignored": 1,
+    "scope": "v20 reader; v21 changes only SQL join ordering and adds an explicit stopped-store diagnostic"
+  },
+  "real_retained_store": {
+    "database_bytes": 106026040459,
+    "epoch": 1725801,
+    "subtrees": 7,
+    "test_seconds": 0.18,
+    "process_seconds": 1.3304636249667965,
+    "max_rss_bytes": 17596416,
+    "scope": "Stopped database previously reauthenticated by native startup; diagnostic alone creates no finality or admission authority"
+  },
+  "negative_controls": [
+    "Selected corruption, missing edges and mismatched heads refuse",
+    "Unrelated corrupt data is not loaded by a selected read; a full restore refuses it",
+    "Native inode and legacy directory paths yield the same subtrees",
+    "Selected contents proofs match the full-tree producer byte for byte"
+  ],
+  "evidence": "out/private-funded-multihop-20261020",
+  "source_sha256": {
+    "crates/octra-node-runtime/src/canonical/reader/projection.rs": "6cc8a522f01d5b467ba50ad402ec432dd4d089bf357ddab1ede15d924aadb0db",
+    "crates/octra-node-runtime/src/status_read.rs": "219f673642754cf6e34c1fb9f6434bc1bb88fe333390977584fe499d36f0bf64",
+    "crates/octra-node/src/vpn/payments/shielded/history/image.rs": "355864388c8f81b129df211033df11452002d3f4f79a16c0d205aecb85dd2180"
+  }
+}

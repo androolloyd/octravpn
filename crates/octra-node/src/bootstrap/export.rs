@@ -12,6 +12,8 @@ mod serve;
 use super::Authority;
 use anyhow::{ensure, Context, Result};
 pub use cli::Commands;
+use octra_node_protocol::state_sync::migration;
+use octra_node_runtime::canonical::CanonicalStore;
 use octra_node_runtime::ledger_image::{self, Limits, Written};
 pub use package::{assemble, prepare, Assemble, PackageReport, Prepare};
 use serde::Serialize;
@@ -33,6 +35,33 @@ pub struct Report {
     pub ledger: Written,
 }
 
+/// Offline export may scan an ordinary isolated genesis store. Normal startup
+/// continues to require the original checkpoint-reopen authority path.
+async fn open_source(
+    authority: &Authority,
+    directory: &Path,
+) -> Result<(CanonicalStore, Option<migration::Admission>)> {
+    let network = authority.network();
+    if network.identity.chain_id.starts_with("octra-rust-local-")
+        && network.identity.genesis_root().is_some()
+    {
+        let ordinary = directory.join("canonical.db");
+        let imported = directory.join("canonical.sqlite");
+        if ordinary.try_exists()? {
+            ensure!(!imported.try_exists()?, "ambiguous private export stores");
+            ensure!(
+                network.migration_root.is_none(),
+                "private genesis export cannot bypass migration authority"
+            );
+            return Ok((
+                CanonicalStore::open(&ordinary, &network.identity).await?,
+                None,
+            ));
+        }
+    }
+    authority.reopen_with_migration(directory).await
+}
+
 /// Produces a ledger image only. Exporter/checkpoint signatures are separate
 /// authority; writing an image does not make it an admissible network snapshot.
 pub async fn ledger(
@@ -52,7 +81,7 @@ pub async fn ledger(
         Ok(_) => anyhow::bail!("ledger image target already exists"),
         Err(error) => return Err(error.into()),
     }
-    let store = authority.reopen(directory).await?;
+    let (store, _) = open_source(authority, directory).await?;
     let head = store.head().await?;
     let state = store.reader().snapshot_at(&head).await?;
     store.close().await;

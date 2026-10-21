@@ -27,6 +27,14 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def test_summaries(output):
+    # Native workers may write arbitrary bytes to a merged diagnostic stream.
+    # Preserve the raw log for hashing; only its textual summaries need decoding.
+    return [tuple(map(int, match)) for match in re.findall(
+        r'test result: \w+\. (\d+) passed; (\d+) failed; (\d+) ignored;',
+        output.decode('utf-8', errors='replace'))]
+
+
 def snapshot():
     # Rescan on both sides so newly created/deleted inputs are also detected.
     paths = {ROOT / name for name in [
@@ -64,8 +72,7 @@ def main():
     with args.log.open('x') as log:
         result = subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
     after = snapshot()
-    suites = [tuple(map(int, m)) for m in re.findall(
-        r'test result: \w+\. (\d+) passed; (\d+) failed; (\d+) ignored;', args.log.read_text())]
+    suites = test_summaries(args.log.read_bytes())
     unchanged = before == after
     report = {
         'scope': args.scope,

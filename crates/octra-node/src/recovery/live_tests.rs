@@ -7,7 +7,58 @@ mod liveness;
 mod vpn;
 use fixture::{Fixture, EXTENSION, WAIT};
 use octra_exex::{CheckpointStore, CommittedEpochSource, Sequence};
+use octra_node_protocol::network::frame::Frame;
 use octravpn_node::admission::SessionAuthority;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn nonvoting_observer_follows_finalized_peer_frame_without_signing() {
+    let mut fixture = Box::pin(Fixture::new(false)).await;
+    fixture.matching_roots(3);
+    fixture
+        .wait(|| {
+            matches!(fixture.node.status(), crate::Status::Serving(_))
+                && fixture.authority.driver().unwrap().is_some_and(|driver| {
+                    let status = driver.status();
+                    status.borrow().started && !status.borrow().voting
+                })
+        })
+        .await;
+    let before = fixture.vote_journal();
+    let (certificate, _) = fixture.successor().await;
+    fixture.peers[0]
+        .swarm
+        .broadcast(
+            Frame {
+                message: 0x32,
+                payload: certificate,
+            },
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    fixture
+        .wait(|| {
+            matches!(fixture.node.status(), crate::Status::Serving(ref head) if head.cursor.epoch.0 == 2)
+        })
+        .await;
+    fixture
+        .wait_checkpoint(fixture.node.head().await.unwrap().cursor)
+        .await;
+    for (path, bytes) in fixture.vote_journal() {
+        // Floor, round mark and their transient staged files can change during
+        // finalization; only .vote records are locally signed statements.
+        if path.extension().is_some_and(|ext| ext == "vote") {
+            assert_eq!(
+                before.get(&path),
+                Some(&bytes),
+                "observer wrote vote log file: {path:?}"
+            );
+        }
+    }
+    fixture.tasks.stop().await;
+    fixture.node.shutdown().await.unwrap();
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn configured_three_peer_attestation_refuses_two_matching_roots() {
@@ -576,17 +627,26 @@ async fn connected_supervisor_requires_attestation_quarantines_conflict_and_reco
         fixture
             .wait(|| {
                 matches!(fixture.node.status(), crate::Status::Serving(_))
-                    && (!voting
-                        || fixture.authority.driver().unwrap().is_some_and(|driver| {
-                            driver.status().borrow().started && driver.status().borrow().voting
-                        }))
+                    && fixture.authority.driver().unwrap().is_some_and(|driver| {
+                        let receiver = driver.status();
+                        let status = receiver.borrow();
+                        status.started && status.voting == voting
+                    })
             })
             .await;
         let first_generation = fixture.authority.driver().unwrap();
-        if voting {
-            assert!(first_generation.is_some());
-        } else {
-            assert!(first_generation.is_none());
+        assert!(first_generation.is_some());
+        if !voting {
+            assert!(!first_generation.as_ref().unwrap().status().borrow().voting);
+            assert!(fixture
+                .journal
+                .max_round(
+                    fixture.node.store.chain().chain_id.as_bytes(),
+                    &fixture.address,
+                    2
+                )
+                .unwrap()
+                .is_none());
         }
         let permit = admission
             .authorize(&fixture.vpn.request, &fixture.vpn.domain)
@@ -704,10 +764,11 @@ async fn connected_supervisor_requires_attestation_quarantines_conflict_and_reco
             .wait(|| {
                 !fixture.node.root_quarantined()
                     && matches!(fixture.node.status(), crate::Status::Serving(_))
-                    && (!voting
-                        || fixture.authority.driver().unwrap().is_some_and(|driver| {
-                            driver.status().borrow().started && driver.status().borrow().voting
-                        }))
+                    && fixture.authority.driver().unwrap().is_some_and(|driver| {
+                        let receiver = driver.status();
+                        let status = receiver.borrow();
+                        status.started && status.voting == voting
+                    })
             })
             .await;
         assert!(!permit.live(), "recovery revived a captured permit");
@@ -753,6 +814,20 @@ async fn connected_supervisor_requires_attestation_quarantines_conflict_and_reco
             .unwrap()
             .is_none());
         assert_eq!(fixture.swarm.peers().len(), 3);
+        if !voting {
+            assert!(
+                fixture
+                    .journal
+                    .max_round(
+                        fixture.node.store.chain().chain_id.as_bytes(),
+                        &fixture.address,
+                        2
+                    )
+                    .unwrap()
+                    .is_none(),
+                "receive-only observer signed a vote"
+            );
+        }
         fixture.tasks.stop().await;
         fixture.node.shutdown().await.unwrap();
         assert_eq!(fixture.node.head().await.unwrap(), fixture.head);

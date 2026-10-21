@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "observed_at_utc": "2026-10-20T06:36:25.190255+00:00",
+  "status": "PRIVATE_PURCHASE_CLIENT_PHASE_HOST_AND_SINGLE_HOP_KERNEL_REGRESSION_PASSED_COORDINATOR_PENDING",
+  "goal_complete": false,
+  "consensus_rule_changes": false,
+  "protocol_commission": 0,
+  "pushed": false,
+  "deployed": false,
+  "public_network_qualification": false,
+  "full_private_route_coordination_implemented": false,
+  "implemented": [
+    "Authenticated nonfinancial Purchase::open before quote or native payment",
+    "Encrypted immutable client phase in the original custody book; exact finite consent, receipt identity and transport binding",
+    "Offline client journal and connection sequence before phase commit and first quote",
+    "Resume only the original encrypted child state; missing/replaced or incomplete state refuses new payment",
+    "Canonical credited step plus fresh private meter required before admission; signed status alone cannot fund",
+    "Standalone Purchase::step and scheduler refuse client-owned phases",
+    "Pinned per-hop preparation validates public endpoints, TLS, hop position and nested MTU before journal creation"
+  ],
+  "host": {
+    "native_release_tests": 69,
+    "native_test_seconds": 289.18,
+    "client_tests": 378,
+    "client_benchmark_checks": 4,
+    "strict_experimental_node_all_targets": true,
+    "strict_client_all_targets": true,
+    "strict_default_node_all_targets": true,
+    "binary": "target/release/deps/octra_node-29d821b50c793905",
+    "binary_sha256": "c1cc608d75ce41c8a6b332d0327b3f7c9cd254199867a53b42e8979ed2cae0f5"
+  },
+  "source_sha256": {
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner.rs": "e25acbad89bdd2954886f6cd5e6a0525604f723254adbadb1e62ff9ce48e4c60",
+    "crates/octra-node/src/vpn/payments/shielded/payer/runner/client.rs": "f696b19e70a4a777d294be99ae2c4764b2004f401103336e29e1028efdba4dfe",
+    "crates/octra-node/src/vpn/payments/shielded/runner_tests.rs": "0539c7cd85e922e6179821f9a930086b460127371b17148ac06ecc4edea51fcd",
+    "crates/octra-node/src/vpn/payments/shielded/runner_tests/client.rs": "7aa69b6da36a55c3caf479fbba399f9753446f2f86398915de0667d31e24cfc8",
+    "crates/octra-node/src/vpn/payments/shielded/storage.rs": "595d2cdd7208b088faff1d9bb7c1685ec4626cf742a14a055bd8436cee9f36da",
+    "crates/octravpn-client/src/private_runner.rs": "3ea90a0aafdb49c8ea886d04d1e2a1afc8d08663da1e8b39b4fc109185d329f4",
+    "crates/octravpn-client/src/private_runner/tests/pending.rs": "481b4aba439835fe714ad87a940c3fe86dc3c13a538e6d5097b87c54981d43a6",
+    "crates/octravpn-client/src/multihop/private.rs": "ee8bd5461baa6944a3b2ac84de82cc1d757d67ad437e7dc5e6819edd4f619f8b",
+    "crates/octravpn-client/src/multihop/mtu.rs": "319de5ef51b2eb4c8d5e9c842ed19bb7fe96df40f862b2f5ac456bcc8b057633",
+    "crates/octravpn-client/src/payments.rs": "42bdbfd5da1eac88fdf6e2d70812a6c8357169aadf4df07e5f88756508277823",
+    "crates/octravpn-client/src/lib.rs": "d3a64ee34f86cdce839c6077d626662295682c1b38ea967c996620d9171e0684"
+  },
+  "evidence": {
+    "root": "out/private-route-phases-20261020",
+    "host_source_manifest": "out/private-route-phases-20261020/source-before.json",
+    "sibling_source_observed": "out/private-route-phases-20261020/sibling-source-observed.json",
+    "native": "out/private-route-phases-20261020/node-release-final.log",
+    "client": "out/private-route-phases-20261020/client-tests.log",
+    "client_source_reuse": "out/private-route-phases-20261020/client-source-reuse.json",
+    "strict": "out/private-route-phases-20261020/clippy-final.log",
+    "default_strict": "out/private-route-phases-20261020/normal-clippy-final.log",
+    "interrupted_initial_native_build": "out/private-route-phases-20261020/cancelled-first-native-gate.json"
+  },
+  "linux_kernel": {
+    "status": "QUALIFIED_SINGLE_HOP_REGRESSION",
+    "evidence": "out/private-route-phases-20261020/kernel",
+    "image": "octra-private-phases-kernel:20261020",
+    "image_id": "sha256:404c9ed285ba9e5bfd2f7491b4e54aec5bd2b63b10ac1ff8dc52b7ade438cd48",
+    "source_files": 4922,
+    "exact_tests": 2,
+    "container_exits": [
+      0,
+      0
+    ],
+    "test_sha256": "9340b7f02024c2a53907dc38122b0e5ed9b7956df59cf4ced16912ab89ed036f",
+    "cleanup_verified": true,
+    "udp_payload_bytes": 9340,
+    "tcp_payload_bytes": 9728,
+    "canonical_exex_reopened": true,
+    "retained_epochs": 84,
+    "purchase_transactions": 2,
+    "sink_files_unchanged": true,
+    "scope": "Two exact tests on the same executable: real canonical private payment and client phase admission/recovery, plus existing single-hop WireGuard/TUN/restart/ExEx regression. The new phase wrapper admits the second purchase; kernel payload uses the existing first-purchase client. Not a funded private route coordinator or public-network qualification."
+  },
+  "remaining": [
+    "Global route intent binding every hop before any operator request",
+    "Ordered private native funding and transport through the paid prefix",
+    "Trusted local-node chain access while staged application traffic stays blocked",
+    "Funded private composite kernel, exhaustion, carrier loss, restart and income qualification",
+    "Broader native/public-chain parity, sustained public service and production cryptographic qualification"
+  ],
+  "public_observer_read_only": {
+    "evidence": "out/private-route-phases-20261020/public-observer-read-only.json",
+    "state": "running",
+    "image": "sha256:dae2796c3df990e94657f25d784cb31e48fe3d4da51a0d0a2efd838d51ab4758",
+    "head_epoch": 1721184,
+    "candidate_deployed": false,
+    "scope": "Local node_status only; no independent current-head match or sustained paid-service qualification."
+  },
+  "validation_limits": [
+    "The native fixture proves the new phase through canonical payment and authenticated admission, then tests lost state; it does not run a complete route through the new wrapper.",
+    "The kernel payload regression uses the existing first-purchase client and confirms no regression in transport/restart/ExEx.",
+    "The first native build was deliberately stopped before source changes to close standalone scheduler ownership; its cancellation is retained.",
+    "The debug canonical fixture stack-overflow limitation recorded by the preceding checkpoint is unchanged; the native execution gate used release."
+  ]
+}

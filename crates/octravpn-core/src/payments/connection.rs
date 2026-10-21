@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use super::{
     b64, deserialize_hash, deserialize_positive, hash, native, native_address, public_key,
     signature, verify_authorization, Address, Deployment, Error, KeyPair, PublicKey, Result,
-    Signature, Tariff,
+    ServiceReceipt, Signature, SignedServiceReceipt, Tariff, Usage,
 };
 use crate::session::SessionId;
 
@@ -231,6 +231,8 @@ pub struct SignedStatus {
     pub operator_key: PublicKey,
     #[serde(with = "signature")]
     pub signature: Signature,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub service_receipts: Vec<SignedServiceReceipt>,
 }
 
 impl SignedStatus {
@@ -240,7 +242,42 @@ impl SignedStatus {
             status,
             operator_key: key.public,
             signature,
+            service_receipts: Vec::new(),
         };
+        signed.verify()?;
+        Ok(signed)
+    }
+
+    /// Pair the status with one operator-signed delivery counter per class.
+    /// The caller must reserve `sequence` in durable storage before signing.
+    pub fn sign_with_receipts(
+        status: Status,
+        key: &KeyPair,
+        operator_generation: u64,
+        sequence: u64,
+    ) -> Result<Self> {
+        let mut signed = Self::sign(status, key)?;
+        signed.service_receipts = signed
+            .status
+            .committed_totals
+            .iter()
+            .enumerate()
+            .map(|(class, &total_bytes)| {
+                SignedServiceReceipt::sign(
+                    ServiceReceipt {
+                        usage: Usage::from_binding(
+                            signed.status.binding.clone(),
+                            u8::try_from(class).map_err(|_| Error::Invalid("too many classes"))?,
+                            sequence,
+                            total_bytes,
+                        )?,
+                        operator: signed.status.tariff.operator().clone(),
+                        operator_generation,
+                    },
+                    key,
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
         signed.verify()?;
         Ok(signed)
     }
@@ -255,16 +292,37 @@ impl SignedStatus {
             &self.operator_key,
             &self.status.signing_message()?,
             &self.signature,
-        )
+        )?;
+        if !self.service_receipts.is_empty() {
+            if self.service_receipts.len() != self.status.committed_totals.len() {
+                return Err(Error::Invalid("service receipt class count differs"));
+            }
+            let mut expected = None;
+            for (class, receipt) in self.service_receipts.iter().enumerate() {
+                receipt.verify()?;
+                let usage = &receipt.receipt.usage;
+                if receipt.operator_key != self.operator_key
+                    || receipt.receipt.operator != *self.status.tariff.operator()
+                    || usage.binding() != self.status.binding
+                    || usize::from(usage.traffic_class) != class
+                    || usage.total_bytes != self.status.committed_totals[class]
+                    || expected.is_some_and(|sequence| sequence != usage.sequence)
+                {
+                    return Err(Error::Invalid("service receipt differs from status"));
+                }
+                expected = Some(usage.sequence);
+            }
+        }
+        Ok(())
     }
 }
 
-mod wireguard_key {
+pub(super) mod wireguard_key {
     use serde::{de::Error as _, Deserialize, Deserializer, Serializer};
 
     use super::b64;
 
-    pub(super) fn serialize<S: Serializer>(
+    pub(in crate::payments) fn serialize<S: Serializer>(
         value: &[u8; 32],
         serializer: S,
     ) -> std::result::Result<S::Ok, S::Error> {
@@ -274,7 +332,7 @@ mod wireguard_key {
         serializer.serialize_str(&b64::encode(value))
     }
 
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+    pub(in crate::payments) fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> std::result::Result<[u8; 32], D::Error> {
         let text = String::deserialize(deserializer)?;
@@ -723,6 +781,7 @@ mod tests {
                 status,
                 operator_key: PublicKey(raw),
                 signature: Signature([0; 64]),
+                service_receipts: Vec::new(),
             };
             assert!(matches!(
                 signed.verify(),

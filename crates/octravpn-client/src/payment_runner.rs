@@ -14,7 +14,7 @@ use octravpn_core::{
 use octravpn_tun::Tun;
 use serde::Deserialize;
 
-mod accounting;
+pub(crate) mod accounting;
 mod prepare;
 pub(crate) use prepare::{Pins, Prepared};
 mod stock;
@@ -27,28 +27,28 @@ use std::{
 };
 pub use stock::{StockClient, StockOptions};
 
-const STATUS_MAX_AGE: Duration = Duration::from_secs(120);
+pub(crate) const STATUS_MAX_AGE: Duration = Duration::from_secs(120);
 
 #[derive(Debug)]
-struct Freshness {
+pub(crate) struct Freshness {
     canonical_ms: u64,
-    deadline: tokio::time::Instant,
+    pub(crate) deadline: tokio::time::Instant,
 }
 impl Freshness {
-    fn new(canonical_ms: u64) -> Self {
+    pub(crate) fn new(canonical_ms: u64) -> Self {
         Self {
             canonical_ms,
             deadline: tokio::time::Instant::now() + STATUS_MAX_AGE,
         }
     }
-    fn ensure_live(&self) -> Result<()> {
+    pub(crate) fn ensure_live(&self) -> Result<()> {
         ensure!(
             tokio::time::Instant::now() < self.deadline,
             "operator canonical clock stopped advancing"
         );
         Ok(())
     }
-    fn observe(&mut self, canonical_ms: u64) -> Result<()> {
+    pub(crate) fn observe(&mut self, canonical_ms: u64) -> Result<()> {
         self.ensure_live()?;
         ensure!(
             canonical_ms >= self.canonical_ms,
@@ -85,10 +85,16 @@ impl Observation {
 pub struct Plan {
     pub binding: PlanBinding,
     pub tariff: Tariff,
+    /// Canonical bond generation for the accepted offer.
+    pub operator_generation: u64,
     pub original_budget_ou: u64,
     /// Explicit finite cumulative byte purchase in immutable tariff order.
     pub prepaid_bytes: Vec<u64>,
     pub control_url: String,
+    /// Optional explicitly accepted private CA. It replaces built-in roots
+    /// for this control connection; hostname validation remains mandatory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_ca_pem: Option<String>,
     pub wireguard_endpoint: String,
 }
 impl Plan {
@@ -105,6 +111,10 @@ impl Plan {
 
     pub(crate) fn origin(&self) -> Result<reqwest::Url> {
         self.binding.validate()?;
+        ensure!(
+            self.operator_generation > 0,
+            "operator bond generation missing"
+        );
         ensure!(self.original_budget_ou > 0, "zero original plan budget");
         validate_purchase(&self.tariff, self.original_budget_ou, &self.prepaid_bytes)?;
         ensure!(
@@ -126,7 +136,44 @@ impl Plan {
             origin.scheme() == "https" || (origin.scheme() == "http" && local),
             "control requires HTTPS or loopback HTTP"
         );
+        ensure!(
+            self.control_ca_pem.is_none() || origin.scheme() == "https",
+            "an accepted control CA requires HTTPS"
+        );
+        self.control_root()?;
         Ok(origin)
+    }
+
+    pub(crate) fn control_root(&self) -> Result<Option<reqwest::Certificate>> {
+        self.control_ca_pem
+            .as_ref()
+            .map(|pem| {
+                ensure!(
+                    pem.len() <= 16_384,
+                    "accepted control CA exceeds byte bound"
+                );
+                let mut certificates = reqwest::Certificate::from_pem_bundle(pem.as_bytes())
+                    .context("invalid accepted control CA certificate")?;
+                ensure!(
+                    certificates.len() == 1,
+                    "accepted control CA must contain exactly one certificate"
+                );
+                Ok(certificates.remove(0))
+            })
+            .transpose()
+    }
+
+    fn control_http(&self) -> Result<reqwest::ClientBuilder> {
+        let mut builder = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(60))
+            .no_proxy();
+        if let Some(root) = self.control_root()? {
+            builder = builder
+                .tls_built_in_root_certs(false)
+                .add_root_certificate(root);
+        }
+        Ok(builder)
     }
 }
 
@@ -198,54 +245,29 @@ impl Client {
             connect,
             http,
             initial,
-            mut tunnel,
+            tunnel,
             device,
             interface,
         } = self;
         initial.freshness.ensure_live()?;
         let (stop, stopped) = tokio::sync::watch::channel(false);
-        let control = control_loop(http, origin, connect, plan, initial, stopped);
-        let accounting = journal.clone();
-        let driver = async move {
-            let assigned = interface.address;
-            let mut health = tokio::time::interval(Duration::from_millis(250));
-            health.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            let mut packet = vec![0; ip_tunnel::MTU + 1];
-            loop {
-                tokio::select! {
-                    _ = health.tick() => { tunnel.ensure_available()?; },
-                    length = device.recv(&mut packet) => {
-                        let length = length?;
-                        let raw = packet[..length].to_vec();
-                        if raw.len() > usize::from(interface.mtu) || ip_tunnel::validate_outbound(&raw, assigned).is_err() { continue; }
-                        let Some(reservation) = reserve(&accounting, raw.clone(), Direction::Outbound).await? else {continue;};
-                        if tunnel.send_confirmed(&ip_tunnel::encode(&raw)?).await? {
-                            finish(&accounting, reservation, true).await?;
-                        } else {
-                            finish(&accounting, reservation, false).await?;
-                        }
-                        tunnel.ensure_available()?;
-                    },
-                    body = tunnel.recv() => {
-                        let body = body?;
-                        let raw = ip_tunnel::decode(&body)?.to_vec();
-                        if raw.len() > usize::from(interface.mtu) { continue; }
-                        ip_tunnel::validate_inbound(&raw, assigned)?;
-                        let Some(reservation) = reserve(&accounting, raw.clone(), Direction::Inbound).await? else {continue;};
-                        let length = device.send(&raw).await?;
-                        ensure!(length == raw.len(), "partial client TUN write");
-                        finish(&accounting, reservation, true).await?;
-                    },
-                }
-            }
-        };
+        let control = control_loop(
+            http,
+            origin,
+            connect,
+            plan,
+            journal.clone(),
+            initial,
+            stopped,
+        );
+        let driver = drive(tunnel, device, interface, journal.clone());
         supervise(journal, driver, control, stop, shutdown).await
     }
 }
 
 // Race shutdown and control failure against the whole driver, including its
 // nested packet IO/fsync awaits. Cancelling a handoff never releases exposure.
-async fn supervise(
+pub(crate) async fn supervise(
     journal: Accounting,
     driver: impl std::future::Future<Output = Result<()>>,
     control: impl std::future::Future<Output = Result<()>> + Send + 'static,
@@ -293,6 +315,44 @@ async fn supervise(
     outcome.and(stopped).and(idle).and(summary)
 }
 
+/// Shared conservative packet handoffs for public and private prepaid plans.
+pub(crate) async fn drive(
+    mut tunnel: wireguard::Tunnel,
+    device: Tun,
+    interface: Interface,
+    accounting: Accounting,
+) -> Result<()> {
+    let assigned = interface.address;
+    let mut health = tokio::time::interval(Duration::from_millis(250));
+    health.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut packet = vec![0; ip_tunnel::MTU + 1];
+    loop {
+        tokio::select! {
+            _ = health.tick() => { tunnel.ensure_available()?; },
+            length = device.recv(&mut packet) => {
+                let length = length?;
+                let raw = packet[..length].to_vec();
+                if raw.len() > usize::from(interface.mtu) || ip_tunnel::validate_outbound(&raw, assigned).is_err() { continue; }
+                let Some(reservation) = reserve(&accounting, raw.clone(), Direction::Outbound).await? else {continue;};
+                if tunnel.send_confirmed(&ip_tunnel::encode(&raw)?).await? {
+                    finish(&accounting, reservation, true).await?;
+                } else { finish(&accounting, reservation, false).await?; }
+                tunnel.ensure_available()?;
+            },
+            body = tunnel.recv() => {
+                let body = body?;
+                let raw = ip_tunnel::decode(&body)?.to_vec();
+                if raw.len() > usize::from(interface.mtu) { continue; }
+                ip_tunnel::validate_inbound(&raw, assigned)?;
+                let Some(reservation) = reserve(&accounting, raw.clone(), Direction::Inbound).await? else {continue;};
+                let length = device.send(&raw).await?;
+                ensure!(length == raw.len(), "partial client TUN write");
+                finish(&accounting, reservation, true).await?;
+            },
+        }
+    }
+}
+
 /// Bounded authenticated status monitoring after the purchase barrier. Operator
 /// delivery counters cannot create new payment authorizations.
 async fn control_loop(
@@ -300,16 +360,21 @@ async fn control_loop(
     origin: reqwest::Url,
     connect: SignedConnect,
     plan: Plan,
+    journal: Accounting,
     initial: Observation,
     shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
-    control_mode(client, origin, connect, plan, initial, shutdown, false).await
+    control_mode(
+        client, origin, connect, plan, journal, initial, shutdown, false,
+    )
+    .await
 }
 async fn control_mode(
     client: reqwest::Client,
     origin: reqwest::Url,
     connect: SignedConnect,
     plan: Plan,
+    journal: Accounting,
     initial: Observation,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
     stock: bool,
@@ -332,7 +397,7 @@ async fn control_mode(
             () = tokio::time::sleep_until(freshness.deadline) => anyhow::bail!("operator canonical clock stopped advancing"),
             _ = interval.tick() => (),
         }
-        let poll = status_mode(&client, &origin, &connect, &plan, stock);
+        let poll = status_mode(&client, &origin, &connect, &plan, &journal, stock);
         tokio::pin!(poll);
         let view = tokio::select! {
             biased;
@@ -408,7 +473,7 @@ async fn prepay_mode(
                 result.context("purchase batch missing")?.context("purchase batch failed")??;
             },
             _ = interval.tick() => {
-                let view = tokio::time::timeout_at(freshness.deadline.min(deadline), status_mode(client, origin, connect, plan,stock)).await??;
+                let view = tokio::time::timeout_at(freshness.deadline.min(deadline), status_mode(client, origin, connect, plan, journal, stock)).await??;
                 ensure!(view.status.server_wireguard_key == signed.status.server_wireguard_key,
                     "operator WireGuard identity changed during purchase");
                 freshness.observe(view.status.canonical_ms)?;
@@ -494,14 +559,16 @@ async fn status(
     origin: &reqwest::Url,
     connect: &SignedConnect,
     plan: &Plan,
+    journal: &Accounting,
 ) -> Result<SignedStatus> {
-    status_mode(client, origin, connect, plan, false).await
+    status_mode(client, origin, connect, plan, journal, false).await
 }
 async fn status_mode(
     client: &reqwest::Client,
     origin: &reqwest::Url,
     connect: &SignedConnect,
     plan: &Plan,
+    journal: &Accounting,
     stock: bool,
 ) -> Result<SignedStatus> {
     let mut response = client
@@ -532,6 +599,11 @@ async fn status_mode(
             && signed.status.client_wireguard_key == connect.request.wireguard_key,
         "operator status differs from accepted plan"
     );
+    let retained = signed.clone();
+    let generation = plan.operator_generation;
+    journal
+        .with(move |journal| journal.observe_service_status(&retained, generation))
+        .await?;
     Ok(signed)
 }
 

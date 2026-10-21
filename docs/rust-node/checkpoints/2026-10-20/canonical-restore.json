@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "observed_at_utc": "2026-10-20T04:53:19.828850+00:00",
+  "status": "HOST_CANONICAL_RESTORE_INDEX_QUALIFIED_LINUX_ADOPTION_PENDING",
+  "goal_complete": false,
+  "consensus_rule_changes": false,
+  "deployed": false,
+  "pushed": false,
+  "source_sha256": {
+    "crates/octra-node-runtime/src/canonical/reader.rs": "524fef00f43662c8a016fc97c3589db4bd6348d83521b440b6916453f050413a",
+    "crates/octra-node-runtime/src/canonical/reader/restore_tests.rs": "e7e5abb88f0a0d0a5d373c5e909108c521bc7380b754d2bc5e48bbb367c7e87d",
+    "Cargo.lock": "c8706518cb922e40c34963e9075c3574483068df0a0c3e8a72ac558da684f277"
+  },
+  "change": "Read physical edges by reachable parent with the existing covering index; retain recursive UNION, object hashes, kinds and complete physical-edge validation",
+  "validation": {
+    "canonical_unit_passed": 29,
+    "canonical_authority_passed": 1,
+    "canonical_recovery_passed": 7,
+    "retained_query_benchmark_passed": 1,
+    "distinct_tests_passed": 38,
+    "runtime_all_targets_strict_clippy": "passed",
+    "source_unchanged_during_validation": true,
+    "default_ignored_tests": [
+      "explicit retained-copy benchmark, subsequently executed",
+      "crash worker, exercised by process-crash parent"
+    ]
+  },
+  "retained_sql_benchmark": {
+    "database_bytes": 90440396800,
+    "database_copy": "Separate immutable APFS clone; live state and rollback backup untouched",
+    "sqlite_version": "3.46.0",
+    "exact_edge_row_sets_equal": true,
+    "reports": [
+      {
+        "cache_kib": 2000,
+        "elapsed_seconds": 354.322916708,
+        "name": "historical_scan",
+        "rows": 1875192,
+        "sqlite": "3.46.0"
+      },
+      {
+        "cache_kib": 2000,
+        "elapsed_seconds": 175.225184625,
+        "name": "parent_index",
+        "rows": 1875192,
+        "sqlite": "3.46.0"
+      },
+      {
+        "cache_kib": 32768,
+        "elapsed_seconds": 177.630768625,
+        "name": "parent_index_32m",
+        "rows": 1875192,
+        "sqlite": "3.46.0"
+      }
+    ],
+    "cache_policy_changed": false,
+    "measurement_limits": "One sequential macOS run with concurrent observer/matrix load and warm filesystem effects; measures SQL edge collection, not total startup, snapshot decoding, or sync throughput"
+  },
+  "evidence": {
+    "source": "out/canonical-restore-20261020/source-before.json",
+    "benchmark": "out/canonical-restore-20261020/edge-benchmark.log",
+    "unit": "out/canonical-restore-20261020/canonical-unit.log",
+    "integration": "out/canonical-restore-20261020/canonical-integration.log",
+    "lint": "out/canonical-restore-20261020/runtime-clippy.log"
+  },
+  "remaining": [
+    "Linux source-bound rebuild and integration adoption",
+    "Public active-head sync and sustained serving",
+    "Private purchase/route coordination and full private multihop qualification"
+  ]
+}
