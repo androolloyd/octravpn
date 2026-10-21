@@ -1,6 +1,6 @@
 {
-  "observed_at_utc": "2026-10-21T13:08:34.890395+00:00",
-  "status": "both funded matrices, full node suite and audit regressions passed; public serving and funded canary pending",
+  "observed_at_utc": "2026-10-21T13:53:28.872749+00:00",
+  "status": "all local gates passed; sampled official head equality and fresh native serving observed; public activation interrupted and funded canary pending",
   "consensus_changes": false,
   "problem": "Repeated resume audits decode roughly 6.7 GB of retained archive events even after successful in-process authentication. This competes with live import and interrupts fresh serving.",
   "change": "Capture retained heads, finality, receipt/reward blobs and ExEx bytes in one SQL statement. Hash their exact bytes before decoding. Reuse only bounded process-local successful entries with identical full historical authority and policy. On a miss, decode and authenticate the same captured bytes.",
@@ -76,7 +76,24 @@
   },
   "public_serving": {
     "qualified": false,
-    "status": "closed candidate cold startup pending"
+    "status": "fresh serving observed; sustained public paid service remains unqualified",
+    "official_head_equality": {
+      "epoch": 1727401,
+      "state_root": "b3f5a0726c6c1d51ee9e125f665eef712f9aeac4c4ce9034b671f88181289fa9",
+      "sources": [
+        "official node_status RPC",
+        "local native node_status RPC"
+      ],
+      "scope": "One sampled epoch and state root; not sustained qualification"
+    },
+    "fresh_admission": {
+      "epoch": 1727415,
+      "state_root": "5b24bfea631db80905e6cbef158bfc7d9dfe4ad4ca7741c55ac8ddbe4736cc74",
+      "canonical_ms": 1792589692286,
+      "peers": 24,
+      "native_serving": true,
+      "quorum_and_freshness_unchanged": true
+    }
   },
   "runner_environment": "The final test-only image adds the official local /bin/kill utility. Docker --init reaps adopted children. Executable temporary storage, staging capacity, frozen read-only source fixtures and an isolated writable output satisfy the actual fixture requirements. Earlier failed environment attempts remain local. Production node binary and 8 GiB suite memory limit are unchanged.",
   "evidence": "out/private-funded-multihop-20261020/linux-v32",
@@ -98,5 +115,15 @@
       "log_sha256": "07090488421f458a9e3fe730680dee8f70aef1df78cad450aea811e23140a349"
     }
   ],
-  "website_scope": "Five final portal source/bundle files differ from the frozen executable test context. They are not embedded in the node binary; their canonical publication is qualified separately in octra-to-site.json. Current executable source inputs match the frozen candidate."
+  "website_scope": "Five final portal source/bundle files differ from the frozen executable test context. They are not embedded in the node binary; their canonical publication is qualified separately in octra-to-site.json. Current executable source inputs match the frozen candidate.",
+  "public_activation": {
+    "status": "partial; recovery required",
+    "cloud_udp_rule_saved_and_verified": true,
+    "private_control_bridge_created": true,
+    "private_control_caddy_reload_verified": true,
+    "udp_forwarding_application": "unknown after SSH timeout; reconcile actual rules before retrying",
+    "relay_ssh_and_https": "subsequent checks timed out; cloud rules and source IP verified unchanged",
+    "public_canary_spent_ou": 0,
+    "whole_activation_rerun_allowed": false
+  }
 }

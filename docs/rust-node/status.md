@@ -14,11 +14,18 @@ record; cache misses authenticate the same captured bytes. Cold startup, root
 quarantine, quorum and serving freshness remain mandatory. The generated-fixture
 speedup does not establish sustained public-network serving.
 
-The closed nonvoting devnet replacement is restoring the original state and
-wallets. The exact restricted cloud UDP rule is approved and saved. Local ingress
-activation and an actual funded public traffic/restart/withdrawal canary remain
-launch gates. One public operator does not establish a public multi-operator
-network. See the [private alpha guide](../operators/devnet-private-alpha.md).
+The nonvoting public replacement reached the same sampled epoch and state root
+as the official devnet node at 1,727,401, then passed fresh native admission at
+1,727,415 with 24 peers. These observations do not qualify sustained service.
+
+The exact restricted cloud UDP rule is saved and the private control route was
+configured. Activation's subsequent relay command timed out; SSH and HTTPS then
+became unreachable while the cloud rules and source address remained unchanged.
+The UDP forwarding outcome needs reconciliation before retrying. No public
+canary transaction has been signed or funded. Relay recovery and the actual
+funded traffic/restart/withdrawal canary remain launch gates. One public operator
+does not establish a public multi-operator network. See the
+[private alpha guide](../operators/devnet-private-alpha.md).
 
 The [previous qualification](checkpoints/2026-10-21/private-funded-multihop.json)
 retains its frozen binary hashes, results and initial resource-limit failure.
