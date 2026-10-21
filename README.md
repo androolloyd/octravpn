@@ -1,632 +1,141 @@
 # OctraVPN
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/androolloyd/octravpn)
-[![Proof of working state](https://github.com/androolloyd/octravpn/actions/workflows/proof.yml/badge.svg)](https://github.com/androolloyd/octravpn/actions/workflows/proof.yml)
-[![HFHE bridge status](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fandroolloyd%2Foctravpn%2Fmain%2Fdocs%2Faudit%2Ffhe-load-pk-status.json)](docs/audit/fhe-load-pk-status.json)
+**Peer-to-peer bandwidth, paid in OCT.**
 
-A decentralized VPN on Octra with WireGuard traffic, Circle-hosted offers and
-portal assets, and OCT payments directly between users and operators.
-New deployments target [Circle custody](docs/architecture/circle-prepaid.md):
-the payment Circle runs the contract, operator Circles publish tariffs and
-sites, and a portal Circle hosts the bounded unpaid onboarding pages. Rust
-nodes carry packets and enforce canonical prepaid allowances. Existing Program
-configurations remain supported. This Circle-first candidate is locally tested;
-the public-devnet paid route has a bounded packet test, while sustained service
-for public testers remains unqualified.
+OctraVPN combines a Rust Octra node, WireGuard networking and Circle-hosted
+applications. Operators offer connectivity at their own prices. Users fund a
+channel, buy traffic, and pay operators directly. The protocol takes **zero
+commission**.
 
-The [public devnet deployment](docs/rust-node/checkpoints/2026-10-18/devnet-circle-deployment.json)
-has a confirmed, initialized, factory-owned payment Circle and a separate
-[octra.to onboarding Circle](sites/octra-to/README.md) with six byte-verified
-assets. A bonded devnet operator published a tariff, and a signed 1 MiB
-purchase credited 1,000 OU of earnings that the operator withdrew. A later
-[bounded paid observer run](docs/rust-node/checkpoints/2026-10-19/devnet-paid-observer.json)
-forwarded HTTP traffic with matching client/operator byte counters. The
-observer still has intermittent serving gaps, and the public `octra.to` HTTPS
-origin is not active yet.
+[Documentation](docs/README.md) · [Node status](docs/rust-node/status.md) ·
+[Payment model](docs/architecture/circle-prepaid.md) · [octra.to](https://octra.to)
 
-The current [prepaid channel application](program/octranet-payments.aml) buys
-finite byte allowances before forwarding. Operators choose per-class prices;
-the protocol takes **zero commission**, with ordinary Octra transaction fees
-separate. The model supports:
+> **Development preview.** The payment and portal Circles are published on
+> public devnet. Sustained public VPN service, funded private multi-hop recovery
+> and accounting are still being qualified. The alpha is not open to testers
+> yet; Mainnet deployment is not qualified.
 
-- **Immediate withdrawal** of available channel OCT. Settled purchases stay final.
-- **Exit earnings funding outgoing traffic** without a withdrawal/deposit round trip.
-- **24-hour notice** before replacement rates activate. Bought bytes keep their price.
-- **Seven-day operator unstaking**, fixed from the first request.
+## What it does
 
-Exact purchased bytes must settle canonically before traffic flows. There are
-no operator credit lines or automatic top-ups. Full or partial channel
-withdrawal invalidates old plan connections and unsettled authorizations;
-unused purchased bytes are not refunded. See the
-[payment design](docs/architecture/octranet-payment-tier.md) and
-[operator/client guide](docs/operators/payment-plans.md).
+- **Run an Octra node.** Transaction execution, authenticated peers, consensus,
+  canonical state, ExEx and embedded VPN services share one node lifecycle.
+- **Create an Octranet.** Coordinate a private mesh with embedded `headscale-rs`
+  and supported Tailscale clients. Internet exit service is an explicit opt-in.
+- **Sell connectivity.** Publish an offer, choose rates for different traffic
+  classes, and enforce purchased allowances before forwarding packets.
+- **Use Circles.** Host tariffs, management pages and onboarding assets in
+  Circles. Resolve published public Circle resources through the node's HTTPS
+  gateway.
+- **Route through operators.** Nested routes carry downstream control and data
+  through preceding tunnels. Shielded payments and funded private routes remain
+  experimental and require their own qualification.
 
-The [prepaid revision checkpoint](docs/audit/octranet-prepaid-status.json) records **1,719
-passing tests** across 20 targets, **20 compiled AML tests**, **39 bounded Lean
-theorems**, strict lint and an isolated four-validator/two-kernel qualification.
-It covers TCP/UDP/ICMP, canonical advance purchases, class exhaustion, crash
-recovery, instant withdrawals, earnings reuse and matching ExEx. The
-[adversarial review](docs/audit/octranet-prepaid-2026-10-17.md) records fixes,
-source pins and proof limits. Purchase authorization does not prove Internet
-delivery; no arbitrary non-delivery slashing or delivery insurance is implemented.
-The current payment candidate can slash a bonded operator for two conflicting
-operator-signed service statements in one plan/class/sequence slot and reserve
-the bond for that payer after the seven-day lock. Paid transport now emits
-durably sequenced statements; the client retains verified statements and
-same-slot conflicts. This path still needs combined live qualification before
-it can be presented as an available user remedy.
+The integrated node follows the adopted upstream Octra protocol. Full behavioral
+parity is still being checked; implementation and qualification evidence are
+recorded in the [node status](docs/rust-node/status.md).
 
-The Rust node integrates transaction execution, authenticated peers, the native
-validator driver, canonical commitments, ExEx, Circle browsing and the opt-in
-paid VPN service. Its adopted reference is lite_node
-`7f9be4489870645cfcc95439638cde40f5da9f50`; this application changes no consensus
-rules. The Rust client library exposes the same paid service as the CLI, with
-explicit startup, shutdown and durable recovery. The native integration adds
-[Circle custody](docs/architecture/circle-prepaid.md),
-[stock Tailscale payments and Circle HTTPS](docs/architecture/stock-paid-exit.md),
-and [two- or three-hop prepaid routes](docs/architecture/nested-paid-exits.md).
-Each transport requires its own qualification; enrollment alone grants only the
-fixed onboarding portal. The
-[local devnet guide](docs/rust-node/devnet.md) and
-[current node status](docs/rust-node/status.md) describe configuration and
-qualification. [Offline legacy repair](docs/rust-node/legacy-repair.md) resumes
-trusted native-format plans through a pinned compatibility backend; it does not
-rewind modern canonical history or supply an all-Rust physical backend.
+## How payment works
 
-The [native integration checkpoint](docs/rust-node/checkpoints/2026-10-17/native-integration.md)
-records **35 passing local gates**, **3,516 passing Rust test identities across
-280 logical targets**, nine explicit exclusions and 21 separate Python tests.
-It combines source-bound native comparisons, recovery and isolated-worker tests,
-Rust/OCaml peers, browser checks and seven freshly executed Linux scenarios:
-framed prepaid traffic, stock Tailscale with Program and Circle custody, both
-two-hop exhaustion directions, legacy-v5 private Single and a three-hop route.
-The production node uses a release build; the captured client and standalone
-operator kernel fixtures use debug builds. Repeated executions are counted once.
-It extends the [earlier core checkpoint](docs/rust-node/checkpoints/2026-10-17/core-parity.json).
-Complete upstream behavioral equivalence and public paid service remain unqualified.
+Users buy finite byte allowances before traffic flows. Operators set their own
+prices, including different rates for different traffic classes. The unpaid
+onboarding portal provides the basics needed to join and fund an account.
 
-A separate [mixed-validator run](docs/rust-node/checkpoints/2026-10-17/mixed-validators.md)
-finalized sixteen epochs with two Rust validators and two hosts around unchanged
-native libraries. Transfers, state and ExEx histories agree across a clean
-four-node restart. This covers the recorded Standard/private-genesis fixture;
-stock-launcher and mixed Circle/private-proof parity remain separate.
-
-The [native interface successor](docs/rust-node/native-interfaces.md) adds
-publication-stable reads, authenticated queue-first proof warmup and native-format
-operator transaction/snapshot/store tooling. Its final combined qualification is
-pending. Native physical stores use an explicitly pinned compatibility backend;
-private-genesis fixtures do not establish public entitlement or universal parity.
-The [current qualification status](docs/rust-node/checkpoints/2026-10-18/interface-candidate.json)
-records the remaining mixed private-proof and nested traffic failures. Captured
-startup settings and failure diagnostics are implemented. Eight startup and
-recovery regressions pass; the broader combined rerun remains pending.
-
-The [public Circle reader fix](docs/rust-node/checkpoints/2026-10-18/sealed-reader.json)
-supports native ciphertext responses that omit sensitive metadata while retaining
-authenticated decryption. Client regressions and the Foundry suite pass; combined
-node, Linux traffic and mixed-validator qualification remain pending.
-
-Retained finality audits can [reuse verified work within one process](docs/rust-node/checkpoints/2026-10-17/audit-reuse.md).
-Every audit still rereads the full prefix and authenticates historical validator
-authority; startup, exported records and new publication retain their complete
-verification gates. Demo jobs publish only fresh, complete recording groups
-bound to their GitHub run and source commit.
-
-The [tested native integration build is syncing on public devnet](docs/rust-node/checkpoints/2026-10-18/native-integration-public-adoption.md).
-Its clean retained-state upgrade preserved the identity, configuration, relay
-and canonical history at epoch 1,711,611. Read-only audits verified **66 new
-epochs and 491 transaction events** with matching ExEx. A later guarded sample
-reached epoch 1,711,685; catch-up was active, serving suspended and connected
-peers zero. Sustained public availability and P2P retention remain unqualified.
-Public paid service has only bounded devnet evidence; sustained availability,
-public DNS/TLS and Mainnet remain open gates. The prepaid candidate is **not
-deployed to Mainnet**.
-The devnet payment Circle now has a bonded operator and a sealed,
-byte-verified 1,000 OU/MiB offer; the adopted Rust observer has read its
-Circle assets from retained state. A bounded on-chain canary bought a signed
-1 MiB allowance, withdrew the operator's exact earnings, and returned the
-payer's unspent OCT. Later bounded paid forwarding is documented in the
-[paid observer checkpoint](docs/rust-node/checkpoints/2026-10-19/devnet-paid-observer.json);
-sustained service remains unqualified.
-The current Circle custody source passed a separate isolated stock
-Tailscale 1.104.1/Headscale 29.5 gate with prepaid traffic, MagicDNS, Circle
-HTTPS, direct and DERP transport, restart, withdrawal and replay checks; its
-exact evidence is in the [devnet Circle deployment record](docs/rust-node/checkpoints/2026-10-18/devnet-circle-deployment.json).
-The [earlier core adoption](docs/rust-node/checkpoints/2026-10-17/core-parity-public-adoption.json)
-retains its own historical scope.
-
-The separate [v5 application](docs/private-administration.md) retains private
-admin credentials and cooperative two-transaction settlement. Its existing
-deployments, historical owner/tailnet/slashing variants and
-[canary](docs/audit/2026-10-11-canary-security.md) have their own qualification
-scope; enabling prepaid mode does not migrate them. See
-[first-party integration](docs/octra-vpn-inclusion.md) for the broader roadmap.
-
-The dated deployment notes below are historical records, not qualification of
-the current application or a present Mainnet readiness claim.
-
-> **Status (2026-05-20).** Three AML deployments are live on devnet
-> and run in parallel, gated by the node/client `protocol_version` config:
->
-> - **v1.1** — `program/main.aml`, deployed at
->   `oct2YehVLezCi2RCcSkURc3nyyYtzxmspwGHHALm6pjkUvJ`. Public-registry
->   operators, two-tx settle, cryptographic `slash_double_sign`. The
->   v1.1 49-case adversarial drill landed clean in that historical deployment.
-> - **v2** — `program/main-v2.aml`, deployed at
->   `oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7`. Slim registry
->   + per-operator **Octra Circle** holding sealed `/policy.json`,
->   per-class ACL, and metering counters. 45/45 adversarial drill,
->   end-to-end on devnet through `open_session`. HFHE settlement is
->   the last gate — see "What's blocked" below.
-> - **v3** — `program/main-v3.aml`, deployed at
->   `oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3` (2026-05-18).
->   Chain-minimal successor: OU custody + slash + 32-byte SHA-256
->   anchors per role; sealed `policy.json` / `members.json` / per-session
->   receipts live in operator + tailnet-owner Octra Circles. Replaces
->   HFHE-encrypted earnings with a swap-ready SHA-256 hash chain
->   while `fhe_*` AML host calls remain blocked. 40/40 adversarial drill
->   green; end-to-end smoke replays the earnings hash chain
->   byte-for-byte. **This is the substrate going to mainnet.**
->   Design-doc set at [`docs/v3/`](docs/v3/).
->
-> Workspace total: **373 Lean 4 theorems** across OctraVPN (46),
-> OctraVPN_V2 (54), OctraVPN_V3 (55), OctraVPN_Rust (109), and WireProtocol (109) — clean `lake build`,
-> zero `sorry`), **TLA+** v1.1 + v2 modules (~4 M distinct states,
-> 17 invariants, 0 violations), 30 Rust proptest harnesses, Kani
-> bounded checks, and a GPL-isolated PVAC sidecar (`pvac-sidecar/`)
-> producing chain-compatible HFHE blobs.
-
-## Documentation
-
-Start at [`docs/README.md`](docs/README.md) — the "I am a..."
-audience selector (end-user / operator / tailnet-owner / auditor /
-contributor). Time-budget guide: [`docs/READING_PATHS.md`](docs/READING_PATHS.md).
-File index: [`docs/INDEX.md`](docs/INDEX.md). Master demo tour:
-[`demo/recordings/00-master-tour.mp4`](demo/recordings/00-master-tour.mp4).
-
-[v3 design-doc set](docs/v3/) ·
-[v5 private administration](docs/private-administration.md) ·
-[v3 circle-resident architecture](docs/v3-circle-resident-architecture.md) ·
-[v3 threat model](docs/security/threat-model-v3.md) ·
-[v3 mainnet ceremony](docs/mainnet-ceremony.md) ·
-[Detailed v2 release notes](docs/v2-release-notes.md) ·
-[v2 circle-native design](docs/v2-circles-design.md) ·
-[v2 threat model](docs/v2-threat-model.md) ·
-[v2 operator flow](docs/v2-operator-flow.md) ·
-[v2 client flow](docs/v2-client-flow.md) ·
-[v1.1 release notes](docs/v1.1-release-notes.md)
-
----
-
-## Verify without installing anything
-
-Three ways:
-
-1. **Click "Open in GitHub Codespaces"** above → in ~90 seconds you have a
-   browser VS Code with everything built. Run
-   `bash docker/devnet/v3-smoke.sh` from the integrated terminal.
-2. **Read the latest CI proof** → click the proof badge above. The summary
-   tab shows test counts, the clippy gate, the Lean proof count, the
-   last-known tailscale-interop exit code, and signed artifact hashes
-   (`.deb` + `.rpm`).
-3. **Watch the demo recordings** below (or at `demo/recordings/*.mp4`;
-   regenerated via `bash demo/run-demo.sh` from inside the Codespace).
-
-### Recorded flows
-
-**`octravpn init` + `keygen` + `identity`** — cold-start operator flow:
-
-![init/keygen demo](demo/recordings/01-init-keygen.gif)
-
-**`octravpn-node mesh mint-preauth`** — single-use + reusable preauth keys:
-
-![mesh preauth demo](demo/recordings/04-mesh-preauth.gif)
-
----
-
-## Architecture
-
-### v1.1 — public registry (still shippable)
-
-```
-                ┌──────────────────────────────────────────────┐
-                │             Octra chain (program)            │
-                │       /program/main.aml (v1.1, deployed)     │
-                │                                              │
-                │  • operator stake registry (bond/unbond/slash) │
-                │  • tailnet records (owner, treasury, members)│
-                │  • sessions + two-tx settle (claim+confirm)  │
-                │  • HFHE encrypted earnings ledger            │
-                │  • slash_double_sign (cryptographic)         │
-                └─────────────▲──────────────▲─────────────────┘
-                              │              │
-       JSON-RPC contract_call │              │  octra_submit
-                              │              │
-       ┌──────────────────────┴───┐    ┌─────┴──────────────────────┐
-       │  octravpn (client CLI)    │    │  octravpn-node (operator  │
-       │  /crates/octravpn-client  │    │  daemon)                  │
-       │                           │    │  /crates/octravpn-node    │
-       │  • discover endpoints     │    │  • boringtun WG endpoint  │
-       │  • open_session           │◄──►│  • bandwidth metering     │
-       │  • settle_confirm         │    │  • settle_claim           │
-       └───────────────────────────┘    └───────────────────────────┘
-
-                       Off-chain control + WireGuard data
-```
-
-### v2 — circle-keyed, slim registry
-
-```
-                ┌──────────────────────────────────────────────┐
-                │   Octra chain — slim registry (v2)           │
-                │   /program/main-v2.aml (deployed)            │
-                │                                              │
-                │  • CircleRecord (owner, receipt_pk, prices)  │
-                │  • tailnets + authorized_circles[tid][cid]   │
-                │  • atomic register_circle (payable + bond)   │
-                │  • two-tx settle keyed on circle_id          │
-                │  • slash_double_sign / gov_slash on circle   │
-                │  • HFHE ledger via fhe_load_pk(circle.owner) │
-                └─────────▲────────────▲───────────▲───────────┘
-                          │            │           │
-       deploy_circle      │            │           │ open_session(tid, circle, class, max_pay)
-       register_circle    │            │           │ settle_*
-        + asset_put       │            │           │
-                ┌─────────┴──┐  ┌──────┴──┐  ┌─────┴───────────────┐
-                │ Operator   │  │ Operator│  │  Client (octravpn)  │
-                │ Circle A   │  │ Circle B│  │  /crates/octravpn-  │
-                │            │  │         │  │      client         │
-                │ /policy.json│ │ ...     │  │                     │
-                │ (sealed)   │  │         │  │  discover v2 <tid>  │
-                │ ACL +      │  │         │  │  connect-v2 …       │
-                │ metering   │  │         │  │  settle_confirm     │
-                └────────────┘  └─────────┘  └─────────────────────┘
-                       ▲                              │
-                       │  octravpn-node               │
-                       │  /crates/octravpn-node       │
-                       │  • predict circle_id         │
-                       │  • deploy_circle             │
-                       │  • circle_asset_put_encrypted (sealed)│
-                       │  • atomic register_circle    │
-                       │  • boringtun WG endpoint     │
-                       │  • PVAC sidecar IPC          │
-                       └──────────────────────────────┘
-```
-
-The data plane is **unchanged**: WireGuard via boringtun, the same
-JSON receipt protocol, and the same two-tx on-chain settle pattern.
-What changed is **who the operator is on chain** (a circle, not a
-wallet) and **how the client learns about it** (sealed asset fetched
-by `resource_key`, not a public `EndpointRecord`).
-
-### v3 — chain-minimal, circle-resident (deployed substrate)
-
-v3 doubles down on the circle move: the chain holds **only**
-OU custody (bonds + escrow + treasury), slash + state-version
-flags, and a 32-byte SHA-256 anchor per role. Operator policy,
-tailnet ACL, per-session receipts, and the per-class price tariff
-all live inside the role's Octra Circle as sealed assets. Class +
-price disappear from chain entrypoints; `open_session` is just
-`(tailnet, circle, max_pay)`. Earnings privacy uses a SHA-256
-hash chain (HFHE-swap-ready) because AML `fhe_*` host calls
-revert on devnet. Full design at [`docs/v3/`](docs/v3/) — see
-[`docs/v3/README.md`](docs/v3/README.md) for the reading order
-per audience (contributor / auditor / operator) and
-[`docs/v3/v3-vs-v2.md`](docs/v3/v3-vs-v2.md) for the per-entrypoint delta.
-
-## What's shielded, by layer
-
-The table below describes historical session designs, not the current prepaid
-Circle. In the current app, payer, operator, plan, balance and purchase metadata
-are public. Explicit nested routes encrypt payload carriage and now carry
-downstream control traffic through the preceding tunnel; accepted IP pins avoid
-operator bootstrap DNS. `payment_privacy: "shielded_required"` refuses to start
-because Circle settlement is not shielded. The final exit still sees the
-Internet destination, and application content needs end-to-end encryption.
-
-| Surface             | Shielded?      | Mechanism                                          |
-| ------------------- | -------------- | -------------------------------------------------- |
-| Tunnel contents     | yes            | WireGuard Noise IK                                 |
-| Onion peeling       | yes (data plane) | per-hop ChaCha20-Poly1305 layer; AML is single-hop |
-| Session→client link | yes            | ephemeral session pubkey, never wallet pubkey      |
-| Earnings            | yes            | HFHE ciphertexts; homomorphic accumulation on chain |
-| Payment recipients  | yes            | stealth outputs via Octra's X25519 ECDH scheme     |
-| WG handshake fingerprint | partial   | pluggable transport scaffolded; obfs4 wrapping pending |
-| Operator identity   | **v1.1: no.** Public `octV…` address. **v2: hidden via per-operator Circle** — sealed `/policy.json` carries the endpoint + WG pubkey; the chain only sees `circle_id` plus `from=deployer_wallet`, see `docs/v2-operator-key-hygiene.md` for the fresh-wallet rule | per-operator Circle + sealed AES-GCM asset + path-private `circle_asset_ciphertext_by_resource_key` fetch |
-| Exit egress IP      | **no (inherent)** | the exit must actually send the request to the public internet |
-
-The exit-IP limit is fundamental to *any* VPN. Mitigations: TLS-only
-browsing, layering Tor over OctraVPN, and (v2) Circle-native operator
-opacity so even the operator's wallet address is decoupled from a
-public registry entry.
-
-## Operators
-
-### v1.1
-
-Stake OU + register publicly:
-
-1. `bond_endpoint` value-bearing tx with `amount ≥ MIN_ENDPOINT_STAKE`
-   (default 1000 OCT).
-2. `register_endpoint(endpoint, wg_pubkey, hfhe_pubkey, initial_enc_zero, region, price_per_mb, receipt_pubkey)`.
-
-### v2
-
-Deploy your own Circle, upload sealed policy, register atomically.
-The node automates this — see [`docs/v2-operator-flow.md`](docs/v2-operator-flow.md):
-
-1. **Predict** `circle_id` deterministically from
-   `(deployer_wallet, nonce, deploy_payload)` (octra-core::circle).
-2. `deploy_circle` if the predicted id is not on chain yet.
-3. `circle_asset_put_encrypted` with the sealed `/policy.json` —
-   AES-GCM-256 + PBKDF2-SHA256-120k + `"OCRS1"` magic + padding class
-   (4k / 16k / 32k / 128k). The plaintext carries the WG endpoint,
-   pubkey, region, and tariffs; only tailnet members holding the
-   shared passphrase can read it.
-4. `register_circle(circle, receipt_pubkey_b64, region, price_shared, price_internal)`
-   carrying `value = MIN_CIRCLE_STAKE` — `register_circle` is
-   **payable + atomic** in v2 (the chicken-and-egg of "bond requires
-   owner / owner requires bond" surfaced in the live e2e and is
-   fixed at `program/main-v2.aml:488`).
-
-PVAC pubkey registration is a separate per-wallet step (run once,
-not per-circle) because Octra's PVAC registry is wallet-keyed:
-`octra cast register-pvac` (in the `octra-foundry` sibling) signs
-`"register_pvac|<addr>|<sha256_hex(pk)>"` and submits
-`octra_registerPvacPubkey`. v2 `fhe_load_pk(circles[c].owner)`
-then resolves to the wallet-registered key.
-
-Forensics tooling: every state-changing request lands in an
-HMAC-chained audit log next to the daemon, and every receipt-signing
-decision flushes through a persistent journal that prevents
-forced-restart double-signing (P1-8/P1-9). Operators inspect both
-with `octravpn-node audit replay --audit-path … --journal-path …`
-(structured timeline; supports `--session`, `--since/--until`, and
-`--format json` for log shipping) and verify integrity with
-`octravpn-node audit verify` (HMAC chain + journal monotonicity +
-cross-check; structured exit codes 0/1/2/3). See
-[`docs/operator-guide.md`](docs/operator-guide.md) §8a "Auditing
-receipt activity" for the runbook.
-
-Historical v1/v2 slashing design (these rows do not describe the prepaid
-Circle candidate; see its signed same-slot rule above). The current source
-disables opaque `slash_double_sign`, so the historical descriptions below are
-not evidence that this entrypoint can presently slash:
-
-| Condition                  | Evidence                                                      |
-| -------------------------- | ------------------------------------------------------------- |
-| In-AML equivocation        | same operator submits two `settle_claim` for the same session with different `bytes_used` |
-| Cryptographic equivocation | two distinct ed25519-signed receipt payloads under the operator's `receipt_pubkey` — see `slash_double_sign` |
-| Governance slash           | owner calls `gov_slash_operator(addr/circle, evidence)`       |
-| Unbond + sweep             | operator goes offline → 1% bounty to sweeper                  |
-
-## Repository layout
-
-```
-octra/                              # this repo
-├── program/                        # AppliedML on-chain programs
-│   ├── main.aml                    # v1.1 (deployed, oct2Yeh…)
-│   ├── main-v2.aml                 # v2 slim registry (deployed, oct3fxj…)
-│   └── operator-circle.aml         # in-circle program (per-operator)
-│
-├── crates/
-│   ├── octravpn-core/              # shared types + JSON-RPC + crypto +
-│   │                               #   receipt journal (P1-8/9) + sealed
-│   │                               #   key envelope (P1-6)
-│   ├── octravpn-node/              # operator daemon (v1.1 + v2 register
-│   │                               #   flows, seal-keys/unseal-keys cmds)
-│   ├── octravpn-client/            # CLI: includes `discover v2 <tid>`
-│   │                               #   and `connect-v2`
-│   ├── octra-circle-sim/           # Rust simulator for an OctraVPN Circle
-│   ├── octravpn-tun/               # TUN device wrapper
-│   ├── octravpn-mesh/              # mesh coordination scaffolding
-│   └── octravpn-admin-ui/          # operator admin web UI
-│
-├── pvac-sidecar/                   # GPL-isolated HFHE blob producer
-│                                   #   (JSON-over-stdio; not linked into
-│                                   #   the Rust workspace's MIT/Apache crates)
-│
-├── proofs/
-│   ├── lean/                       # OctraVPN (v1.1) + OctraVPN_V2 modules
-│   ├── tla/                        # OctraVPN.tla + OctraVPN_V2.tla
-│   ├── tamarin/                    # Dolev-Yao crypto-protocol model (advisory)
-│   └── kani/                       # bounded model checks
-│
-├── tests/e2e/                      # full-flow integration tests vs mock RPC
-├── docker/                         # Dockerfiles, compose harness, e2e scripts
-│   └── devnet/                     # e2e-adversarial-v2.sh (45 cases)
-├── docker-compose.yml
-└── docs/                           # see Documentation table below
-```
-
-### Build dependencies
-
-| Repo | Role |
+| Rule | Behavior |
 | --- | --- |
-| [octra-foundry](https://github.com/androolloyd/octra-foundry) | `octraforge` (Forge), `octra-mock-rpc` (Anvil), `octra-core` (types + Circle primitive: `circle_id_of_deploy`, sealed-envelope codec, `resource_key`), `octra-cli` (`cast circle …`, `cast register-pvac`) |
-| [headscale-rs](https://github.com/androolloyd/headscale-rs) | Embedded mesh coordination and admin API, fetched by Cargo at `570fa5a60c8ed792b643a301b5e91d3b668ba614` |
+| Protocol commission | Zero. Payments go directly to operators. |
+| Available channel OCT | Withdrawable immediately. Settled byte purchases stay final. |
+| Operator earnings | Can fund outgoing traffic without a withdrawal and redeposit. |
+| Rate changes | Activate after 24 hours. Purchased bytes keep their accepted price. |
+| Operator unstaking | Seven-day delay. |
+| Transaction fees | Ordinary Octra transaction fees apply separately. |
+
+There are no automatic top-ups or operator credit lines. Buying bytes does not
+prove delivery of arbitrary Internet traffic. The exact custody, allowance and
+withdrawal rules are in the [payment design](docs/architecture/octranet-payment-tier.md)
+and [operator guide](docs/operators/payment-plans.md).
+
+WireGuard encrypts tunnel traffic. An exit operator can still observe
+destinations, and applications need HTTPS or equivalent protection beyond the
+exit. Standard prepaid settlement exposes payment metadata; experimental
+shielded settlement has separate setup and security requirements. See the
+[security documentation](docs/security.md) for the trust assumptions.
+
+## Build from source
+
+Install Rust through [rustup](https://rustup.rs), a C/C++ build toolchain and
+`protoc`. The repository selects Rust **1.96.0**. Clone Foundry beside this
+checkout at the revision used by CI:
 
 ```sh
-mkdir octravpn-workspace && cd $_
+mkdir octravpn-workspace
+cd octravpn-workspace
 git clone https://github.com/androolloyd/octravpn.git octra
 git clone https://github.com/androolloyd/octra-foundry.git
 git -C octra-foundry checkout c9011f1f4dfeee3c7c726feb4b4cd337477f866a
-cd octra && cargo build --locked --workspace
+cd octra
+cargo build --locked --release -p octra-node -p octravpn-client -p octravpn-node
 ```
 
-Foundry is the sibling path dependency. A separate Headscale checkout is optional
-for its own development and tests; editing it does not change the pinned build.
+This builds `octra-node`, the `octravpn` client and the standalone
+`octravpn-node` operator. Cargo fetches `headscale-rs` at its pinned revision;
+a separate Headscale checkout is optional. See
+[dependency strategy](docs/architecture/headscale-dep-strategy.md).
 
-> Single-binary install: `octravpn-node` now embeds the entire
-> `headscale` admin CLI under `octravpn-node headscale …`. You no
-> longer need to build / install the standalone `headscale` binary
-> alongside the node — see
-> [`docs/operators/cli-migration.md`](docs/operators/cli-migration.md).
-
-## Quickstart — local
-
-Prereqs: **Rust** via [rustup](https://rustup.rs) (the repo's
-`rust-toolchain.toml` auto-selects 1.96.0 — no manual version pick) and the
-**Foundry sibling** cloned at the revision above, per
-[Build dependencies](#build-dependencies).
+Start an isolated four-validator development chain:
 
 ```sh
-# Build everything with the pinned dependencies
-cargo build --locked --workspace --release
-
-# Run unit + integration + e2e tests (uses in-process mock RPC)
-cargo test --locked --release --workspace
+target/release/octra-node init-devnet --directory out/native-devnet
+python3 scripts/devnet/native.py start --binary target/release/octra-node
+python3 scripts/devnet/native.py status
 ```
 
-## Tests
+Initialization requires a new directory. This chain is local; joining public
+devnet requires independently configured network trust and an authenticated
+bootstrap. Follow the [node guide](docs/rust-node/devnet.md) for public startup,
+Circle browsing and retained-state restart. Stop the local chain with
+`python3 scripts/devnet/native.py stop`.
 
-The one-command answer to "did my change break anything" is
-[`./scripts/test-all.sh`](scripts/test-all.sh) — it runs the full
-required gate (workspace build, `cargo test`, `cargo test -p
-octravpn-mesh --features test-helpers`, clippy with `-D warnings`,
-and the bench-regression check against
-[`bench-snapshots/core.json`](bench-snapshots/core.json)). Adversarial
-devnet drills (`OCTRA_RUN_DRILLS=1`) and the v3 smoke
-(`OCTRA_RUN_SMOKE=1`) are opt-in because they need a funded wallet.
-See [`docs/contributing-tests.md`](docs/contributing-tests.md) for the
-full surface-by-surface breakdown.
+## Circles and octra.to
 
-## Quickstart — Docker
+[octra.to](https://octra.to) is the front door for onboarding and public Circle
+browsing. Its portal assets are published in a Circle; the Rust gateway reads
+canonical state and serves them over HTTPS. Public service availability remains
+a launch gate.
 
-Prereqs: a **running Docker daemon** — Docker Desktop, [OrbStack](https://orbstack.dev),
-or Colima on macOS — plus the `octra-foundry` sibling. The nodes run
-*userspace* WireGuard (boringtun), so **no privileged container,
-`/dev/net/tun`, or kernel module is required** — the harness runs as-is on
-macOS (Apple silicon included).
+An `oct://<CircleAddress>/path` identifies a Circle resource. A client handler or
+HTTPS gateway resolves it. DNS alone cannot make arbitrary applications
+understand the `oct://` scheme. Circle addresses stay in URL paths because their
+case is significant. See the [gateway guide](docs/rust-node/devnet.md#https-access-through-tailscale)
+and [site bundle](sites/octra-to/README.md).
+
+## Development and verification
 
 ```sh
-# Build the full image set (Docker context is the parent dir so
-# the foundry sibling is reachable)
-docker compose build
-
-# Boot mock RPC + 3 operator nodes
-docker compose up -d mock-rpc node1 node2 node3
-
-# Smoke: list active endpoints (v1.1)
-./docker/e2e.sh
-
-# Full tailnet happy-path (v1.1)
-./docker/e2e-tailnet.sh
-
-# v2 adversarial drill (45/45 holds)
-./docker/devnet/e2e-adversarial-v2.sh
+./scripts/test-all.sh
 ```
 
-## Deploying the on-chain programs
+The required gate builds and tests the workspace, runs strict Clippy and checks
+benchmark regressions. Public-chain drills and Docker smoke tests are explicit
+opt-ins. Privileged kernel transport, private payments and public deployment
+have additional gates; a green unit suite does not qualify a launch.
 
-Full flow lives in [`docs/architecture.md`](docs/architecture.md). The
-v1.1 program is in `program/main.aml`, the v2 slim registry is in
-`program/main-v2.aml`, and each operator's in-circle program is in
-`program/operator-circle.aml`.
+Formal models and executable tests cover specific payment and protocol
+properties. Their scope and assumptions are recorded with the evidence; they do
+not establish complete implementation correctness or prove Internet delivery.
 
-Deploys go through `octraforge`. `--key` and `--rpc-url` are **required**,
-and constructor args are **space-separated** (not a JSON array). The five
-params are `min_session_deposit min_tailnet_deposit min_circle_stake
-session_grace_epochs unbond_grace_epochs`:
-
-```sh
-# v2 slim registry (one per chain)
-octra forge create program/main-v2.aml \
-  --key path/to/deployer.key \
-  --rpc-url https://devnet.octrascan.io/rpc \
-  --constructor-args 100 10 1000000000 100 1000
-
-# v3 chain-minimal program (same constructor shape). This exact
-# invocation deployed + `contract_verify`'d the live devnet v3.
-octra forge create program/main-v3.aml \
-  --key path/to/deployer.key \
-  --rpc-url https://devnet.octrascan.io/rpc \
-  --constructor-args 100 1000 100000000 100 1000
-
-# Per-operator circle is automated by `octravpn-node v2 register`
-```
-
-The compile-gate CI job re-runs `octra_compileAml` against the
-live mainnet RPC on every PR.
-
-## Formal verification
-
-| Layer               | Tool      | Scope                                           |
-| ------------------- | --------- | ----------------------------------------------- |
-| State machine v1.1  | TLA+      | `OctraVPN.tla` — 12 invariants, 223,118 distinct states, depth 26 |
-| State machine v2    | TLA+      | `OctraVPN_V2.tla` — circle-keyed, atomic register-bond, per-class price-stamp, 3,805,681 distinct states, depth 31 |
-| Program semantics   | Lean 4    | OctraVPN + OctraVPN_V2 + OctraVPN_V3 + OctraVPN_Rust + WireProtocol modules in `proofs/lean/` — 373 theorems / 0 `sorry` |
-| Prepaid channels    | Lean 4    | `OctranetPayments.lean` — 39 abstract payment theorems; no compiler/VM refinement or Internet-delivery theorem |
-| Crypto protocol     | Tamarin   | receipt unforgeability, double-sign slashable, no link before settle (advisory) |
-| Rust implementation | Kani      | receipt round-trip, monotonic check, payload determinism |
-| Rust runtime        | proptest  | 30 harnesses across `octravpn-core` + `octravpn-mesh` — canonicalization, monotonic seq, security, receipt context binding, sweep determinism |
-
-Run them via:
-
-```sh
-cd proofs/tla && java -cp tla2tools.jar tlc2.TLC -workers auto -deadlock OctraVPN -config OctraVPN.cfg
-cd proofs/tla && java -cp tla2tools.jar tlc2.TLC -workers auto -deadlock OctraVPN_V2 -config OctraVPN_V2.cfg
-cd proofs/lean && lake build
-cd proofs/kani && cargo kani
-cargo test --workspace
-```
-
-## What's blocked
-
-- **Public paid onboarding remains unqualified.** Local packet and custody
-  qualification plus devnet Circle publication and a bounded paid HTTP probe
-  do not establish sustained public service or trusted DNS/TLS for `octra.to`.
-  Mainnet is a separate launch gate.
-- **Public HFHE settlement remains unqualified.** The May 20 key-load
-  blocker was historical. The October 17 recheck found no registered key
-  for its test wallet, outdated RPC arguments and a nonexistent probe method.
-  Actual compiled AML loads and serializes a production-profile key in the
-  local Rust runtime, including missing/corrupt-source controls. Public devnet
-  and Mainnet require fresh registered-key execution evidence before encrypted
-  settlement can be claimed. See [current observations](docs/audit/fhe-load-pk-status.json).
-
-## Threat model
-
-- **Adversary**: Dolev-Yao network attacker; can compromise individual
-  operator keys or session keys.
-- **Trust assumption**: Octra validator set is honest-majority.
-- **What's *not* defended**: a fully malicious exit hop logs the
-  destinations of egress traffic — fundamental to any VPN. v2 hides
-  the operator's *identity* (sealed policy + path-private fetch) but
-  not the exit IP. Operator-side key hygiene matters because
-  `deploy_circle` is a normal tx with `from=deployer → to_=circle_id`
-  permanently recorded — see [`docs/v2-operator-key-hygiene.md`](docs/v2-operator-key-hygiene.md).
-
-Full cryptographic threat model in [`docs/v2-threat-model.md`](docs/v2-threat-model.md)
-(18-item fix queue; **P0-1 / P0-2 / P0-3 / P1-5 / P1-6 / P1-8 / P1-9 / P1-10
-all FIXED in source as of `d6b3930`**).
-
-## Documentation
-
-| File | What's in it |
+| Start here | Guide |
 | --- | --- |
-| [`docs/v2-release-notes.md`](docs/v2-release-notes.md) | v2 substrate — what shipped, commit-by-commit |
-| [`docs/v1.1-release-notes.md`](docs/v1.1-release-notes.md) | v1.1 cryptographic `slash_double_sign` notes |
-| [`docs/architecture.md`](docs/architecture.md) | Long-form system design (v1.1 + v2) |
-| [`docs/v2-circles-design.md`](docs/v2-circles-design.md) | v2 Circle-native architecture (status snapshot in §0) |
-| [`docs/v2-threat-model.md`](docs/v2-threat-model.md) | Cryptographic threat model + 18-item fix queue |
-| [`docs/v2-operator-flow.md`](docs/v2-operator-flow.md) | Operator runbook for v2 (deploy + register) |
-| [`docs/v2-client-flow.md`](docs/v2-client-flow.md) | Client runbook for v2 (discover + connect-v2) |
-| [`docs/v2-operator-key-hygiene.md`](docs/v2-operator-key-hygiene.md) | Fresh-wallet rule + sealed-key mode |
-| [`pvac-sidecar/README.md`](pvac-sidecar/README.md) | GPL-isolated HFHE blob producer |
-| [`docs/aml-grammar.md`](docs/aml-grammar.md) | AppliedML grammar reference |
-| [`docs/security.md`](docs/security.md) | v1.1 threat model + formal-verification correspondence |
-| [`docs/economics.md`](docs/economics.md) | OU-only design, money flows, operator P&L |
-| [`docs/governance.md`](docs/governance.md) | Roles, parameters, decentralization roadmap |
-| [`docs/operators/mainnet-deployment.md`](docs/operators/mainnet-deployment.md) | **Mainnet deployment runbook** — clean host → paid v3 node |
-| [`docs/operator-guide.md`](docs/operator-guide.md) | Day-2 operator guide (audit CLI, rotation, etc.) |
-| [`docs/install.md`](docs/install.md) | Per-OS install (general / try-it-out) |
-| [`docs/octra-research.md`](docs/octra-research.md) | Public-info dossier on the Octra chain |
+| Run a node | [Local and public devnet](docs/rust-node/devnet.md) |
+| Operate a paid exit | [Payment plans](docs/operators/payment-plans.md) |
+| Use Tailscale clients | [Stock paid exits](docs/architecture/stock-paid-exit.md) |
+| Build nested routes | [Multi-hop design](docs/architecture/nested-paid-exits.md) |
+| Inspect verification | [Formal models](proofs/lean/README.md) and [qualification status](docs/rust-node/status.md) |
+| Watch recorded flows | [Demos and recordings](demo/README.md) |
+| Report a vulnerability | [Security policy](SECURITY.md) |
+| Explore the project | [Documentation index](docs/README.md) |
 
 ## License
 
-MIT OR Apache-2.0 for the Rust workspace + AML programs.
-GPL-2+ (with OpenSSL exemption) for `pvac-sidecar/` — isolated as a
-separate process; no GPL symbols cross into the Rust crates.
-
-Latest RC status and deployment instructions: [canary security review](docs/audit/2026-10-11-canary-security.md).
+The workspace is licensed under [MIT](LICENSE-MIT) or
+[Apache-2.0](LICENSE-APACHE). Bundled components retain their own licenses;
+see the [PVAC sidecar documentation](pvac-sidecar/README.md).
