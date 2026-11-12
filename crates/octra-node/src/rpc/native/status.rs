@@ -307,7 +307,7 @@ async fn epoch_proof(
     }
     Ok(proof)
 }
-// Native public_tx_data hides private Circle code even in inclusion proofs.
+// Native public_tx_data hides private Circle and account payloads in proofs.
 fn public_tx_data(raw: &[u8]) -> std::result::Result<Vec<u8>, Fault> {
     let doc = Document::parse(raw).map_err(unavailable)?;
     let Value::Object(fields) = doc.root() else {
@@ -323,7 +323,7 @@ fn public_tx_data(raw: &[u8]) -> std::result::Result<Vec<u8>, Fault> {
     let ops = values(b"op_type");
     if !ops
         .iter()
-        .any(|v| matches!(v,Value::String(v)if v==b"deploy_circle"||v==b"circle_program_update"))
+        .any(|v| matches!(v,Value::String(v)if matches!(v.as_slice(), b"deploy_circle" | b"circle_program_update" | b"circle_asset_put_encrypted" | b"circle_sealed_slot_put" | b"circle_balance_cell_put" | b"circle_register_cell_put" | b"circle_call" | b"stealth" | b"claim")))
     {
         return Ok(raw.to_vec());
     }
@@ -365,6 +365,31 @@ mod tests {
     use octra_node_protocol::epoch_index;
     use octra_node_runtime::{canonical::CanonicalStore, state_batch::StateBatch};
 
+    #[test]
+    fn public_inclusion_proofs_hide_private_payloads_and_ambiguous_operations() {
+        for operation in [
+            "circle_program_update",
+            "circle_asset_put_encrypted",
+            "circle_sealed_slot_put",
+            "circle_balance_cell_put",
+            "circle_register_cell_put",
+            "circle_call",
+            "stealth",
+            "claim",
+        ] {
+            let raw =
+                serde_json::to_vec(&serde_json::json!({"op_type":operation,"message":"secret"}))
+                    .unwrap();
+            assert_eq!(public_tx_data(&raw).unwrap(), b"null");
+        }
+        let public = br#"{"op_type":"standard","message":"public"}"#;
+        assert_eq!(public_tx_data(public).unwrap(), public);
+        let duplicate = br#"{"op_type":"standard","op_type":"stealth","message":"secret"}"#;
+        assert_eq!(public_tx_data(duplicate).unwrap(), b"null");
+        let deployment =
+            br#"{"op_type":"deploy_circle","message":"{\"privacy_class\":\"public\"}"}"#;
+        assert_eq!(public_tx_data(deployment).unwrap(), deployment);
+    }
     #[tokio::test]
     async fn epoch_tag_rpc_reads_actual_backend_metadata_without_serving_admission() {
         // Native Status_read_rpc.epoch_tags reads Store_irmin directly rather

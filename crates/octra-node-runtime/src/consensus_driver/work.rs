@@ -43,6 +43,17 @@ impl<H: Host, C: Publication> Driver<H, C> {
             .chain(self.publish_retry)
             .chain(self.sync_retry.as_ref().map(|retry| retry.deadline))
             .chain(
+                self.value_restore
+                    .as_ref()
+                    .filter(|_| self.work.is_empty())
+                    .map(|_| self.value_retry),
+            )
+            .chain(
+                self.proof_search
+                    .as_ref()
+                    .map(|_| Instant::now() + Duration::from_millis(2100)),
+            )
+            .chain(
                 self.pending_checks
                     .values()
                     .filter(|c| self.work.is_empty() && self.current(&c.proposal))
@@ -55,11 +66,12 @@ impl<H: Host, C: Publication> Driver<H, C> {
     pub(super) fn current(&self, p: &Proposal) -> bool {
         p.epoch_id == self.engine.state().height
             && p.epoch_id > self.publication.head_epoch()
-            && driver_policy::proposal_verify_relevant(
+            && (driver_policy::proposal_verify_relevant(
                 self.engine.state().round,
                 self.engine.state().step,
                 p.round,
-            )
+            ) || self.engine.past_proposal_needed(p).unwrap_or(false)
+                || self.engine.current_proposal_needed(p).unwrap_or(false))
     }
     pub(super) fn queue_check(&mut self, peer: Peer, proposal: Proposal) {
         self.pending_checks
@@ -80,8 +92,15 @@ impl<H: Host, C: Publication> Driver<H, C> {
         let height = state.height;
         let round = state.round;
         let step = state.step;
-        self.pending_checks
-            .retain(|&(epoch, r), _| epoch > height || epoch == height && r >= round);
+        self.pending_checks.retain(|&(epoch, r), check| {
+            epoch > height
+                || epoch == height
+                    && (r >= round
+                        || self
+                            .engine
+                            .past_proposal_needed(&check.proposal)
+                            .unwrap_or(false))
+        });
         let check = self
             .pending_checks
             .values()
@@ -93,18 +112,46 @@ impl<H: Host, C: Publication> Driver<H, C> {
             step,
             started_at: self.now(),
         };
-        if let Some(check) = check {
+        if let Some(proposal) = self
+            .value_restore
+            .clone()
+            .filter(|_| self.value_retry <= Instant::now())
+        {
+            self.active_work = Some(active);
+            self.checking = true;
+            let host = self.host.clone();
+            self.work.spawn(async move {
+                let result = host.verify_parent(proposal.epoch_id, proposal.parent_commit.as_ref());
+                let result = match result {
+                    Ok(()) => host.verify(&proposal).await,
+                    Err(reason) => Err(reason),
+                };
+                Work::Restore {
+                    generation,
+                    proposal,
+                    result,
+                }
+            });
+        } else if let Some(check) = check {
             let peer = check.peer.clone();
             let proposal = check.proposal.clone();
             let host = self.host.clone();
             // Future messages are authenticated again against the activated set.
-            if driver_policy::validate_proposal_frame(
-                &self.chain,
-                self.engine.validators(),
-                self.engine.protocol(),
-                &proposal,
-            )?
-            .is_some()
+            let historical = self.engine.past_proposal_needed(&proposal)?
+                && octra_node_protocol::consensus::engine::proof_proposal_valid(
+                    &self.chain,
+                    self.engine.validators(),
+                    self.engine.protocol(),
+                    &proposal,
+                )?;
+            if !historical
+                && driver_policy::validate_proposal_frame(
+                    &self.chain,
+                    self.engine.validators(),
+                    self.engine.protocol(),
+                    &proposal,
+                )?
+                .is_some()
             {
                 self.pending_checks
                     .remove(&(proposal.epoch_id, proposal.round));
@@ -154,6 +201,27 @@ impl<H: Host, C: Publication> Driver<H, C> {
         self.active_work = None;
         self.refresh();
         match work {
+            Work::Restore {
+                generation,
+                proposal,
+                result,
+            } if generation == self.engine.generation()
+                && proposal.epoch_id == self.engine.state().height =>
+            {
+                match result {
+                    Ok(Verdict::Accept) => {
+                        self.engine.learn_recovered_proposal(proposal)?;
+                        self.value_restore = None;
+                    }
+                    Ok(Verdict::Reject) => self.value_restore = None,
+                    result => {
+                        if let Err(reason) = result {
+                            self.host.warning(&reason.to_string());
+                        }
+                        self.value_retry = Instant::now() + Duration::from_millis(500);
+                    }
+                }
+            }
             Work::Build {
                 generation,
                 height,
@@ -217,6 +285,10 @@ impl<H: Host, C: Publication> Driver<H, C> {
                     if verdict == Verdict::Accept && proposal.round > self.engine.state().round {
                         self.verified
                             .insert((proposal.epoch_id, proposal.round), proposal.clone());
+                    }
+                    if verdict == Verdict::Accept && self.engine.past_proposal_needed(&proposal)? {
+                        self.engine
+                            .learn_past_proposal(proposal.clone(), &mut |_| Ok(true))?;
                     }
                     self.engine.on_proposal(
                         proposal.clone(),

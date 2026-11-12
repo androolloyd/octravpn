@@ -94,7 +94,12 @@ struct Running {
 }
 impl Running {
     fn start<A: Host>(driver: Live<A>) -> Self {
-        Self::spawn(|signal| async move { driver.run(signal).await.map_err(anyhow::Error::from) })
+        Self::spawn(|signal| {
+            // A generation owns the large driver state machine independently
+            // of the recovery supervisor's future and task allocation.
+            let running = Box::pin(driver.run(signal));
+            async move { running.await.map_err(anyhow::Error::from) }
+        })
     }
     fn spawn<F: std::future::Future<Output = Result<()>> + Send + 'static>(
         run: impl FnOnce(watch::Receiver<bool>) -> F,

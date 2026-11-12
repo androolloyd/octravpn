@@ -110,6 +110,7 @@ fn evaluate(input: &Value, expected: &Value) -> Value {
                 profile: &profile,
                 duty: head.map(|h| (h, mode)),
                 limits,
+                duty_marks: false,
             };
             let post = Postcheck {
                 preverify_has_capacity: bool(c, "capacity"),

@@ -79,6 +79,7 @@ fn fixture() -> (PendingCommit, Precommit, Proposal, Rules) {
             compute: mode("compute"),
             settle: mode("settle"),
         },
+        signing: octra_node_protocol::tx_signature::Mode::Historical,
     };
     (pending, request, proposal, rules)
 }

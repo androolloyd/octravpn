@@ -247,6 +247,8 @@ async fn pristine_single_sender_footer_tree_and_commit_bytes() {
                 .unwrap();
             let ledger = account_store::ledger(&state).unwrap();
             let profile = octra_node_runtime::private_balance::Profile {
+                keyed: false,
+                registered: false,
                 fields: context.private_payload,
                 strict: false,
                 math: octra_hfhe::scalar::ScalarRule::Prior,

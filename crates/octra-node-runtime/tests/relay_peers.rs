@@ -136,6 +136,7 @@ async fn vote_guard_requires_durable_local_vote_before_peer_publication() {
             compute: mode("compute"),
             settle: mode("settle"),
         },
+        signing: octra_node_protocol::tx_signature::Mode::Historical,
     };
     let proposal =
         Proposal::decode(&hex::decode(call["proposal"].as_str().unwrap()).unwrap()).unwrap();

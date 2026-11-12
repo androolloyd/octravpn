@@ -29,7 +29,9 @@ impl Native {
     ) -> std::result::Result<Verified, Fault> {
         match tokio::task::spawn_blocking(move || {
             let _lease = lease.0;
-            verification::verify(material, source_entry, &stored_base64)
+            super::compiler::on_compiler_stack(move || {
+                verification::verify(material, source_entry, &stored_base64)
+            })
         })
         .await
         {

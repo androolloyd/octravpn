@@ -589,12 +589,7 @@ impl Parser<'_> {
         } else {
             self.function(modifiers)?
         };
-        if !self.prior
-            && contract
-                .functions
-                .iter()
-                .any(|prior| prior.name == function.name)
-        {
+        if !self.prior && !self.function_names.insert(function.name.clone()) {
             return Err(
                 self.error([b"duplicate function name = ".as_slice(), &function.name].concat())
             );

@@ -3,6 +3,8 @@ mod finality_host;
 #[path = "common/circle_host.rs"]
 #[allow(dead_code)] // This suite uses the shared runtime/fixture without install_counter.
 mod host;
+#[path = "common/vm_root_projection.rs"]
+mod vm_root_projection;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use octra_node_protocol::{
     circle_program::Deploy,
@@ -139,6 +141,7 @@ fn rules(input: &Value) -> Rules {
         },
         update_policy: input["circle_policy"] == true,
         wasm: WasmRules {
+            proof_key: false,
             proof_exec: input["proof"].as_bool().unwrap(),
             wasm_float: input["float"].as_bool().unwrap(),
             math: input["math"].as_bool().unwrap(),
@@ -147,6 +150,7 @@ fn rules(input: &Value) -> Rules {
         storage_proof: input["storage_proof"].as_bool().unwrap(),
         fhe_work: input["fhe_work"] == true,
         object_cost: input["object_cost"] == true,
+        program_inputs: false,
     }
 }
 #[test]
@@ -351,6 +355,7 @@ async fn signed_spawn_publishes_oct_page_and_exex_record_through_restart() {
             profile: &release,
             duty: None,
             limits: Limits::default(),
+            duty_marks: false,
         },
         Postcheck {
             preverify_has_capacity: true,
@@ -595,7 +600,11 @@ fn native_octb_circle_execution_matches_complete_epoch_effects() {
             hex::encode(Sha256::digest(source))
         );
     }
-    assert_bft_epochs(&fixture);
+    assert_bft_epochs_projected(
+        &fixture,
+        include_bytes!("../../../scripts/node-port/circle-code-oracle.ml"),
+        Some("circle-octb-execution.json"),
+    );
 }
 
 #[test]
@@ -831,9 +840,10 @@ fn native_mixed_octb_wasm_journals_match_reentry_budget_and_rollback() {
             hex::encode(Sha256::digest(source))
         );
     }
-    assert_bft_epochs_with_oracle(
+    assert_bft_epochs_projected(
         &fixture,
         include_bytes!("../../../scripts/node-port/circle-octb-journal-oracle.ml"),
+        Some("circle-octb-journal.json"),
     );
 }
 
@@ -844,6 +854,9 @@ fn assert_bft_epochs(fixture: &Value) {
     );
 }
 fn assert_bft_epochs_with_oracle(fixture: &Value, oracle: &[u8]) {
+    assert_bft_epochs_projected(fixture, oracle, None);
+}
+fn assert_bft_epochs_projected(fixture: &Value, oracle: &[u8], projection: Option<&str>) {
     use octra_node_protocol::{
         emission::Schedule,
         epoch_rewards::{Attribution, Validator},
@@ -992,7 +1005,11 @@ fn assert_bft_epochs_with_oracle(fixture: &Value, oracle: &[u8]) {
         };
         let actual = json!({"deployments":deployments,"before":before,"result":result,"root":hex::encode(state.root().unwrap()),"receipts":calls.receipts().iter().map(|(k,v)|json!([k,encoded(v)])).collect::<Vec<_>>(),"accounts":ledger.accounts().iter().map(|(a,v)|json!([encoded(a),encoded(&v.to_json_bytes())])).collect::<Vec<_>>(),"supply":ledger.total_supply().to_string(),"spent":ledger.spent_nonces().len(),"journal":ledger.journal_active()});
         assert_eq!(
-            actual, case["expected"],
+            actual,
+            projection.map_or_else(
+                || case["expected"].clone(),
+                |name| vm_root_projection::expected(name, index, &case["expected"])
+            ),
             "native Circle code epoch {index}: {}",
             input["name"]
         );

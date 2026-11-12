@@ -27,6 +27,9 @@ pub fn is_hash(value: &[u8]) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
 }
 pub fn parse_message(raw: &[u8]) -> Result<Vec<u8>, Error> {
+    parse_message_for(SCHEMA, raw)
+}
+pub fn parse_message_for(expected_schema: &[u8], raw: &[u8]) -> Result<Vec<u8>, Error> {
     let doc = Document::parse_native(raw, ReadMode::Tree).map_err(|error| match error {
         ReadError::Json { .. } => Error::Rejected("program upgrade payload invalid"),
         ReadError::Unavailable(error) => Error::Unavailable(error),
@@ -50,7 +53,7 @@ pub fn parse_message(raw: &[u8]) -> Result<Vec<u8>, Error> {
     let (Some(schema), Some(hash)) = (one(b"schema"), one(b"expected_code_hash")) else {
         return Err(Error::Rejected("program upgrade payload invalid"));
     };
-    if schema != SCHEMA {
+    if schema != expected_schema {
         Err(Error::Rejected("program upgrade schema mismatch"))
     } else if !is_hash(hash) {
         Err(Error::Rejected(
@@ -81,6 +84,21 @@ pub fn parse(tx: &Transaction) -> Result<Upgrade, Error> {
 pub fn message(expected_code_hash: &[u8]) -> Vec<u8> {
     let mut out = b"{\"schema\":".to_vec();
     json_string(&mut out, SCHEMA);
+    out.extend_from_slice(b",\"expected_code_hash\":");
+    json_string(&mut out, expected_code_hash);
+    out.push(b'}');
+    out
+}
+
+/// Source publication uses the existing upgrade transaction envelope.
+pub fn is_source(tx: &Transaction) -> bool {
+    tx.message
+        .as_deref()
+        .is_some_and(|raw| parse_message_for(crate::program_record::source::SCHEMA, raw).is_ok())
+}
+pub fn source_message(expected_code_hash: &[u8]) -> Vec<u8> {
+    let mut out = b"{\"schema\":".to_vec();
+    json_string(&mut out, crate::program_record::source::SCHEMA);
     out.extend_from_slice(b",\"expected_code_hash\":");
     json_string(&mut out, expected_code_hash);
     out.push(b'}');

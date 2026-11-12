@@ -14,7 +14,10 @@ use octra_node_runtime::{
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, sync::Mutex};
+use std::{
+    collections::BTreeMap,
+    sync::{Mutex, OnceLock},
+};
 
 #[path = "common/finality_host.rs"]
 mod finality_host;
@@ -34,15 +37,84 @@ fn graph(v: &Value) -> Graph {
 fn parent(v: &Value) -> Option<ParentCommit> {
     (!v["parent"].is_null()).then(|| ParentCommit::decode(&raw(&v["parent"])).unwrap())
 }
+fn candidate_rules() -> &'static Value {
+    static FIXTURE: OnceLock<Value> = OnceLock::new();
+    FIXTURE.get_or_init(|| {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../octra-node-protocol/tests/fixtures/consensus-staged-c49.json"
+        ))
+        .unwrap();
+        let candidate: Value = serde_json::from_str(include_str!(
+            "../../../docs/rust-node/source-map-candidate.json"
+        ))
+        .unwrap();
+        assert_eq!(fixture["upstream_commit"], candidate["upstream_commit"]);
+        for (path, hash) in fixture["source_sha256"].as_object().unwrap() {
+            assert_eq!(hash, &candidate["files"][path], "{path}");
+        }
+        assert_eq!(
+            fixture["oracle_sha256"],
+            hex::encode(Sha256::digest(include_bytes!(
+                "../../../scripts/node-port/candidate-consensus-oracle.ml"
+            )))
+        );
+        fixture
+    })
+}
 fn plans(v: &Value) -> BTreeMap<i64, Vec<u8>> {
-    v["plans"]
+    let mut plans: BTreeMap<_, _> = v["plans"]
         .as_array()
         .unwrap()
         .iter()
         .filter(|p| !p.is_null())
         .map(|p| (p[0].as_i64().unwrap(), raw(&p[1])))
-        .collect()
+        .collect();
+    // The historical oracle's 'good' source predates five candidate rules.
+    // Supply only native-derived anchor inputs; candidate outcomes are separately captured.
+    if let Some(native) = candidate_rules()["graph"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["input"]["chain"] == v["chain"])
+    {
+        for plan in native["expected"]["plans"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|plan| !plan.is_null())
+        {
+            let (epoch, root) = (plan[0].as_i64().unwrap(), raw(&plan[1]));
+            if let Some(old) = plans.insert(epoch, root.clone()) {
+                assert_eq!(old, root, "native anchor drift {epoch}");
+            }
+        }
+    }
+    plans
 }
+fn preview(input: &Value) -> Value {
+    let plans = plans(input);
+    Bound::resolve(
+        &graph(input),
+        input["epoch"].as_i64().unwrap(),
+        parent(input),
+        &[],
+        &|epoch| match input["roots"][epoch.to_string()]
+            .as_str()
+            .unwrap_or(input["default"].as_str().unwrap())
+        {
+            "missing" => RootRead::Missing,
+            "bad" => RootRead::Root(b"wrong-root".to_vec()),
+            "unreadable" => RootRead::Unreadable(b"disk unavailable".to_vec()),
+            "good" => plans
+                .get(&epoch)
+                .cloned()
+                .map_or(RootRead::Missing, RootRead::Root),
+            _ => panic!("unknown root mode"),
+        },
+    )
+    .map_or_else(|error| json!({"error":error.0}), |bound| summary(&bound))
+}
+
 fn summary(bound: &Bound) -> Value {
     let active = |mode| mode == RuleMode::Active;
     json!({"manifest":bound.circle.manifest.name(),"update_policy":bound.circle.update_policy,"object_cost":bound.object_cost,
@@ -74,30 +146,93 @@ fn native_preview_rule_selection_and_fault_precedence() {
     ] {
         assert_eq!(fixture[key], hex::encode(Sha256::digest(bytes)), "{key}");
     }
-    for (index, case) in fixture["cases"].as_array().unwrap().iter().enumerate() {
-        let input = &case["input"];
-        let plans = plans(input);
-        let result = Bound::resolve(
-            &graph(input),
-            input["epoch"].as_i64().unwrap(),
-            parent(input),
-            &[],
-            &|e| match input["roots"][e.to_string()]
-                .as_str()
-                .unwrap_or(input["default"].as_str().unwrap())
-            {
-                "missing" => RootRead::Missing,
-                "bad" => RootRead::Root(b"wrong-root".to_vec()),
-                "unreadable" => RootRead::Unreadable(b"disk unavailable".to_vec()),
-                "good" => plans
-                    .get(&e)
-                    .cloned()
-                    .map_or(RootRead::Missing, RootRead::Root),
-                _ => panic!("unknown root mode"),
-            },
+    let current: Value =
+        serde_json::from_str(include_str!("fixtures/execution-rules-c49.json")).unwrap();
+    let candidate: Value = serde_json::from_str(include_str!(
+        "../../../docs/rust-node/source-map-candidate.json"
+    ))
+    .unwrap();
+    assert_eq!(current["upstream_commit"], candidate["upstream_commit"]);
+    for (path, hash) in current["source_sha256"].as_object().unwrap() {
+        assert_eq!(hash, &candidate["files"][path], "{path}");
+    }
+    for (key, bytes) in [
+        (
+            "oracle_sha256",
+            include_bytes!("../../../scripts/node-port/candidate-execution-rules-oracle.ml")
+                .as_slice(),
+        ),
+        (
+            "runner_sha256",
+            include_bytes!("../../../scripts/node-port/candidate-execution-rules-oracle.py")
+                .as_slice(),
+        ),
+        (
+            "dependency_runner_sha256",
+            include_bytes!("../../../scripts/node-port/candidate-rule-activation-oracle.py")
+                .as_slice(),
+        ),
+        (
+            "historical_fixture_sha256",
+            include_bytes!("fixtures/execution-rules.json").as_slice(),
+        ),
+    ] {
+        assert_eq!(current[key], hex::encode(Sha256::digest(bytes)), "{key}");
+    }
+    let old_cases = fixture["cases"].as_array().unwrap();
+    let cases = current["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 978);
+    assert_eq!(cases.len(), old_cases.len());
+    let mut reauthenticated = 0;
+    for (index, (old, case)) in old_cases.iter().zip(cases).enumerate() {
+        assert_eq!(old["input"], case["input"], "historical input {index}");
+        if old["expected"] != case["expected"] {
+            // Current native quorum policy rejects three historical high-epoch
+            // parent certificates. All earlier fault controls remain identical.
+            assert!(old["expected"]["error"].is_null());
+            assert_eq!(
+                case["expected"],
+                json!({"error":"validator duty commit is invalid: quorum"})
+            );
+            reauthenticated += 1;
+        }
+        assert_eq!(
+            preview(&case["input"]),
+            case["expected"],
+            "native preview rules {index}"
         );
-        let actual = result.map_or_else(|e| json!({"error":e.0}), |b| summary(&b));
-        assert_eq!(actual, case["expected"], "native preview rules {index}");
+    }
+    assert_eq!(reauthenticated, 3);
+}
+
+#[test]
+fn new_anchor_faults_match_candidate_native_rules_and_keep_earlier_fault_priority() {
+    let historical = fixture();
+    let basis = &historical["cases"][155]["input"];
+    assert_eq!(basis["default"], "good");
+    assert_eq!(basis["roots"], json!({}));
+    for kind in ["missing", "bad", "unreadable"] {
+        let native = candidate_rules()["graph"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| {
+                case["input"]["chain"] == basis["chain"]
+                    && case["input"]["epoch"] == 1_737_333
+                    && case["input"]["root"] == kind
+                    && case["input"]["floor"] == 0
+            })
+            .unwrap();
+        // Native oracle lists ProofKey at slot31, after the original28 rules.
+        let plan = &native["expected"]["plans"][31];
+        let anchor = plan[0].as_i64().unwrap().to_string();
+        let mut input = basis.clone();
+        input["roots"][&anchor] = json!(kind);
+        let fault = String::from_utf8(raw(&native["expected"]["modes"][31]["error"])).unwrap();
+        assert_eq!(preview(&input), json!({"error":fault}));
+        let mut earlier = historical["cases"][156]["input"].clone();
+        earlier["roots"][&anchor] = json!(kind);
+        assert_eq!(preview(&earlier), historical["cases"][156]["expected"]);
     }
 }
 

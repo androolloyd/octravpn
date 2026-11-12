@@ -40,6 +40,7 @@ pub(super) struct Slot {
     pub window: QueryWindow,
     pub owner: Arc<()>,
     pub responses: Vec<Arc<CatchupResponse>>,
+    pub replies: octra_node_protocol::consensus::reply_window::ReplyWindow,
 }
 struct Reader<H> {
     inner: Arc<Inner<H>>,
@@ -103,6 +104,17 @@ impl<H: Host> Finality<H> {
                 },
                 owner: reader.owner.clone(),
                 responses: vec![],
+                replies: octra_node_protocol::consensus::reply_window::ReplyWindow::new(
+                    crate::query_work::now().saturating_add(
+                        i64::try_from(
+                            deadline
+                                .saturating_duration_since(Instant::now())
+                                .as_nanos(),
+                        )
+                        .unwrap_or(i64::MAX),
+                    ),
+                    [],
+                ),
             });
             let frame = Frame {
                 message: 0x3a,
@@ -145,6 +157,17 @@ impl<H: Host> Finality<H> {
             for (index, wave) in waves.iter().enumerate() {
                 if Instant::now() >= deadline {
                     return Ok(None);
+                }
+                if let Some(slot) = self
+                    .0
+                    .windows
+                    .lock()
+                    .expect("finality windows")
+                    .range
+                    .as_mut()
+                    .filter(|s| Arc::ptr_eq(&s.owner, &reader.owner))
+                {
+                    slot.replies.extend(wave.clone());
                 }
                 futures::future::join_all(
                     wave.iter()

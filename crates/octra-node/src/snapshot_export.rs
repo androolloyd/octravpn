@@ -196,6 +196,10 @@ async fn capture<A: Host>(
                 .head_for_epoch(u64::try_from(epoch)?)
                 .await?;
             let anchor = chain::build(&node, &config, &head).await?;
+            ensure!(
+                anchor.encode()?.len() <= manifest::MANIFEST_LIMIT,
+                "state sync anchor exceeds manifest limit"
+            );
             package::capture(&authority, &node.store, &config.source, head, anchor).await
         }
         .await;
@@ -330,12 +334,13 @@ async fn tick<A: Host>(
 ) -> Result<()> {
     active(&node, &cancel)?;
     let epoch = i64::try_from(node.head().await?.cursor.epoch.0)?;
-    let minimum =
-        octra_node_protocol::rules::profile_epochs(config.network.identity.chain_id.as_bytes())
-            .into_iter()
-            .filter(|activation| *activation <= epoch)
-            .max()
-            .unwrap_or(0);
+    let minimum = octra_node_protocol::consensus::profile::epochs(
+        config.network.identity.chain_id.as_bytes(),
+    )
+    .into_iter()
+    .filter(|activation| *activation <= epoch)
+    .max()
+    .unwrap_or(0);
     let event = if minimum == 0 {
         cycle::Event::Finalized(epoch)
     } else {

@@ -130,8 +130,20 @@ async fn trace(j: &Value) -> Vec<Value> {
     let dir = tempfile::tempdir().unwrap();
     let owner = JournalOwner::open(dir.path()).unwrap();
     let local = j["local"].as_u64().unwrap() as u8;
-    let mut engine = engine(local, integer(j, "height"));
-    let mut guard = VoteGuard::new(CHAIN.to_vec(), address(local), owner.clone());
+    let chain = if j["chain"].is_null() {
+        CHAIN.to_vec()
+    } else {
+        raw(j, "chain")
+    };
+    let mut engine = Engine::new(
+        chain.clone(),
+        address(local),
+        validators(),
+        integer(j, "height"),
+        Protocol::default(),
+        TimeoutConfig::default(),
+    );
+    let mut guard = VoteGuard::new(chain, address(local), owner.clone());
     let mut ready = Readiness {
         role_can_vote: true,
         can_vote: true,
@@ -199,25 +211,45 @@ async fn trace(j: &Value) -> Vec<Value> {
     results
 }
 #[tokio::test]
-async fn native_local_vote_bootstrap_recovery_and_durability_match() {
-    let fixture: Value = serde_json::from_str(include_str!("fixtures/driver-votes.json")).unwrap();
-    let source: Value =
-        serde_json::from_str(include_str!("../../../docs/rust-node/source-map.json")).unwrap();
+async fn current_native_local_vote_bootstrap_recovery_and_durability_match() {
+    let raw = include_bytes!("fixtures/driver-votes-c49.json");
+    let fixture: Value = serde_json::from_slice(raw).unwrap();
+    let source: Value = serde_json::from_str(include_str!(
+        "../../../docs/rust-node/source-map-candidate.json"
+    ))
+    .unwrap();
     assert_eq!(fixture["upstream_commit"], source["upstream_commit"]);
-    assert_eq!(fixture["source_sha256"], source["files"]);
-    assert_eq!(fixture["instrumentation"], json!({}));
+    for (path, hash) in fixture["source_sha256"].as_object().unwrap() {
+        assert_eq!(&source["files"][path], hash, "candidate source {path}");
+    }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     for (field, path) in [
         ("oracle_sha256", "scripts/node-port/driver-votes-oracle.ml"),
-        ("runner_sha256", "scripts/node-port/native-oracle.py"),
+        (
+            "runner_sha256",
+            "scripts/node-port/candidate-driver-votes-oracle.py",
+        ),
     ] {
         assert_eq!(
             fixture[field],
             hex::encode(Sha256::digest(std::fs::read(root.join(path)).unwrap()))
         );
     }
+    let historical_bytes = include_bytes!("fixtures/driver-votes.json");
+    assert_eq!(
+        fixture["historical_fixture_sha256"],
+        hex::encode(Sha256::digest(historical_bytes))
+    );
+    let historical: Value = serde_json::from_slice(historical_bytes).unwrap();
     let cases = fixture["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 164);
+    assert_eq!(fixture["historical_case_count"], 164);
+    assert_eq!(cases.len(), 184);
+    for (old, current) in historical["cases"].as_array().unwrap().iter().zip(cases) {
+        assert_eq!(
+            old["input"], current["input"],
+            "all historical controls are replayed unchanged"
+        );
+    }
     for (case_index, case) in cases.iter().enumerate() {
         let actual = trace(&case["input"]).await;
         let expected = case["expected"].as_array().unwrap();

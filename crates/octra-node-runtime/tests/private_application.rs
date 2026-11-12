@@ -121,6 +121,8 @@ fn execute(
     let mut host = Epoch::new(
         octra_node_runtime::private_key::Policy {
             balance: Profile {
+                keyed: false,
+                registered: false,
                 fields: RuleMode::Active,
                 strict: true,
                 math: ScalarRule::Wide,

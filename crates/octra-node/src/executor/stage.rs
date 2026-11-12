@@ -366,6 +366,8 @@ impl Native {
     pub(super) fn private_profile(&self, context: &Bound, epoch: i64) -> private_balance::Profile {
         let fold = context.fold.context();
         private_balance::Profile {
+            keyed: fold.proof_key == RuleMode::Active,
+            registered: fold.program_inputs == RuleMode::Active,
             fields: context.private_payload,
             strict: fold.standard_mode == RuleMode::Active,
             math: if fold.math {

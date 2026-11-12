@@ -81,6 +81,17 @@ pub fn make_range<R: RngCore + CryptoRng>(
     rule: ScalarRule,
     rng: &mut R,
 ) -> Result<RangeProof, Error> {
+    make_range_keyed(public, secret, cipher, value, rule, false, rng)
+}
+pub fn make_range_keyed<R: RngCore + CryptoRng>(
+    public: &PublicKey,
+    secret: &SecretKey,
+    cipher: &Cipher,
+    value: u64,
+    rule: ScalarRule,
+    keyed: bool,
+    rng: &mut R,
+) -> Result<RangeProof, Error> {
     if !value_cipher_ok(public, cipher) {
         return Err(Error("pvac: range proof value rejected"));
     }
@@ -92,11 +103,13 @@ pub fn make_range<R: RngCore + CryptoRng>(
     for index in 0..RANGE_BITS {
         let bit = encrypt::value_random(public, secret, (value >> index) & 1, rng)?;
         let check = bit_check(public, &bit, index, rule == ScalarRule::Wide)?;
-        proofs.push(zero::make_zero(public, secret, &check, rule, rng)?);
+        proofs.push(zero::make_zero_keyed(
+            public, secret, &check, rule, keyed, rng,
+        )?);
         bits.push(bit);
     }
     let difference = difference(public, &bits, cipher)?;
-    let lc_proof = zero::make_zero(public, secret, &difference, rule, rng)?;
+    let lc_proof = zero::make_zero_keyed(public, secret, &difference, rule, keyed, rng)?;
     Ok(RangeProof {
         ct_bit: bits,
         bit_proofs: proofs,
@@ -108,6 +121,15 @@ pub fn verify_range(
     cipher: &Cipher,
     proof: &RangeProof,
     rule: ScalarRule,
+) -> Result<bool, Error> {
+    verify_range_keyed(public, cipher, proof, rule, false)
+}
+pub fn verify_range_keyed(
+    public: &PublicKey,
+    cipher: &Cipher,
+    proof: &RangeProof,
+    rule: ScalarRule,
+    keyed: bool,
 ) -> Result<bool, Error> {
     if !value_cipher_ok(public, cipher)
         || proof.ct_bit.len() != RANGE_BITS
@@ -127,15 +149,16 @@ pub fn verify_range(
     }
     for (index, (bit, proof)) in proof.ct_bit.iter().zip(&proof.bit_proofs).enumerate() {
         let check = bit_check(public, bit, index, rule == ScalarRule::Wide)?;
-        if !zero::verify_zero(public, &check, proof, rule)? {
+        if !zero::verify_zero_keyed(public, &check, proof, rule, keyed)? {
             return Ok(false);
         }
     }
-    zero::verify_zero(
+    zero::verify_zero_keyed(
         public,
         &difference(public, &proof.ct_bit, cipher)?,
         &proof.lc_proof,
         rule,
+        keyed,
     )
 }
 
@@ -165,6 +188,7 @@ fn build_aggregated(
     cipher: &Cipher,
     bits: &[Cipher],
     rule: ScalarRule,
+    keyed: bool,
 ) -> Result<(Prover, Transcript), Error> {
     if bits.len() != RANGE_BITS {
         return Err(Error("HFHE range bit count rejected"));
@@ -196,6 +220,9 @@ fn build_aggregated(
         )?;
     }
     let mut transcript = Transcript::new(b"pvac.range_proof.aggregated", rule);
+    if keyed {
+        transcript.append_message(b"public_key", &super::key::digest(public));
+    }
     transcript.append_u64(b"RANGE_BITS", RANGE_BITS as u64);
     for item in &data {
         transcript.append_u64(b"nL", item.cipher.layers.len() as u64);
@@ -210,6 +237,17 @@ pub fn make_aggregated_range<R: RngCore + CryptoRng>(
     cipher: &Cipher,
     value: u64,
     rule: ScalarRule,
+    rng: &mut R,
+) -> Result<AggregatedRangeProof, Error> {
+    make_aggregated_range_keyed(public, secret, cipher, value, rule, false, rng)
+}
+pub fn make_aggregated_range_keyed<R: RngCore + CryptoRng>(
+    public: &PublicKey,
+    secret: &SecretKey,
+    cipher: &Cipher,
+    value: u64,
+    rule: ScalarRule,
+    keyed: bool,
     rng: &mut R,
 ) -> Result<AggregatedRangeProof, Error> {
     if !value_cipher_ok(public, cipher) {
@@ -227,7 +265,7 @@ pub fn make_aggregated_range<R: RngCore + CryptoRng>(
             rng,
         )?);
     }
-    let (prover, mut transcript) = build_aggregated(public, secret, cipher, &bits, rule)?;
+    let (prover, mut transcript) = build_aggregated(public, secret, cipher, &bits, rule, keyed)?;
     Ok(AggregatedRangeProof {
         ct_bit: bits,
         proof: prover.prove(&mut transcript, rng, LimitProfile::Default)?,

@@ -12,7 +12,7 @@ use rand::{CryptoRng, RngCore};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 mod driver;
-pub use driver::{Driver, Peer};
+pub use driver::{Driver, Peer, ServicePermit};
 
 #[derive(Clone, Debug)]
 pub struct LocalNode {
@@ -264,4 +264,10 @@ where
     let finish = Finish::decode(&request.payload).map_err(handshake_error)?;
     finish.validate(&peer, &hello)?;
     Ok(Connection::authenticated(stream, peer, timeouts))
+}
+
+impl Connection<tokio::net::TcpStream> {
+    pub(crate) fn remote_addr(&self) -> Option<std::net::SocketAddr> {
+        self.stream.peer_addr().ok()
+    }
 }

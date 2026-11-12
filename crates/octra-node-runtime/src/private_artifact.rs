@@ -54,6 +54,8 @@ impl PartialEq for Source {
             && self.profile.fields == other.profile.fields
             && self.profile.strict == other.profile.strict
             && self.profile.math == other.profile.math
+            && self.profile.keyed == other.profile.keyed
+            && self.profile.registered == other.profile.registered
             && self.profile.result == other.profile.result
             && self.verifier == other.verifier
     }

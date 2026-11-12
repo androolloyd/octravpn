@@ -46,6 +46,8 @@ extern "C" {
         math: bool,
     ) -> *mut c_void;
     fn octra_pvac_commit(pk: *mut c_void, ct: *mut c_void, output: *mut u8) -> i32;
+    fn octra_pvac_proof_key_digest(pk: *mut c_void, output: *mut u8) -> i32;
+    fn octra_pvac_pubkey_powers_ok(pk: *mut c_void) -> i32;
     fn octra_pvac_pedersen(amount: u64, blinding: *const u8, output: *mut u8) -> i32;
     #[cfg(feature = "benchmark")]
     fn octra_pvac_reference_add(pk: *mut c_void, ct: *mut c_void, iterations: usize) -> f64;
@@ -144,6 +146,21 @@ impl PublicKey {
     }
     pub fn to_bytes(&self) -> Result<Vec<u8>, Error> {
         self.0.encode()
+    }
+    /// Exact typed public-key binding used by the active proof transcript.
+    pub fn proof_key_digest(&self) -> Result<[u8; 32], Error> {
+        let mut digest = [0; 32];
+        if unsafe { octra_pvac_proof_key_digest(self.0.raw(), digest.as_mut_ptr()) } != 0 {
+            return Err(failure());
+        }
+        Ok(digest)
+    }
+    pub fn powers_ok(&self) -> Result<bool, Error> {
+        match unsafe { octra_pvac_pubkey_powers_ok(self.0.raw()) } {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(failure()),
+        }
     }
     pub fn encrypt(
         &self,

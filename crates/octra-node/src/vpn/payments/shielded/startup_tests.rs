@@ -38,6 +38,10 @@ pub(super) async fn run(fixture: &Fixture, pool: shielded::Config) {
         wallet: root.join("startup-wallet"),
         master_key: master,
         purchases: Policy {
+            allowed_receipt_keys: vec![
+                KeyPair::from_secret_bytes(&[251; 32]).public,
+                KeyPair::from_secret_bytes(&[250; 32]).public,
+            ],
             max_channels: 1,
             max_requests: 4,
             max_ceiling_ou: 10,
@@ -178,7 +182,45 @@ pub(super) async fn run(fixture: &Fixture, pool: shielded::Config) {
             ceiling_ou: 10,
         },
     );
+    // An unadmitted signer can create valid signatures but no wallet rows.
+    for id in 1..=4 {
+        let mut outsider = open.request.clone();
+        outsider.id = [id; 32];
+        let outsider =
+            SignedPrivateRequest::sign(outsider, &KeyPair::from_secret_bytes(&[249; 32])).unwrap();
+        assert_eq!(
+            http.post(format!("{origin}/shielded/purchase"))
+                .json(&outsider)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            reqwest::StatusCode::FORBIDDEN
+        );
+    }
     let first = send(&http, &origin, &open).await;
+    // An admitted payer cannot use another payer's channel allocation.
+    let full = request(
+        3,
+        PrivateAction::Open {
+            offer: 0,
+            ceiling_ou: 10,
+        },
+    );
+    assert_eq!(
+        http.post(format!("{origin}/shielded/purchase"))
+            .json(&full)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::FORBIDDEN
+    );
+    let mut other = open.request.clone();
+    other.id = [4; 32];
+    let other = SignedPrivateRequest::sign(other, &KeyPair::from_secret_bytes(&[250; 32])).unwrap();
+    let other_reply = send(&http, &origin, &other).await;
+
     let PrivateResult::Open { binding, .. } =
         serde_json::from_slice(&first.verify(&open).unwrap()).unwrap()
     else {
@@ -230,6 +272,19 @@ pub(super) async fn run(fixture: &Fixture, pool: shielded::Config) {
     let (stop, stopped) = tokio::sync::watch::channel(false);
     let job = tokio::spawn(service.run(stopped));
     assert_eq!(send(&http, &origin, &open).await.payload, first.payload);
+    assert_eq!(
+        send(&http, &origin, &other).await.payload,
+        other_reply.payload
+    );
+    assert_eq!(
+        http.post(format!("{origin}/shielded/purchase"))
+            .json(&full)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::FORBIDDEN
+    );
     assert_eq!(send(&http, &origin, &quote).await.payload, quoted.payload);
     fixture.node.suspend("private startup source unavailable");
     let fresh = request(

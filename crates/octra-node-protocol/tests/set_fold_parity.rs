@@ -137,6 +137,7 @@ fn parent(v: &Value) -> ParentCommit {
 }
 fn finality(v: &Value) -> Final {
     Final {
+        round: None,
         epoch: i(v, "epoch"),
         proposal_id: raw(v, "pid"),
         set_hash: raw(v, "set"),
@@ -144,6 +145,7 @@ fn finality(v: &Value) -> Final {
 }
 fn parent_final(p: &ParentCommit) -> Final {
     Final {
+        round: None,
         epoch: p.certificate.epoch_id,
         proposal_id: p.certificate.proposal_id.clone(),
         set_hash: hash::validator_set_hash(&p.validator_set).unwrap().to_vec(),

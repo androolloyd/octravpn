@@ -156,3 +156,138 @@ async fn handler_and_wire_errors_close_both_loops() {
     assert!(!a.is_connected());
     assert!(!b.is_connected());
 }
+
+#[tokio::test]
+async fn cancelled_transaction_keeps_its_budget_until_the_writer_finishes() {
+    let (connection, mut remote) = connections().await;
+    let (peer, driver) = connection.into_driver().unwrap();
+    let running = tokio::spawn(driver.run(|_, _| async { Ok(()) }));
+    let sender = peer.clone();
+    let pending = tokio::spawn(async move {
+        sender
+            .send_tx(Frame {
+                message: 0x20,
+                payload: vec![1; 4_500_000],
+            })
+            .await
+    });
+    tokio::task::yield_now().await;
+    pending.abort();
+    let _ = pending.await;
+    assert!(
+        !peer
+            .send_tx(Frame {
+                message: 0x20,
+                payload: vec![2; 4_500_000]
+            })
+            .await
+    );
+    // Draining the accepted frame, not dropping its waiter, releases the quota.
+    assert_eq!(remote.receive().await.unwrap().payload.len(), 4_500_000);
+    let sender = peer.clone();
+    let next = tokio::spawn(async move {
+        sender
+            .send_tx(Frame {
+                message: 0x20,
+                payload: vec![3; 10],
+            })
+            .await
+    });
+    assert_eq!(remote.receive().await.unwrap().payload, vec![3; 10]);
+    assert!(next.await.unwrap());
+    peer.close();
+    let _ = running.await;
+}
+#[tokio::test]
+async fn service_lane_is_exclusive_and_batch_builders_wait_for_transaction_drain() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let (connection, mut remote) = connections().await;
+    let (peer, driver) = connection.into_driver().unwrap();
+    let permit = peer.service().await.unwrap();
+    assert!(peer.service().await.is_none());
+    drop(permit);
+    assert!(peer.service().await.is_some());
+    let running = tokio::spawn(driver.run(|_, _| async { Ok(()) }));
+    let sender = peer.clone();
+    let pending = tokio::spawn(async move {
+        sender
+            .send_tx(Frame {
+                message: 0x20,
+                payload: vec![1; 4096],
+            })
+            .await
+    });
+    tokio::task::yield_now().await;
+    let built = Arc::new(AtomicUsize::new(0));
+    let counter = built.clone();
+    let sender = peer.clone();
+    let batch = tokio::spawn(async move {
+        sender
+            .send_batch(
+                0x20,
+                vec![move || {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    Some(vec![2; 10])
+                }],
+            )
+            .await;
+    });
+    tokio::task::yield_now().await;
+    assert_eq!(built.load(Ordering::SeqCst), 0);
+    assert_eq!(remote.receive().await.unwrap().payload, vec![1; 4096]);
+    assert_eq!(remote.receive().await.unwrap().payload, vec![2; 10]);
+    assert!(pending.await.unwrap());
+    batch.await.unwrap();
+    assert_eq!(built.load(Ordering::SeqCst), 1);
+    peer.close();
+    let _ = running.await;
+}
+
+#[tokio::test]
+async fn detached_transaction_service_reserves_limits_before_spawning() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let (connection, _remote) = connections().await;
+    let (peer, driver) = connection.into_driver().unwrap();
+    // No writer is running: admission must return without waiting for its
+    // mailbox and must reserve slots before the spawned jobs are scheduled.
+    for _ in 0..64 {
+        assert!(peer.queue_tx(Frame {
+            message: 0x20,
+            payload: vec![1; 16]
+        }));
+    }
+    assert!(!peer.queue_tx(Frame {
+        message: 0x20,
+        payload: vec![1; 16]
+    }));
+    let built = Arc::new(AtomicUsize::new(0));
+    for index in 0..5 {
+        let built = built.clone();
+        assert_eq!(
+            peer.queue_batch(
+                0x20,
+                vec![move || {
+                    built.fetch_add(1, Ordering::SeqCst);
+                    Some(vec![2; 16])
+                }]
+            ),
+            index < 4
+        );
+    }
+    tokio::task::yield_now().await;
+    assert_eq!(built.load(Ordering::SeqCst), 0);
+    peer.close();
+    tokio::task::yield_now().await;
+    assert_eq!(built.load(Ordering::SeqCst), 0);
+    assert!(!peer.queue_tx(Frame {
+        message: 0x20,
+        payload: vec![]
+    }));
+    drop(driver);
+}

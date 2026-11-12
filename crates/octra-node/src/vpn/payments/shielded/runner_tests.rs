@@ -189,6 +189,21 @@ pub(super) async fn run(
         .is_err());
     assert!(Purchase::resume(payer.clone(), [0; 32]).await.is_err());
     assert_eq!(Purchase::discover(payer.clone()).await.unwrap().len(), 1);
+    let mut bundle_terms = terms.clone();
+    let extra_bytes = 4096;
+    let extra_cost = offered.tariff.charge(1, extra_bytes).unwrap();
+    bundle_terms.additional.push(Allowance {
+        traffic_class: 1,
+        bytes: extra_bytes,
+        max_cost_ou: extra_cost,
+    });
+    let second = Purchase::create(payer.clone(), [199; 32], bundle_terms.clone())
+        .await
+        .unwrap();
+    let second_receipt = second.receipt_identity().unwrap().public;
+    // Admission needs only the public identity; retain no extra writer lease
+    // across the cold payer-book reopen below.
+    drop(second);
     Purchase::legacy_recovery_case(payer.clone(), [198; 32], terms.clone()).await;
     let receipt = purchase.receipt_identity().unwrap().public;
     assert_ne!(receipt.0, terms.relayer_public);
@@ -210,6 +225,7 @@ pub(super) async fn run(
             },
             &operator,
             shielded::wallet::rpc::Policy {
+                allowed_receipt_keys: vec![receipt, second_receipt],
                 max_channels: 16,
                 max_requests: 128,
                 max_ceiling_ou: 100,
@@ -441,22 +457,12 @@ pub(super) async fn run(
     }
     // Commit a signed transaction before the scheduler has ever submitted it.
     // Recovery must find it without an auxiliary saved sequence/pending flag.
-    let mut bundle_terms = terms.clone();
-    let extra_bytes = 4096;
-    let extra_cost = offered.tariff.charge(1, extra_bytes).unwrap();
-    bundle_terms.additional.push(Allowance {
-        traffic_class: 1,
-        bytes: extra_bytes,
-        max_cost_ou: extra_cost,
-    });
     assert!(
         Purchase::create(payer.clone(), [198; 32], bundle_terms.clone())
             .await
             .is_err()
     );
-    let second = Purchase::create(payer.clone(), [199; 32], bundle_terms.clone())
-        .await
-        .unwrap();
+    let second = Purchase::resume(payer.clone(), [199; 32]).await.unwrap();
     let before_open = payer.reserved_fees(&terms.relayer_public).await.unwrap();
     let before_pending = intake.pending.transactions().unwrap();
     let second_binding = second.open(&index, &control).await.unwrap().unwrap();

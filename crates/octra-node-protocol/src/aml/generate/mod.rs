@@ -21,8 +21,10 @@ mod protocol_inference;
 mod statements;
 mod storage;
 mod writes;
-pub use entries::{generate, imperative, linked, prior, protocol, Generated};
-#[derive(Clone, Debug)]
+pub use entries::{
+    generate, imperative, linked, linked_metered, prior, protocol, protocol_metered, Generated,
+};
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Local {
     pub name: Name,
     pub register: u8,
@@ -30,6 +32,10 @@ pub struct Local {
 }
 pub struct Generator<'a> {
     pub contract: &'a Contract,
+    symbols: super::symbols::Index,
+    inferred_locals: Arc<Vec<Local>>,
+    inferred_pure: bool,
+    inferred_types: BTreeMap<Name, (TypeId, std::collections::BTreeSet<Name>)>,
     pub nodes: &'a mut Nodes,
     pub code: Emitter,
     pub loops: bool,
@@ -70,6 +76,10 @@ impl<'a> Generator<'a> {
             .iter()
             .any(|function| function.payable);
         Self {
+            symbols: super::symbols::Index::new(&ast.contract),
+            inferred_locals: Arc::new(vec![]),
+            inferred_pure: false,
+            inferred_types: BTreeMap::new(),
             contract: &ast.contract,
             nodes: &mut ast.nodes,
             code: Emitter::new(syntax),
@@ -84,6 +94,18 @@ impl<'a> Generator<'a> {
             function_direct: false,
             function_return,
         }
+    }
+    pub(super) fn constant(&self, name: &[u8]) -> Option<&super::ast::Const> {
+        self.symbols
+            .consts
+            .get(name)
+            .map(|&index| &self.contract.consts[index])
+    }
+    pub(super) fn function_by_name(&self, name: &[u8]) -> Option<&Function> {
+        self.symbols
+            .functions
+            .get(name)
+            .map(|&index| &self.contract.functions[index])
     }
     pub fn require_type(&self, context: &[u8], expected: TypeId, actual: TypeId) -> Result<()> {
         if types::compatible(self.nodes, expected, actual) {
@@ -151,20 +173,20 @@ impl<'a> Generator<'a> {
                 return None;
             };
             let structure = self
-                .contract
+                .symbols
                 .structs
-                .iter()
-                .find(|item| item.name == *name)?;
+                .get(name)
+                .map(|&index| &self.contract.structs[index])?;
             typ = structure.fields.iter().find(|(name, _)| name == segment)?.1;
         }
         Some(typ)
     }
     pub fn storage_base(&self, field: &[u8], indexed: bool) -> Option<TypeId> {
         let typ = self
-            .contract
+            .symbols
             .state
-            .iter()
-            .find(|item| item.name == field)?
+            .get(field)
+            .map(|&index| &self.contract.state[index])?
             .typ;
         Some(if indexed { self.map_value(typ) } else { typ })
     }
@@ -194,10 +216,10 @@ impl<'a> Generator<'a> {
     }
     pub fn enum_index(&self, name: &[u8], variant: &[u8]) -> Result<usize> {
         let enumeration = self
-            .contract
+            .symbols
             .enums
-            .iter()
-            .find(|item| item.name == name)
+            .get(name)
+            .map(|&index| &self.contract.enums[index])
             .ok_or_else(|| {
                 self.code
                     .error([b"unknown enum: ".as_slice(), name].concat())
@@ -226,19 +248,18 @@ pub fn check_interfaces(ast: &Ast) -> Result<()> {
         line: 0,
         column: 0,
     };
+    let symbols = super::symbols::Index::new(&ast.contract);
     for name in &ast.contract.implements {
-        let interface = ast
-            .contract
+        let interface = symbols
             .interfaces
-            .iter()
-            .find(|interface| interface.name == *name)
+            .get(name)
+            .map(|&index| &ast.contract.interfaces[index])
             .ok_or_else(|| error([b"unknown interface: ".as_slice(), name].concat()))?;
         for method in &interface.methods {
-            let function = ast
-                .contract
+            let function = symbols
                 .functions
-                .iter()
-                .find(|function| function.name == method.name)
+                .get(&method.name)
+                .map(|&index| &ast.contract.functions[index])
                 .ok_or_else(|| {
                     error(
                         [

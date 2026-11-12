@@ -152,17 +152,19 @@ impl Pending {
     /// Retire stale duty against one authenticated current admission lease.
     pub(crate) fn expire_duty(&self, draft: &Draft, sender: Option<&[u8]>) -> Result<()> {
         let mode = draft.context().rules().fold.context().ready_exec_mode;
+        let marks = draft.context().rules().fold.context().duty_marks == RuleMode::Active;
         let head = draft.context().header().epoch_id - 1;
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64();
         if !self.inspect(|pool| {
             pool.all().any(|tx| {
-                sender.is_none_or(|s| tx.from == s) && duty::expired(tx, Some(head), mode)
+                sender.is_none_or(|s| tx.from == s)
+                    && duty::expired_with_marks(tx, Some(head), mode, marks)
             })
         })? {
             return Ok(());
         }
         self.mutate(Some(draft), draft.context().parent().cursor, |pool| {
-            pool.expire_duty(sender, Some(head), mode, &|| now);
+            pool.expire_duty_with_marks(sender, Some(head), mode, marks, &|| now);
             Ok(())
         })
     }
@@ -371,7 +373,12 @@ impl Pending {
             for tx in entries {
                 if fold.ready_exec_mode == RuleMode::Active && tx.op_type == OpType::ValidatorReady
                 {
-                    if duty::expired(&tx, Some(epoch - 1), RuleMode::Active) {
+                    if duty::expired_with_marks(
+                        &tx,
+                        Some(epoch - 1),
+                        RuleMode::Active,
+                        fold.duty_marks == RuleMode::Active,
+                    ) {
                         continue;
                     }
                     let Ok(claim) = BondedReady::parse(tx.message.as_deref()) else {
@@ -572,6 +579,7 @@ impl Native {
             bft: true,
             profile: &self.config.profile,
             duty: Some((head, fold.ready_exec_mode)),
+            duty_marks: fold.duty_marks == RuleMode::Active,
             limits: self.config.payload,
         };
         // Native already owns a loaded ledger. Reject its cheap route/profile
@@ -589,8 +597,12 @@ impl Native {
                 .or(tx.public_key.as_deref()),
         )
         .map_err(admission::Error::from)?;
-        admission::signature(&tx, account.as_ref().and_then(|a| a.public_key.as_deref()))
-            .map_err(admission::Error::from)?;
+        admission::signature_at(
+            &rules.signing,
+            &tx,
+            account.as_ref().and_then(|a| a.public_key.as_deref()),
+        )
+        .map_err(admission::Error::from)?;
         admission::payload(&tx, self.config.payload)?;
         admission::post_signature(
             &tx,
@@ -645,12 +657,14 @@ impl Native {
                     &tx,
                     &ledger,
                     &intake::Rules {
+                        signing: rules.signing.clone(),
                         bft: true,
                         profile: host.config.profile.clone(),
                         compute: rules.envelope.compute,
                         settle: rules.envelope.settle,
                         proof: fold.proof_exec,
                         duty: Some((head, fold.ready_exec_mode)),
+                        duty_marks: fold.duty_marks == RuleMode::Active,
                         queue_head: Some(head),
                         stealth_minimum: rules.stealth_minimum.clone(),
                     },

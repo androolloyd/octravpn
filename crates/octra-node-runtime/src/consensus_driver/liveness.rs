@@ -62,9 +62,25 @@ impl<H: Host, C: Publication> Driver<H, C> {
         // No await separates the native policy sample from this mutation. A
         // queued health poll cannot apply a decision from an older generation.
         let increment = |round: i64| (round.wrapping_add(1) << 1) >> 1;
-        let round = increment(self.engine.state().round).max(increment(reset.round));
-        self.clear_round_work(reset.expected, round);
-        self.engine.realign_round(round)?;
+        if self.engine.round_wait() {
+            let now = self.now();
+            let jumped = self.engine.try_round_skip()?
+                || (now.saturating_sub(self.progress_step_at) >= 180_000_000_000
+                    && self.engine.try_round_step()?);
+            if jumped {
+                self.progress_step_at = now;
+                self.clear_round_sync_jump();
+            }
+            self.host.warning(&format!(
+                "round_progress_request height = {} round = {} advanced = {jumped}",
+                self.engine.state().height,
+                self.engine.state().round
+            ));
+        } else {
+            let round = increment(self.engine.state().round).max(increment(reset.round));
+            self.clear_round_work(reset.expected, round);
+            self.engine.realign_round(round)?;
+        }
         self.host.warning(&format!(
             "liveness realign height = {} round = {} step = {} source = health_poll stall_sec = {:.0} step_timeout_sec = {:.0} state_age = {:.0} height_age = {:.0} resets = {}",
             reset.height, reset.round, String::from_utf8_lossy(&reset.step),

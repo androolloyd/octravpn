@@ -1,0 +1,168 @@
+{
+  "recorded_at": "2026-11-12T15:44:46.974188+00:00",
+  "status": "local_core_qualification_passed",
+  "upstream_commit": "c49de45cf49ebbc2e5c0697eb956cbcada5845e7",
+  "historical_reference": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "repository_head": "d84499a36a64dd7bb02401da5836caa1e6e2d50e",
+  "source_files": 307,
+  "source_fingerprint_sha256": "7d7b838fcfc3d9f0ff1daf202cd074bff969dc2cbabf8fa5ee60b37f7ec1c56b",
+  "preexisting_patch_sha256": "4aa84721839f3239b8e3166475620c3cd95cb77a91d0a596ce9eea64597d3623",
+  "source_inventory": {
+    "commit": "c49de45cf49ebbc2e5c0697eb956cbcada5845e7",
+    "files_checked": 1192,
+    "mismatches": [],
+    "manifest_sha256": "97da94e6706b4267c45ff5dc193c1ba411e3692c99764f0e69bf9fb5d2c42447"
+  },
+  "results": {
+    "protocol": {
+      "ok": 209,
+      "FAILED": 0,
+      "ignored": 2
+    },
+    "runtime": {
+      "ok": 328,
+      "FAILED": 0,
+      "ignored": 4
+    },
+    "node": {
+      "ok": 343,
+      "FAILED": 0,
+      "ignored": 7
+    },
+    "crypto": {
+      "ok": 52,
+      "FAILED": 0,
+      "ignored": 0
+    },
+    "circle_host": {
+      "ok": 287,
+      "FAILED": 0,
+      "ignored": 0
+    }
+  },
+  "total_passed": 1219,
+  "ignored": [
+    {
+      "suite": "protocol",
+      "target": "tests/native_peer_interop.rs [native_peer_interop]",
+      "test": "rust_swarm_interoperates_with_pinned_ocaml_swarm"
+    },
+    {
+      "suite": "protocol",
+      "target": "tests/public_manifest.rs [public_manifest]",
+      "test": "public_snapshot_authenticates_against_the_adopted_network_configuration"
+    },
+    {
+      "suite": "runtime",
+      "target": "unittests src/lib.rs [octra_node_runtime]",
+      "test": "canonical::reader::projection::tests::stopped_retained_store_subtrees_stay_bounded"
+    },
+    {
+      "suite": "runtime",
+      "target": "unittests src/lib.rs [octra_node_runtime]",
+      "test": "canonical::reader::restore_tests::retained_edge_query_benchmark"
+    },
+    {
+      "suite": "runtime",
+      "target": "tests/canonical_assets.rs [canonical_assets]",
+      "test": "browser_fixture"
+    },
+    {
+      "suite": "runtime",
+      "target": "tests/canonical_recovery.rs [canonical_recovery]",
+      "test": "crash_worker"
+    },
+    {
+      "suite": "node",
+      "target": "tests/legacy_stage.rs [legacy_stage]",
+      "test": "signed_peer_selection_stages_only_an_unprotected_native_empty_suffix"
+    },
+    {
+      "suite": "node",
+      "target": "tests/offline_native.rs [offline_native]",
+      "test": "unchanged_native_physical_check_and_fhe_audit_have_positive_exact_dispatch"
+    },
+    {
+      "suite": "node",
+      "target": "tests/offline_native.rs [offline_native]",
+      "test": "unchanged_native_signed_sync_positive_and_refusals_preserve_exact_contents"
+    },
+    {
+      "suite": "node",
+      "target": "tests/offline_native.rs [offline_native]",
+      "test": "unchanged_native_vote_floor_output_and_durable_plan_match_rust"
+    },
+    {
+      "suite": "node",
+      "target": "tests/services.rs [services]",
+      "test": "gateway::canonical_gateway_chromium_fixture"
+    },
+    {
+      "suite": "node",
+      "target": "tests/single_native.rs [single_native]",
+      "test": "facade::initialize_private_single_paid_fixture"
+    },
+    {
+      "suite": "node",
+      "target": "tests/single_native.rs [single_native]",
+      "test": "single_crash_child"
+    }
+  ],
+  "rerun_resolution": "Completed full-target reruns replace earlier target results; filtered reruns replace only the named test. Child process harness summaries are not double counted.",
+  "validation": [
+    "strict Clippy: default and private experimental features",
+    "rustfmt: changed crate Rust sources",
+    "exact native PVAC source and Circle API patch reproduction",
+    "four-validator executable local network: transfer, Circle browsing, restart and observer recovery",
+    "real private crypto worker corpus: 259 cases",
+    "genuine shielded purchase/history/recovery and private import"
+  ],
+  "not_qualified": [
+    "full source-certified native OCaml peer interoperability and retained-store migration",
+    "sustained public devnet bootstrap/head tracking/recovery",
+    "funded Linux private multi-hop traffic on this build",
+    "current public portal/operator availability",
+    "mainnet deployment",
+    "whole-node formal equivalence"
+  ],
+  "evidence_directory": "out/upstream-adoption-20261112",
+  "resolved_results_sha256": "32e4afb4b4a644e843144ef34d7f2be3f18b445fa13dd8f284c7d52b8ffc8f21",
+  "logs_sha256": {
+    "protocol-rerun.log": "d4c27447d14f2f59ca3b9da15c406c289f26854abd3c75186a35dc96de8c6a42",
+    "network-swarm-focused.log": "4692475dc187285a3d701462a35a837550550b97f796fcf8731bd27827e4ee43",
+    "protocol-qualified.log": "6ffd1d0a331c83c5e2eebf23f2be46f3ebe7e799855487884216ab4578871e4a",
+    "runtime-full.log": "fe52331521fbd44640b0e1cd7b0e9f80e05c4f88e7fd0416643c8ad00db6b5f6",
+    "runtime-rerun.log": "989d718f4e5f6e9c1dd71d1cbca51908f20520fc29166ceab03d0e455177cb54",
+    "runtime-qualified.log": "4087eecc9ee7dd6a114ca161f35b9512efd74b1b386f4c0f1fee3c6929905c32",
+    "circle-registry-qualified.log": "08b151cb6ff1a232105a52c065ce6b0baf20dc913264cb36964441b6fe6edbeb",
+    "node-full-rerun.log": "8e095ed18b959e45e41c10a12fa036b7b69a5ee90b6911681e4723e57def9925",
+    "public-history-qualified.log": "1eb763375aaa081985737217457d122ae8a32830d14d84d001d7f2347dc74434",
+    "node-profile-qualified.log": "09f5180d0461f9cbb51c3225e9756f22d02af3a0fe757e319dfc4b73942b6905",
+    "crypto-full.log": "e04008807c61f575e87812eb13b4b4257049f3bfae46428e73a9003eefbbedab",
+    "pvac-native-rerun.log": "36ac3f6e5490549f5d76769c465f2de58eb3b133a2edf1a3e9efddf70076b836",
+    "circle-host-rerun.log": "001cefa3434a97b67f0399c726fe8fb6ee2211333ac4e608e96cf12c37068d6b",
+    "clippy-qualified.log": "86b852706e314d47a50eb16dfd4bdd8309d8be32f6077ac40fa7143c4fb72706",
+    "clippy-default.log": "687dcc02556e0097b537291114281caa06d09b9bff46db98f5e7b64466cc455a",
+    "native-source-final.log": "eccc8c6abb90f29519ebe9191329e0589a3b6ca0f00aa86727fec7c3e5f3c893",
+    "circle-native-c49-final.log": "b10824e368cc07019d06a990849bf01ce92e836c7079b782b509c1fddac93f3d",
+    "format-final.log": "68e3ee7876571f9b02e1903a14e8b1a2d7449cc13461573855b97ec61797c501"
+  },
+  "published": false,
+  "deployed": false,
+  "publication_preparation": {
+    "scope": "GitHub native-test preparation uses the candidate Circle host; historical HFHE budget fixture keeps its baseline. Fresh native captures remain portable across WASM build environments.",
+    "source_sha256": {
+      ".github/actions/prepare-native-tests/action.yml": "3e5f85435daa5f9da7876a2d4b3b9b0a72ef1930f5b401cf261dbaea0e768a6d",
+      ".github/workflows/circle-vpn.yml": "e522ed74dae62f5f0c8e1e230d101a2bce8c6fe97dad28d3954642b9889b26a2",
+      "scripts/circle-apps/prepare-registry.py": "e59e6ac232a9b11a40d287d7722aa155dfdd8231fc1a26540a5c6bc40aecc49f",
+      "crates/octra-node-runtime/tests/circle_parity.rs": "485502713979fed1ac1cdade539988aebf929ac1100cfda27619ea872919c6e0"
+    },
+    "validation": [
+      "two workflow YAML files parsed",
+      "runtime Circle parity: 2 passed",
+      "unsigned candidate registry package prepared",
+      "historical upstream evidence rejected for candidate packaging"
+    ],
+    "log_sha256": "e1c840a565e3a82cf78d1a87c04deb7db227849018ec2a8c8205ff615e70db13"
+  }
+}

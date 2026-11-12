@@ -380,10 +380,10 @@ impl Generator<'_> {
                         }
                         Stmt::RevertError(name, args) => {
                             let definition = self
-                                .contract
+                                .symbols
                                 .errors
-                                .iter()
-                                .find(|item| item.name == name)
+                                .get(&name[..])
+                                .map(|&index| &self.contract.errors[index])
                                 .cloned()
                                 .ok_or_else(|| {
                                     self.code
@@ -484,7 +484,12 @@ impl Generator<'_> {
         let Some((name, _, _)) = arms.first() else {
             return Err(self.code.error("empty match expression"));
         };
-        if let Some(enumeration) = self.contract.enums.iter().find(|item| item.name == *name) {
+        if let Some(enumeration) = self
+            .symbols
+            .enums
+            .get(&name[..])
+            .map(|&index| &self.contract.enums[index])
+        {
             let missing: Vec<_> = enumeration
                 .variants
                 .iter()

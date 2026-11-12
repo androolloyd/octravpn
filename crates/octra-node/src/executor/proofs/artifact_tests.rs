@@ -124,6 +124,8 @@ fn fixture() -> (
     let ledger = Ledger::from_accounts([(b"alice".to_vec(), account)].into()).unwrap();
     let policy = octra_node_runtime::private_key::Policy {
         balance: private_balance::Profile {
+            keyed: false,
+            registered: false,
             fields: octra_node_protocol::transaction::RuleMode::Prior,
             strict: true,
             math: octra_hfhe::scalar::ScalarRule::Wide,

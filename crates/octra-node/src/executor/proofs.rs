@@ -54,6 +54,8 @@ pub(super) struct ProofBinding {
     selected_crypto_active: bool,
     fields: octra_node_protocol::transaction::RuleMode,
     strict: bool,
+    keyed: bool,
+    registered: bool,
     math: octra_hfhe::scalar::ScalarRule,
     result: octra_node_runtime::private_crypto::ResultPolicy,
     owner: octra_node_protocol::transaction::RuleMode,
@@ -83,6 +85,8 @@ impl ProofBinding {
         let private_balance::Profile {
             fields,
             strict,
+            keyed,
+            registered,
             math,
             result,
         } = balance;
@@ -95,6 +99,8 @@ impl ProofBinding {
             selected_crypto_active: rules.crypto_active,
             fields,
             strict,
+            keyed,
+            registered,
             math,
             result,
             owner,
@@ -583,7 +589,7 @@ impl Native {
         else {
             return skip(Kind::Invalid, b"pvac_key_not_consensus_bound".to_vec());
         };
-        let plan = match circle_cell::preverify(
+        let plan = match circle_cell::preverify_keyed(
             &self.runtime,
             tx,
             ledger,
@@ -591,6 +597,7 @@ impl Native {
             epoch,
             profile.strict,
             profile.math,
+            profile.keyed,
         ) {
             Ok(plan) => plan,
             Err(Error::Rejected(reason)) => return skip(Kind::Invalid, reason),

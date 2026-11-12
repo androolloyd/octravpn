@@ -35,8 +35,13 @@ pub enum Rule {
     VmBytes,
     CipherMigration,
     Settle,
+    Stake,
+    ProgramRecords,
+    DutyMarks,
+    ProofKey,
+    TxNetwork,
 }
-pub const ALL: [Rule; 28] = [
+pub const ALL: [Rule; 33] = [
     Rule::Circle,
     Rule::WasmCompute,
     Rule::ValidatorQuorum,
@@ -65,6 +70,11 @@ pub const ALL: [Rule; 28] = [
     Rule::VmBytes,
     Rule::CipherMigration,
     Rule::Settle,
+    Rule::Stake,
+    Rule::ProgramRecords,
+    Rule::DutyMarks,
+    Rule::ProofKey,
+    Rule::TxNetwork,
 ];
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Activation {
@@ -190,7 +200,12 @@ pub fn activation(chain: &[u8], rule: Rule) -> Option<Activation> {
                 _ => 1_688_734,
             },
         ),
-        Rule::Settle => return None,
+        Rule::Stake | Rule::ProgramRecords | Rule::DutyMarks | Rule::ProofKey => (
+            1_692_238,
+            "369bdf20cafef586867569d2db0a6d89f36811960e1445a52651856b00f8242a",
+            1_737_333,
+        ),
+        Rule::Settle | Rule::TxNetwork => return None,
     };
     Some(Activation {
         anchor_epoch: anchor,
@@ -245,6 +260,15 @@ pub fn at(chain: &[u8], rule: Rule, epoch: i64) -> RuleMode {
         RuleMode::Prior
     }
 }
+pub const PROGRAM_INPUTS_ID: &[u8] = b"registered_pvac:private_registry:kat_independent:emission_counter:program_65536:legacy_1048576";
+/// Program-input metering follows the upstream round transition, not a new anchor.
+pub fn program_inputs_at(chain: &[u8], epoch: i64) -> RuleMode {
+    if policy::round_epoch(chain).is_some_and(|first| epoch >= first) {
+        RuleMode::Active
+    } else {
+        RuleMode::Prior
+    }
+}
 /// Native trusted-history floor fallback. Callers must authenticate that floor.
 pub fn root_after_floor(chain: &[u8], floor: i64, epoch: i64) -> Option<Vec<u8>> {
     let circle = activation(chain, Rule::Circle);
@@ -280,6 +304,11 @@ pub fn root_after_floor(chain: &[u8], floor: i64, epoch: i64) -> Option<Vec<u8>>
         Rule::VmBytes,
         Rule::CipherMigration,
         Rule::Settle,
+        Rule::Stake,
+        Rule::ProgramRecords,
+        Rule::DutyMarks,
+        Rule::ProofKey,
+        Rule::TxNetwork,
     ]
     .iter()
     .filter_map(|r| activation(chain, *r))
@@ -517,6 +546,11 @@ impl Graph {
         epoch: i64,
         root_at: &impl Fn(i64) -> RootRead,
     ) -> Result<RuleMode, Fault> {
+        // The stake transition must authenticate its new anchor even though
+        // validator quorum was already active under the earlier count rule.
+        if rule == Rule::ValidatorQuorum {
+            activation_mode(root_at, self.activation(Rule::Stake).as_ref(), epoch)?;
+        }
         let plan = self.activation(rule);
         if plan.is_some() {
             return activation_mode(root_at, plan.as_ref(), epoch);
@@ -534,6 +568,9 @@ impl Graph {
         } else {
             RuleMode::Prior
         })
+    }
+    pub fn program_inputs(&self, epoch: i64) -> RuleMode {
+        program_inputs_at(&self.chain_id, epoch)
     }
     pub fn program_overlap(
         &self,

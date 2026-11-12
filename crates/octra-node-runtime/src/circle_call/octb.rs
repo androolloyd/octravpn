@@ -42,7 +42,7 @@ impl vm::Host for Host<'_, '_, '_> {
             return Ok(None);
         }
         self.runtime
-            .public_key(self.snapshot, address)
+            .live_public_key(self.snapshot, address, self.context.program_inputs)
             .map(|key| key.map(vm::FheKeySource::Bytes))
             .map_err(|e| vm::Unavailable(e.to_string()))
     }
@@ -288,6 +288,7 @@ pub(super) fn execute(
             fhe_work: ctx.fhe_work,
             object_cost: ctx.object_cost,
             proof_exec: ctx.profile.proof_exec,
+            proof_key: ctx.profile.proof_key,
             math: ctx.profile.math,
             point_ops: ctx.storage_proof,
             async_exec: true,

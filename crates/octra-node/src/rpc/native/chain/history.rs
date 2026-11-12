@@ -22,12 +22,7 @@ enum Projection {
     Account,
     Transactions,
 }
-struct ConfirmedRow {
-    hash: String,
-    from: Vec<u8>,
-    to: Vec<u8>,
-    json: Vec<u8>,
-}
+type ConfirmedRow = crate::rpc::public_history::Row;
 type ConfirmedPage = HistoryPage<ConfirmedRow>;
 struct RejectedRow {
     hash: String,
@@ -52,9 +47,6 @@ fn project(
     record: NativeTransaction,
     projection: Projection,
 ) -> std::result::Result<(ConfirmedRow, usize), Fault> {
-    let tx =
-        Transaction::from_document(&Document::parse(&record.transaction).map_err(unavailable)?)
-            .map_err(unavailable)?;
     let json = match projection {
         Projection::Summary => summary(head, &record)?,
         Projection::Recent => projection::prefix(head, &record)?,
@@ -68,8 +60,7 @@ fn project(
     Ok((
         ConfirmedRow {
             hash: record.hash,
-            from: tx.from,
-            to: tx.to,
+            epoch: head.cursor.epoch.0,
             json,
         },
         size,
@@ -110,68 +101,47 @@ async fn confirmed_as(
         .await
         .map_err(history_fault)
 }
+fn public_address(tx: &Transaction, address: &[u8]) -> bool {
+    !matches!(tx.op_type, OpType::Stealth | OpType::Claim)
+        && (tx.from == address || tx.to == address)
+}
 async fn address_confirmed(
     host: &Arc<Context>,
     head: &Head,
     query: &HistoryQuery,
     page: Page,
-    strict: bool,
+    _strict: bool,
     projection: Projection,
 ) -> std::result::Result<ConfirmedPage, Fault> {
     let address = query.address.as_deref().expect("address history");
-    let total = confirmed(
-        host,
-        head,
-        query,
-        Page {
-            limit: 0,
-            offset: 0,
-        },
-    )
-    .await?
-    .total;
-    let scan = (page.limit.saturating_mul(4).max(64) as u64).min(total.saturating_sub(page.offset));
-    let mut result = confirmed_as(
-        host,
-        head,
-        query,
-        Page {
-            limit: scan as usize,
-            offset: page.offset,
-        },
-        projection,
-    )
-    .await?;
-    let mut rows = Vec::new();
-    for row in result.rows {
-        if row.from == address || row.to == address {
-            rows.push(row);
+    let mut result = host
+        .public_history
+        .read(
+            &host.node.reader(),
+            head,
+            address,
+            page.limit,
+            page.offset,
+            |head, record| {
+                let tx = Transaction::from_document(
+                    &Document::parse(&record.transaction).map_err(unavailable)?,
+                )
+                .map_err(unavailable)?;
+                if !public_address(&tx, address) {
+                    return Ok(None);
+                }
+                project(&head, record, Projection::Summary).map(|(row, _)| Some(row))
+            },
+        )
+        .await?;
+    if matches!(projection, Projection::Account) {
+        for row in &mut result.rows {
+            row.json = hash_summary(row.epoch, &row.hash);
         }
     }
-    result.total = if page.offset == 0 && scan == total {
-        rows.len() as u64
-    } else {
-        total
-    };
-    let needed = (page.limit as u64).min(result.total.saturating_sub(page.offset)) as usize;
-    rows.truncate(needed);
-    if strict && rows.len() != needed {
-        let mut fault = Fault::new(116, b"history index incomplete");
-        fault.data = Some(object(&[
-            (
-                "detail",
-                string([b"address history incomplete for ".as_slice(), address].concat()),
-            ),
-            ("address", string(address)),
-            ("offset", number(page.offset)),
-            ("limit", number(page.limit)),
-            ("missing", number(0)),
-        ]));
-        return Err(fault);
-    }
-    result.rows = rows;
     Ok(result)
 }
+
 async fn rejected(
     host: &Arc<Context>,
     head: &Head,
@@ -195,11 +165,15 @@ async fn rejected_as(
             Vec<octra_node_protocol::transaction_outcome::Rejection>,
         )>,
     ));
+    let query = HistoryQuery {
+        public: true,
+        ..query.clone()
+    };
     host.node
         .reader()
         .rejections_projected(
             head,
-            query,
+            &query,
             page.limit,
             page.offset,
             rpc::MAX_SINGLE,
@@ -254,10 +228,17 @@ fn rejection_summary(row: &RejectionRecord) -> std::result::Result<Vec<u8>, Faul
     Ok(object(&[
         ("hash", string(hash)),
         ("epoch", number(row.head.cursor.epoch.0)),
-        ("from", string(&tx.from)),
-        ("to", string(&tx.to)),
+        ("from", string(display_from(tx))),
+        ("to", string(display_to(tx))),
         ("amount", string(tx.amount.to_string())),
-        ("nonce", number(tx.nonce.get())),
+        (
+            "nonce",
+            number(if matches!(tx.op_type, OpType::Stealth | OpType::Claim) {
+                0
+            } else {
+                tx.nonce.get()
+            }),
+        ),
         ("error_type", string(&row.rejection.error_type)),
         ("reason", string(&row.rejection.reason)),
         ("timestamp", float(time)?),
@@ -291,8 +272,7 @@ fn rejection_lookup(row: &RejectionRecord, hash: &[u8]) -> std::result::Result<V
     let time = row
         .observed_at
         .ok_or_else(|| Fault::new(110, b"service unavailable"))?;
-    // Native rejection projections preserve stored addresses; unlike confirmed
-    // summaries they do not carry an op_type field for mask_stealth_rows.
+    // Private rejected transactions use the same redacted identity projection.
     Ok(object(&[
         ("status", string(b"rejected")),
         ("tx_hash", string(hash)),
@@ -304,10 +284,17 @@ fn rejection_lookup(row: &RejectionRecord, hash: &[u8]) -> std::result::Result<V
                 ("reason", string(&row.rejection.reason)),
             ]),
         ),
-        ("from", string(&tx.from)),
-        ("to", string(&tx.to)),
+        ("from", string(display_from(tx))),
+        ("to", string(display_to(tx))),
         ("amount", string(tx.amount.to_string())),
-        ("nonce", number(tx.nonce.get())),
+        (
+            "nonce",
+            number(if matches!(tx.op_type, OpType::Stealth | OpType::Claim) {
+                0
+            } else {
+                tx.nonce.get()
+            }),
+        ),
         ("rejected_at", float(time)?),
         ("source", string(b"rejected_txs")),
     ]))
@@ -438,6 +425,25 @@ pub(super) async fn read(
     doc: &Document,
     params: &Value,
 ) -> std::result::Result<Vec<u8>, Fault> {
+    if method == b"octra_tokenTransfersByAddress" {
+        let _work = host.public_history.token_work()?;
+        return tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            read_inner(host, method, doc, params),
+        )
+        .await
+        .map_err(|_| {
+            Fault::new(110, b"service unavailable").string_data(b"token history deadline")
+        })?;
+    }
+    read_inner(host, method, doc, params).await
+}
+async fn read_inner(
+    host: &Arc<Context>,
+    method: &[u8],
+    doc: &Document,
+    params: &Value,
+) -> std::result::Result<Vec<u8>, Fault> {
     let address = if matches!(
         method,
         b"octra_account"
@@ -473,30 +479,32 @@ pub(super) async fn read(
             address: address.clone(),
             ..HistoryQuery::default()
         };
-        let transactions = address_confirmed(
-            host,
-            &head,
-            &query,
-            Page { limit, offset: 0 },
-            false,
-            Projection::Account,
-        )
-        .await?;
-        let query = HistoryQuery {
-            ascending: true,
-            ..query
-        };
-        let rejections = rejected_as(
-            host,
-            &head,
-            &query,
-            Page { limit, offset: 0 },
-            RejectedProjection::Account,
-        )
-        .await?;
-        let recent = transactions.rows.iter().map(|row| row.json.clone());
-        let rejected = rejections.rows.iter().map(|row| row.json.clone());
-        return Ok(object(&[
+        let history = async {
+            let transactions = address_confirmed(
+                host,
+                &head,
+                &query,
+                Page { limit, offset: 0 },
+                false,
+                Projection::Account,
+            )
+            .await?;
+            let query = HistoryQuery {
+                ascending: true,
+                ..query
+            };
+            let rejections = rejected_as(
+                host,
+                &head,
+                &query,
+                Page { limit, offset: 0 },
+                RejectedProjection::Account,
+            )
+            .await?;
+            Ok::<_, Fault>((transactions, rejections))
+        }
+        .await;
+        let mut fields = vec![
             (
                 "address",
                 string(address.as_deref().expect("account address")),
@@ -511,13 +519,36 @@ pub(super) async fn read(
                     account
                         .encrypted_balance
                         .as_deref()
-                        .is_some_and(|value| value != b"0"),
+                        .is_some_and(|v| v != b"0"),
                 ),
             ),
-            ("tx_count", number(transactions.total)),
-            ("recent_txs", array(recent)),
-            ("rejected_txs", array(rejected)),
-        ]));
+        ];
+        match history {
+            Ok((transactions, rejections)) => fields.extend([
+                ("tx_count", number(transactions.total)),
+                (
+                    "recent_txs",
+                    array(transactions.rows.iter().map(|row| row.json.clone())),
+                ),
+                (
+                    "rejected_txs",
+                    array(rejections.rows.iter().map(|row| row.json.clone())),
+                ),
+            ]),
+            Err(error) => fields.extend([
+                ("history_status", string(b"unavailable")),
+                (
+                    "history_error",
+                    error
+                        .data
+                        .unwrap_or_else(|| string(b"address history unavailable")),
+                ),
+                ("tx_count", b"null".to_vec()),
+                ("recent_txs", array([])),
+                ("rejected_txs", array([])),
+            ]),
+        }
+        return Ok(object(&fields));
     }
     if method == b"octra_transactions" {
         let limit = rpc::param_int(doc, params, 1)
@@ -726,5 +757,55 @@ pub(super) async fn read(
             ]))
         }
         _ => Err(Fault::missing(method)),
+    }
+}
+
+#[cfg(test)]
+mod privacy_tests {
+    use super::*;
+    use octra_node_protocol::transaction::Nonce;
+    fn tx(operation: OpType) -> Transaction {
+        Transaction {
+            from: b"sender".to_vec(),
+            to: b"recipient".to_vec(),
+            amount: 0.into(),
+            nonce: Nonce::new(7).unwrap(),
+            ou: 1.into(),
+            timestamp: 1.,
+            signature: vec![],
+            public_key: None,
+            message: Some(b"secret".to_vec()),
+            op_type: operation,
+            encrypted_data: None,
+        }
+    }
+    #[test]
+    fn private_operations_are_absent_from_both_address_histories() {
+        for operation in [OpType::Stealth, OpType::Claim] {
+            assert!(!public_address(&tx(operation), b"sender"));
+            assert!(!public_address(&tx(operation), b"recipient"));
+        }
+        assert!(public_address(&tx(OpType::Standard), b"sender"));
+        assert!(public_address(&tx(OpType::Standard), b"recipient"));
+        assert!(!public_address(&tx(OpType::Standard), b"other"));
+    }
+    #[test]
+    fn private_message_projection_hides_payload_with_public_control() {
+        for operation in [
+            OpType::CircleProgramUpdate,
+            OpType::CircleAssetPutEncrypted,
+            OpType::CircleSealedSlotPut,
+            OpType::CircleBalanceCellPut,
+            OpType::CircleRegisterCellPut,
+            OpType::CircleCall,
+            OpType::Stealth,
+            OpType::Claim,
+        ] {
+            assert_eq!(super::super::message(&tx(operation)).unwrap(), b"null");
+        }
+        assert_eq!(
+            super::super::message(&tx(OpType::Standard)).unwrap(),
+            b"\"secret\""
+        );
     }
 }

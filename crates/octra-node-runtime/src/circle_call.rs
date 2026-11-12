@@ -45,6 +45,7 @@ pub struct Context {
     pub storage_proof: bool,
     pub fhe_work: bool,
     pub object_cost: bool,
+    pub program_inputs: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
@@ -330,7 +331,8 @@ pub(crate) fn execute_journalled(
         );
     }
     let code = text(code)?;
-    let description = json!({"action":"describe","is_view":true,"code_b64":code,"execution_profile":ctx.manifest.name(),"float_mode":ctx.profile.wasm_float,"inspect_policy":ctx.inspect});
+    let mut description = json!({"action":"describe","is_view":true,"code_b64":code,"execution_profile":ctx.manifest.name(),"float_mode":ctx.profile.wasm_float,"inspect_policy":ctx.inspect,"table_limit":ctx.profile.proof_key,"stable_errors":ctx.profile.proof_key,"code_limit":ctx.profile.proof_key,"proof_key":ctx.profile.proof_key});
+    crate::circle::host_policy(&mut description, ctx.profile.proof_key, ctx.inspect);
     let descriptor = match runtime
         .execute(&serde_json::to_vec(&description).map_err(|e| unavailable(e.to_string()))?)
     {
@@ -428,7 +430,8 @@ pub(crate) fn execute_journalled(
         .iter()
         .map(|(k, v)| json!({"key_b64":STANDARD.encode(k),"value_b64":STANDARD.encode(v)}))
         .collect::<Vec<_>>();
-    let mut input = json!({"action":"execute","code_b64":code,"code_cache_key":hex::encode(Sha256::digest(code.as_bytes())),"execution_profile":"standard","export_name":"octra_update","request_b64":STANDARD.encode(request),"storage_pairs":storage_pairs,"storage_cache_key":null,"caller":ctx.caller,"address":text(circle)?,"tx_hash":ctx.tx_hash,"current_epoch":ctx.epoch,"hfhe_caps":[],"hfhe_pubkeys":[],"hfhe_active_key":null,"hfhe_strict":ctx.hfhe_strict,"hfhe_receipt_mode":"direct","hfhe_receipt_entries":[],"math":ctx.profile.math,"float_mode":ctx.profile.wasm_float,"inspect_policy":ctx.inspect,"fuel_limit":fuel.clamp(0,20_000_000),"is_view":false,"update_policy":ctx.update_policy,"public_reads":circle_reads::engine_reads(&reads).map_err(|e|unavailable(e.0))?,"compute_storage_cache_key":null,"compute_session_scope":null});
+    let mut input = json!({"action":"execute","code_b64":code,"code_cache_key":hex::encode(Sha256::digest(code.as_bytes())),"execution_profile":"standard","export_name":"octra_update","request_b64":STANDARD.encode(request),"storage_pairs":storage_pairs,"storage_cache_key":null,"caller":ctx.caller,"address":text(circle)?,"tx_hash":ctx.tx_hash,"current_epoch":ctx.epoch,"hfhe_caps":[],"hfhe_pubkeys":[],"hfhe_active_key":null,"hfhe_strict":ctx.hfhe_strict,"hfhe_receipt_mode":"direct","hfhe_receipt_entries":[],"math":ctx.profile.math,"float_mode":ctx.profile.wasm_float,"inspect_policy":ctx.inspect,"table_limit":ctx.profile.proof_key,"stable_errors":ctx.profile.proof_key,"code_limit":ctx.profile.proof_key,"proof_key":ctx.profile.proof_key,"fuel_limit":fuel.clamp(0,20_000_000),"is_view":false,"update_policy":ctx.update_policy,"public_reads":circle_reads::engine_reads(&reads).map_err(|e|unavailable(e.0))?,"compute_storage_cache_key":null,"compute_session_scope":null});
+    crate::circle::host_policy(&mut input, ctx.profile.proof_key, ctx.inspect);
     input["hfhe_caps"] = json!(hfhe.caps);
     input["hfhe_pubkeys"] = hfhe.public_json()?;
     match mode {
@@ -608,6 +611,9 @@ fn binding_with_context(
     let mut context_json = hfhe.context_prefix();
     if ctx.profile.math {
         context_json.extend_from_slice(b",\"math\":true");
+    }
+    if ctx.profile.proof_key {
+        context_json.extend_from_slice(b",\"proof_key\":true");
     }
     if ctx.profile.wasm_float {
         context_json.extend_from_slice(b",\"wasm_float\":\"wasm_float:arith_nan_7fc00000_7ff8000000000000:operand_calls:metered_helpers:v1\"");

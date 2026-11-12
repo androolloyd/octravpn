@@ -48,6 +48,7 @@ fn rules(j: &Value) -> Rules {
             compute: mode("compute"),
             settle: mode("settle"),
         },
+        signing: octra_node_protocol::tx_signature::Mode::Historical,
     }
 }
 fn encoded(v: &[Vec<u8>]) -> Value {

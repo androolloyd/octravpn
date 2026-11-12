@@ -99,7 +99,7 @@ serde_json  = { version = "1", features = ["float_roundtrip"] }
 serde_with  = "3"
 sha2        = "0.10"
 thiserror   = "1"
-tokio       = { version = "1", features = ["full"] }
+tokio       = { version = "1.53.3", features = ["full"] }
 toml        = "0.8"
 tracing     = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
@@ -135,3 +135,24 @@ opt-level = 2
 [profile.test.package.curve25519-dalek]
 opt-level = 2
 
+
+# Real Groth16/poseidon qualification should exercise cryptographic arithmetic
+# at deployment speed; the node/test bodies retain debug assertions and symbols.
+[profile.test.package.ark-ff]
+opt-level = 2
+[profile.test.package.ark-ec]
+opt-level = 2
+[profile.test.package.ark-poly]
+opt-level = 2
+[profile.test.package.ark-groth16]
+opt-level = 2
+[profile.test.package.ark-r1cs-std]
+opt-level = 2
+[profile.test.package.ark-crypto-primitives]
+opt-level = 2
+[profile.test.package.ark-relations]
+opt-level = 2
+[profile.test.package.light-poseidon]
+opt-level = 2
+[profile.test.package.octra-private-payments-experimental]
+opt-level = 2

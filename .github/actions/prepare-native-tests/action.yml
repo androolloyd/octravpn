@@ -18,21 +18,32 @@ runs:
         python3 - <<'PY' >> "$GITHUB_OUTPUT"
         import json
         print('commit=' + json.load(open('docs/rust-node/upstream.json'))['commit'])
+        print('candidate=' + json.load(open('docs/rust-node/candidate.json'))['commit'])
         PY
     - uses: actions/checkout@v4
       with:
         repository: octra-labs/lite_node
         ref: ${{ steps.upstream.outputs.commit }}
         path: lite-node
+    - uses: actions/checkout@v4
+      with:
+        repository: octra-labs/lite_node
+        ref: ${{ steps.upstream.outputs.candidate }}
+        path: lite-node-candidate
     - shell: bash
       working-directory: octra
+      env:
+        OCTRA_CIRCLE_UPSTREAM_COMMIT: ${{ steps.upstream.outputs.candidate }}
       run: |
         rustup target add wasm32-unknown-unknown
         cargo build --locked -p octravpn-circle-registry --release --target wasm32-unknown-unknown
         # Literal artifact bytes can differ across build environments. Replay
         # this actual build in the pristine pinned host and keep both explicit
-        # inputs separate from the historical tracked golden fixture.
-        python3 scripts/circle-apps/test-registry-native.py --upstream ../lite-node --out out/registry-native-current.json --runtime-fixture out/circle-engine-current.json
+        # inputs separate from the historical tracked golden fixture. HFHE
+        # budget replay below retains its original source pin.
+        python3 scripts/node-port/check-native-sources.py --upstream ../lite-node-candidate
+        python3 scripts/circle-apps/test-registry-native.py --upstream ../lite-node-candidate --commit "$OCTRA_CIRCLE_UPSTREAM_COMMIT" --out out/registry-native-current.json --runtime-fixture out/circle-engine-current.json
+        echo "OCTRA_CIRCLE_UPSTREAM_COMMIT=$OCTRA_CIRCLE_UPSTREAM_COMMIT" >> "$GITHUB_ENV"
         echo "OCTRA_CIRCLE_REGISTRY_WASM=$PWD/target/wasm32-unknown-unknown/release/octravpn_circle_registry.wasm" >> "$GITHUB_ENV"
         echo "OCTRA_CIRCLE_REGISTRY_FIXTURE=$PWD/out/circle-engine-current.json" >> "$GITHUB_ENV"
         python3 scripts/node-port/hfhe-budget-fixtures.py --mode native --compiler c++ --upstream ../lite-node --out out/hfhe-budget-native.json

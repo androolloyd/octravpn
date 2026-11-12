@@ -101,6 +101,9 @@ enum Command {
         /// Finish an interrupted initialization with the exact original input.
         #[arg(long)]
         resume: bool,
+        /// Export pseudonymous receipt public keys for private operator admission.
+        #[arg(long)]
+        admission_output: Option<PathBuf>,
     },
     /// Show the public native VPN keys used for operator registration.
     VpnIdentity {
@@ -276,6 +279,7 @@ async fn main() -> Result<()> {
             config,
             requests,
             resume,
+            admission_output,
         } => {
             let hops = octra_node::vpn::payments::shielded::payer::startup::route::read_consent(
                 &requests,
@@ -287,6 +291,7 @@ async fn main() -> Result<()> {
                     octra_node::vpn::payments::shielded::startup::Action::RouteConsent {
                         hops,
                         resume,
+                        admission_output,
                     },
                 ),
             )
@@ -462,6 +467,17 @@ mod startup_settings_tests {
                 "private.json",
                 "--requests",
                 "consent.json",
+            ],
+            vec![
+                "octra-node",
+                "private-route-consent",
+                "--config",
+                "private.json",
+                "--requests",
+                "route.json",
+                "--resume",
+                "--admission-output",
+                "admission.json",
             ],
         ] {
             let result = Cli::try_parse_from(args);

@@ -1,6 +1,7 @@
 //! Native local validator duty orchestration. Only committed receipts choose
 //! pulses or appeals; proofs come from the operator's durable vote journal.
 pub mod control;
+pub mod delivery;
 pub mod post;
 use octra_node_protocol::{
     consensus::hash,
@@ -31,6 +32,7 @@ pub enum Admission {
 pub enum Action {
     Pulse,
     Appeal(Proof),
+    Appeals(Vec<Proof>),
 }
 pub struct Sample {
     pub epoch: i64,
@@ -126,6 +128,9 @@ pub trait Host: Send + Sync + 'static {
     fn sample(&self) -> Sample;
     async fn read(&self, epoch: i64) -> Result<Receipt, String>;
     fn peers(&self) -> usize;
+    fn batch(&self) -> bool {
+        false
+    }
     async fn send(&self, epoch: i64, action: Action) -> Result<(), (Fault, String)>;
     fn warn(&self, fault: Fault, reason: &str);
     fn observe(&self, _stage: Stage, _epoch: i64, _proof: &Proof) {}
@@ -399,7 +404,16 @@ impl<H: Host> Actor<H> {
         if current.epoch != sample.epoch || !allowed || state.last_send == Some(current.epoch) {
             return Ok(());
         }
-        let action = if current.active {
+        let action = if current.active && self.0.host.batch() {
+            let mut proofs: Vec<_> = state
+                .appeals
+                .values()
+                .filter(|a| current.epoch >= a.ready && current.epoch <= a.expires)
+                .map(|a| a.proof.clone())
+                .collect();
+            proofs.sort_by_key(|proof| proof.vote.epoch_id);
+            (!proofs.is_empty()).then_some(Action::Appeals(proofs))
+        } else if current.active {
             state
                 .appeals
                 .iter()
@@ -423,8 +437,14 @@ impl<H: Host> Actor<H> {
             );
             return Ok(());
         }
-        if let Action::Appeal(proof) = &action {
-            self.observe(Stage::Attempt, current.epoch, proof);
+        match &action {
+            Action::Appeal(proof) => self.observe(Stage::Attempt, current.epoch, proof),
+            Action::Appeals(proofs) => {
+                for proof in proofs {
+                    self.observe(Stage::Attempt, current.epoch, proof);
+                }
+            }
+            Action::Pulse => {}
         }
         match self.0.host.send(current.epoch, action).await {
             Ok(()) => {

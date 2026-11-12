@@ -7,7 +7,7 @@ native allocator. No OCaml runtime or sidecar is needed for these operations.
 
 Current surface: seeded key generation/encryption, imports/exports, signed
 decryption, addition/subtraction, profile-aware scale/constant addition, and
-commitments. Proof verification and its isolated worker remain separate node
+commitments, public-key proof digests, and powers validation. Proof verification and its isolated worker remain separate node
 integration work. Handles are thread-confined; no unchecked `Send`/`Sync` impls.
 
 ```sh
@@ -20,6 +20,7 @@ key/cipher, native operation, allocation and release. It measures the call
 boundary, not serialization, key loading, proof verification or node throughput.
 No production credentials are used or printed.
 
-`vendor/octra-pvac/PROVENANCE.json` pins all adopted source hashes. This tree is
+`vendor/octra-pvac/PROVENANCE.json` pins all source hashes to candidate
+`c49de45cf49ebbc2e5c0697eb956cbcada5845e7`, including proof-key binding. This tree is
 separate from the older GPL `pvac-sidecar`; that sidecar's license and IPC
 boundary remain intact.

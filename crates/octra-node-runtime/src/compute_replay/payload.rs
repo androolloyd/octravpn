@@ -3,6 +3,11 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use octra_node_protocol::{resource_compute::graph::CachePlan, transaction::json_string};
 const LIMIT: usize = 8_000_000;
 
+fn code_mode(chain: &[u8], epoch: i64) -> bool {
+    use octra_node_protocol::rules::{self, Rule};
+    rules::activation(chain, Rule::ProofKey).is_some_and(|plan| epoch >= plan.activation_epoch)
+}
+
 fn quoted_size(value: &[u8]) -> usize {
     2 + value
         .iter()
@@ -57,6 +62,14 @@ impl Fields {
     fn number(&mut self, name: &[u8], value: i64) -> Result<()> {
         self.raw(name, value.to_string().as_bytes())
     }
+    fn modes(&mut self, chain: &[u8], epoch: i64) -> Result<()> {
+        self.raw(b"table_limit", b"true")?;
+        self.raw(b"stable_errors", b"true")?;
+        if code_mode(chain, epoch) {
+            self.raw(b"code_limit", b"true")?;
+        }
+        Ok(())
+    }
     fn finish(mut self) -> Vec<u8> {
         self.bytes.push(b'}');
         self.bytes
@@ -77,6 +90,7 @@ pub(super) fn encode(
         let limits = request.limits;
         let request_b64 = STANDARD.encode(request_bytes);
         let mut out = Fields::new(LIMIT - total);
+        out.modes(&request.chain_id, request.epoch_id)?;
         for (name, value) in [
             (b"action".as_slice(), b"execute".as_slice()),
             (b"code_b64", program.code_b64),
@@ -124,6 +138,7 @@ pub(super) fn encode(
     Ok(out)
 }
 pub(super) fn single(
+    chain: &[u8],
     request: &octra_node_protocol::resource_compute::provider::Execute,
     program: &crate::compute_provider::Program,
     model: &crate::compute_provider::owner::Model,
@@ -134,6 +149,7 @@ pub(super) fn single(
     // The native host checks the actual serialized transport size. A warm
     // module may omit code even when a full cold transport would exceed it.
     let mut out = Fields::new(usize::MAX);
+    out.modes(chain, request.epoch_id)?;
     out.number(b"guest_bytes", request.guest_bytes)?;
     out.number(b"memory_bytes", request.memory_bytes)?;
     out.string(b"action", b"execute")?;
@@ -170,4 +186,29 @@ pub(super) fn single(
     out.raw(b"is_view", b"true")?;
     out.raw(b"update_policy", b"false")?;
     Ok(out.finish())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use octra_node_protocol::{
+        consensus::policy::DEVNET,
+        rules::{self, Rule},
+    };
+    #[test]
+    fn table_safety_is_always_enabled_but_source_shape_follows_request_epoch() {
+        let activation = rules::activation(DEVNET, Rule::ProofKey)
+            .unwrap()
+            .activation_epoch;
+        for (epoch, limited) in [(activation - 1, false), (activation, true)] {
+            let mut fields = Fields::new(1024);
+            fields.modes(DEVNET, epoch).unwrap();
+            let json: serde_json::Value = serde_json::from_slice(&fields.finish()).unwrap();
+            assert_eq!(json["table_limit"], true);
+            assert_eq!(json["stable_errors"], true);
+            assert_eq!(json.get("code_limit").is_some(), limited);
+            assert!(json.get("proof_key").is_none());
+        }
+        assert!(!code_mode(b"other-network", i64::MAX));
+    }
 }

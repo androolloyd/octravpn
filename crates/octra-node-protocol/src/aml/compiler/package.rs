@@ -2,7 +2,8 @@
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 //! Rule-selected OCPS compilation and independent source admission.
 use super::{
-    compile_source, prior, program, protocol, AbiMode, BTreeMap, CompileError, Output, Version,
+    compile_source_metered, prior, program, protocol, AbiMode, BTreeMap, CompileError, Output,
+    Version,
 };
 use crate::{
     octb::admission,
@@ -68,6 +69,9 @@ pub struct Built {
 }
 #[derive(Clone, Debug)]
 pub struct AdmittedSource {
+    pub main: Vec<u8>,
+    pub sources: Vec<Source>,
+    pub result: Output,
     envelope: Vec<u8>,
     program: admission::Admitted,
 }
@@ -97,13 +101,39 @@ fn admitted(envelope: &[u8], point_ops: bool) -> Result<admission::Admitted> {
         }
     })
 }
+// Keep the independent native compiler/admission rule switches explicit.
+#[allow(clippy::fn_params_excessive_bools)]
 fn build(
     mut package: Package,
     compiler: CompilerMode,
     point_ops: bool,
     loops: bool,
     described: bool,
+    metered: bool,
+    consts: bool,
 ) -> Result<Built> {
+    if consts {
+        for source in &package.sources {
+            let ast = super::super::parser::parse(&source.body).map_err(|error| match error {
+                super::super::parser::Error::Unavailable(reason) => Error::Unavailable(reason),
+                super::super::parser::Error::Lex(error)
+                | super::super::parser::Error::Parse(error) => Error::Rejected(
+                    [
+                        b"Program compile failed: ".as_slice(),
+                        format!("line {}: ", error.line).as_bytes(),
+                        &error.message,
+                    ]
+                    .concat(),
+                ),
+                super::super::parser::Error::Native(reason) => {
+                    Error::Rejected([b"Program compile failed: ".as_slice(), &reason].concat())
+                }
+            })?;
+            super::super::scope::check_consts(&ast).map_err(|reason| {
+                Error::Rejected([b"Program compile failed: ".as_slice(), &reason].concat())
+            })?;
+        }
+    }
     let sources: BTreeMap<_, _> = package
         .sources
         .iter()
@@ -117,14 +147,17 @@ fn build(
     };
     let result = match package.compiler_profile {
         1 => match compiler {
-            CompilerMode::Source => compile_source(resolver, &package.main, loops, Version::Source),
+            CompilerMode::Source => {
+                compile_source_metered(resolver, &package.main, loops, Version::Source, metered)
+            }
             CompilerMode::Preview => {
-                compile_source(resolver, &package.main, loops, Version::Preview)
+                compile_source_metered(resolver, &package.main, loops, Version::Preview, metered)
             }
             CompilerMode::Protocol if point_ops => protocol::compile_program_multi(
                 resolver,
                 &package.main,
                 protocol::Options {
+                    metered,
                     loops,
                     checked: false,
                     abi: if described {
@@ -197,6 +230,16 @@ pub fn compile_at(
     point_ops: bool,
     loops: bool,
 ) -> Result<Built> {
+    compile_at_metered(main, sources, compiler, point_ops, loops, false)
+}
+pub fn compile_at_metered(
+    main: &[u8],
+    sources: Vec<Source>,
+    compiler: CompilerMode,
+    point_ops: bool,
+    loops: bool,
+    metered: bool,
+) -> Result<Built> {
     if compiler != CompilerMode::Protocol && !point_ops {
         return Err(Error::Rejected(
             b"unsupported Program compiler profile".to_vec(),
@@ -214,6 +257,8 @@ pub fn compile_at(
         point_ops,
         loops,
         true,
+        metered,
+        false,
     )
 }
 pub fn admit_base64(
@@ -230,6 +275,18 @@ pub fn admit_with(
     point_ops: bool,
     loops: bool,
 ) -> Result<AdmittedSource> {
+    admit_with_rules(encoded, compiler, point_ops, loops, false, false)
+}
+// Keep the independent native compiler/admission rule switches explicit.
+#[allow(clippy::fn_params_excessive_bools)]
+pub fn admit_with_rules(
+    encoded: &[u8],
+    compiler: CompilerMode,
+    point_ops: bool,
+    loops: bool,
+    metered: bool,
+    consts: bool,
+) -> Result<AdmittedSource> {
     if compiler != CompilerMode::Protocol && !point_ops {
         return Err(Error::Rejected(
             b"unsupported Program compiler profile".to_vec(),
@@ -245,6 +302,8 @@ pub fn admit_with(
         point_ops,
         loops,
         false,
+        metered,
+        consts,
     );
     let built = if compiler == CompilerMode::Preview {
         match built {
@@ -259,6 +318,8 @@ pub fn admit_with(
                 point_ops,
                 loops,
                 false,
+                metered,
+                consts,
             )?,
         }
     } else {
@@ -271,20 +332,48 @@ pub fn admit_with(
     }
     let program = admitted(&package.envelope, point_ops)?;
     Ok(AdmittedSource {
+        main: package.main,
+        sources: package.sources,
+        result: built.result,
         envelope: package.envelope,
         program,
     })
 }
 pub fn admit_transition(encoded: &[u8], point_ops: bool, loops: bool) -> Result<AdmittedSource> {
+    admit_transition_rules(encoded, point_ops, loops, false, false)
+}
+// Keep the independent native compiler/admission rule switches explicit.
+#[allow(clippy::fn_params_excessive_bools)]
+pub fn admit_transition_rules(
+    encoded: &[u8],
+    point_ops: bool,
+    loops: bool,
+    metered: bool,
+    consts: bool,
+) -> Result<AdmittedSource> {
     if !point_ops {
         return Err(Error::Rejected(
             b"unsupported Program compiler profile".to_vec(),
         ));
     }
-    match admit_with(encoded, CompilerMode::Source, point_ops, loops) {
+    match admit_with_rules(
+        encoded,
+        CompilerMode::Source,
+        point_ops,
+        loops,
+        metered,
+        consts,
+    ) {
         Ok(admitted) => Ok(admitted),
         Err(error @ Error::Unavailable(_)) => Err(error),
-        Err(source_error) => match admit_with(encoded, CompilerMode::Protocol, point_ops, loops) {
+        Err(source_error) => match admit_with_rules(
+            encoded,
+            CompilerMode::Protocol,
+            point_ops,
+            loops,
+            metered,
+            consts,
+        ) {
             Ok(admitted) => Ok(admitted),
             Err(error @ Error::Unavailable(_)) => Err(error),
             Err(_) => Err(source_error),

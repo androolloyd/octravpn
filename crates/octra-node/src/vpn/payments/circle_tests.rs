@@ -49,6 +49,7 @@ pub(super) fn payload(code: &[u8]) -> Value {
 fn rules() -> Rules {
     Rules {
         wasm: WasmRules {
+            proof_key: false,
             wasm_float: true,
             proof_exec: true,
             math: true,
@@ -59,6 +60,7 @@ fn rules() -> Rules {
         storage_proof: true,
         fhe_work: true,
         object_cost: true,
+        program_inputs: false,
     }
 }
 struct Circle {

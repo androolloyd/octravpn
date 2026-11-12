@@ -68,3 +68,5 @@ pub mod legacy_tree;
 pub mod single;
 
 pub mod legacy_epoch;
+
+pub mod tx_signature;

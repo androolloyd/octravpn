@@ -32,6 +32,8 @@ fn authority() -> EpochRules {
 fn policy() -> octra_node_runtime::private_key::Policy {
     octra_node_runtime::private_key::Policy {
         balance: private_balance::Profile {
+            keyed: false,
+            registered: false,
             fields: RuleMode::Prior,
             strict: false,
             math: octra_hfhe::scalar::ScalarRule::Prior,
@@ -51,6 +53,7 @@ fn rules() -> octra_node_runtime::consensus_bundle::Rules {
             compute: RuleMode::Prior,
             settle: RuleMode::Prior,
         },
+        signing: octra_node_protocol::tx_signature::Mode::Historical,
     }
 }
 fn transaction() -> Transaction {

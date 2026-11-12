@@ -272,8 +272,8 @@ pub(super) async fn ingress(
                 let ledger=account_store::ledger(&StateBatch::from_snapshot(view.state().clone()))?;
                 let pending=node.inspect_pool(|pool|pool.all().cloned().collect::<Vec<_>>())?.into_iter().map(|tx|Ok((hex::encode(tx.hash()?).into_bytes(),tx))).collect::<Result<_>>()?;
                 let mut captured=Captured{node:node.clone(),now:now()?,pending,ledger,transactions:vec![],effects:vec![]};
-                if ingress.receive(&peer.hello().node_id,&frame.payload,p2p_transaction::Rules{max_drift:node.settings().maximum_timestamp_drift,duty:None,bft:false},&mut captured).is_err(){continue;}
-                for effect in captured.effects {p2p_transaction::deliver(&swarm,&peer,effect).await?;}
+                if ingress.receive(&peer.hello().node_id,&frame.payload,p2p_transaction::Rules{signing:octra_node_protocol::tx_signature::at(node.store().chain().chain_id.as_bytes(),i64::try_from(view.head().cursor.epoch.0)?.saturating_add(1)),duty_marks:false,max_drift:node.settings().maximum_timestamp_drift,duty:None,bft:false},&mut captured).is_err(){continue;}
+                for effect in captured.effects {let lookup=node.clone();p2p_transaction::deliver(&swarm,&peer,effect,move |hash|lookup.inspect_pool(|pool|pool.find(hash).cloned()).ok().flatten()).await?;}
                 for tx in captured.transactions {if let Ok(hash)=node.submit(tx,now()?).await {let _=facade.announce(hash,Some(&peer.hello().node_id)).await;}}
             }
         }

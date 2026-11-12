@@ -3,9 +3,8 @@
 use crate::import::Executor as _;
 use crate::{peers::Authority, rpc::Submission, Committed, Host};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::SigningKey;
 use octra_node_protocol::{
-    consensus::codec::Wire,
     duty,
     light_rpc::json::{object, string},
     native_json::{Document, Value},
@@ -53,6 +52,7 @@ struct Capture {
     epoch: i64,
     candidate: Option<Candidate>,
     mode: RuleMode,
+    marks: bool,
     active: bool,
 }
 struct Delivery<A: Host> {
@@ -94,6 +94,7 @@ impl<A: Host> Delivery<A> {
             epoch,
             candidate,
             mode: rules::at(chain, Rule::ReadyExecution, epoch),
+            marks: rules::at(chain, Rule::DutyMarks, epoch) == RuleMode::Active,
             active: self
                 .authority
                 .compute_validators()
@@ -241,7 +242,7 @@ impl<A: Host> Delivery<A> {
         {
             return Err("validator duty head changed".into());
         }
-        if duty::expired(&tx, Some(fresh.epoch - 1), fresh.mode) {
+        if duty::expired_with_marks(&tx, Some(fresh.epoch - 1), fresh.mode, fresh.marks) {
             return Err("validator ready head has expired".into());
         }
         let expected = hex::encode(tx.hash().map_err(text)?).into_bytes();
@@ -357,7 +358,7 @@ impl<A: Host> post::Host for Delivery<A> {
             head + 1,
         );
         let capture = self.capture();
-        control::eligible(
+        control::eligible_with_marks(
             mode,
             head,
             bonded_epoch,
@@ -370,6 +371,11 @@ impl<A: Host> post::Host for Delivery<A> {
                 })
                 .map_err(String::as_str),
             tx,
+            rules::at(
+                self.submission.node.store.chain().chain_id.as_bytes(),
+                Rule::DutyMarks,
+                head + 1,
+            ) == RuleMode::Active,
         )
     }
     async fn post(
@@ -479,6 +485,9 @@ impl<A: Host> actor::Host for Duty<A> {
     fn peers(&self) -> usize {
         self.delivery.submission.swarm.peers().len()
     }
+    fn batch(&self) -> bool {
+        self.delivery.capture().is_ok_and(|capture| capture.marks)
+    }
     async fn send(&self, epoch: i64, action: Action) -> Result<(), (Fault, String)> {
         if self.post.pending() {
             self.post.tick();
@@ -580,29 +589,40 @@ impl<A: Host> actor::Host for Duty<A> {
             if let Some(proposal) = &proposal {
                 fields.push(("head_proposal_id", string(proposal)));
             }
-            if let Action::Appeal(proof) = action {
-                fields.push((
-                    "duty_vote",
-                    string(
-                        STANDARD.encode(
-                            proof
-                                .vote
-                                .encode()
-                                .map_err(|e| (Fault::Send, e.to_string()))?,
-                        ),
-                    ),
-                ));
-                fields.push((
-                    "duty_commit",
-                    string(
-                        STANDARD.encode(
-                            proof
-                                .commit
-                                .encode()
-                                .map_err(|e| (Fault::Send, e.to_string()))?,
-                        ),
-                    ),
-                ));
+            let proofs = match action {
+                Action::Pulse => vec![],
+                Action::Appeal(proof) => vec![proof],
+                Action::Appeals(proofs) => proofs,
+            };
+            if !proofs.is_empty() {
+                let extra = if fresh.marks {
+                    let state = fresh
+                        .view
+                        .state()
+                        .get(&[b"meta", set_fold::META_KEY])
+                        .map(set_fold::State::from_bytes)
+                        .transpose()
+                        .map_err(|e| (Fault::Send, e.to_string()))?
+                        .unwrap_or_default();
+                    actor::delivery::mark_fields(
+                        &fields,
+                        epoch,
+                        self.delivery
+                            .submission
+                            .node
+                            .store
+                            .chain()
+                            .chain_id
+                            .as_bytes(),
+                        &self.delivery.submission.address,
+                        &state,
+                        &proofs,
+                    )
+                } else {
+                    actor::delivery::proof_fields(&proofs[0])
+                }
+                .map_err(|e| (Fault::Send, e))?;
+                fields.extend(extra);
             }
             let mut tx = Transaction {
                 from: self.delivery.submission.address.clone(),
@@ -622,17 +642,19 @@ impl<A: Host> actor::Host for Duty<A> {
                 encrypted_data: None,
             };
             tx.ou = transaction_policy::ou_cost(&tx, &0.into());
-            tx.signature = STANDARD
-                .encode(
-                    self.delivery
-                        .key
-                        .sign(
-                            &tx.signing_bytes()
-                                .map_err(|e| (Fault::Send, e.to_string()))?,
-                        )
-                        .to_bytes(),
-                )
-                .into_bytes();
+            let signing = octra_node_protocol::tx_signature::at(
+                self.delivery
+                    .submission
+                    .node
+                    .store
+                    .chain()
+                    .chain_id
+                    .as_bytes(),
+                epoch,
+            );
+            tx = signing
+                .sign(&tx, &self.delivery.key)
+                .map_err(|e| (Fault::Send, e))?;
             let hash = self
                 .delivery
                 .stage(

@@ -46,7 +46,8 @@ pub(super) fn execute(
     budget: &mut Budget,
 ) -> Result<VmReceipt, Error> {
     let code = text(encoded)?;
-    let mut input = json!({"action":"describe","is_view":true,"float_mode":profile.wasm().wasm_float,"code_b64":code,"execution_profile":"manifest","inspect_policy":true});
+    let mut input = json!({"action":"describe","is_view":true,"float_mode":profile.wasm().wasm_float,"code_b64":code,"execution_profile":"manifest","inspect_policy":true,"table_limit":profile.wasm().proof_key,"stable_errors":profile.wasm().proof_key,"code_limit":profile.wasm().proof_key,"proof_key":profile.wasm().proof_key});
+    crate::circle::host_policy(&mut input, profile.wasm().proof_key, true);
     let bytes = serde_json::to_vec(&input).map_err(unavailable)?;
     input.take();
     let description = runtime.execute(&bytes).map_err(native)?;
@@ -141,11 +142,12 @@ pub(super) fn execute(
     let public = hfhe.public_json()?;
     let caller = text(caller)?;
     let address = text(&info.circle_id)?;
-    let mut input = json!({"action":"execute","float_mode":profile.wasm().wasm_float,"inspect_policy":true,"code_cache_key":hex::encode(Sha256::digest(encoded)),"code_b64":code,
+    let mut input = json!({"action":"execute","float_mode":profile.wasm().wasm_float,"inspect_policy":true,"table_limit":profile.wasm().proof_key,"stable_errors":profile.wasm().proof_key,"code_limit":profile.wasm().proof_key,"proof_key":profile.wasm().proof_key,"code_cache_key":hex::encode(Sha256::digest(encoded)),"code_b64":code,
         "export_name":"octra_query","request_b64":STANDARD.encode(request),"storage_cache_key":storage_key,"storage_pairs":storage_pairs,"caller":caller,"address":address,
         "tx_hash":"0".repeat(64),"current_epoch":profile.epoch,"hfhe_caps":hfhe.caps,"hfhe_pubkeys":public,"hfhe_active_key":null,"hfhe_strict":true,
         "math":profile.math,"hfhe_receipt_mode":"direct","hfhe_receipt_entries":[],"public_reads":reads,"fuel_limit":fuel,"compute_storage_cache_key":null,
         "compute_session_scope":null,"execution_profile":execution_profile,"is_view":true,"update_policy":false});
+    crate::circle::host_policy(&mut input, profile.wasm().proof_key, true);
     if profile.wasm().proof_exec {
         input["hfhe_pairs"] = json!(true);
     }

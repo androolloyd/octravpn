@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 //! Vote aggregation after validator authentication by the engine boundary.
-use super::{Bytes, ValidatorSet, Vote, NIL};
+use super::{policy::QuorumPolicy, Bytes, ValidatorSet, Vote, NIL};
 use num_bigint::BigInt;
 use std::collections::BTreeMap;
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,10 +29,10 @@ impl VoteSet {
     pub(super) fn weight(&self, pid: &[u8]) -> BigInt {
         self.by_pid_weight.get(pid).cloned().unwrap_or_default()
     }
-    pub(super) fn nil_quorum(&self, chain: &[u8], epoch: i64, set: &ValidatorSet) -> bool {
-        set.quorum_reached_at(chain, epoch, self.count_nil, &self.weight_nil)
+    pub(super) fn nil_quorum(&self, policy: QuorumPolicy, epoch: i64, set: &ValidatorSet) -> bool {
+        set.quorum_reached_for_policy(policy, epoch, self.count_nil, &self.weight_nil)
     }
-    pub(super) fn add(&mut self, vote: Vote, set: &ValidatorSet) -> VoteAdd {
+    pub(super) fn add(&mut self, vote: Vote, set: &ValidatorSet, policy: QuorumPolicy) -> VoteAdd {
         if self.votes.contains_key(&vote.validator) {
             return VoteAdd::Duplicate;
         }
@@ -55,10 +55,10 @@ impl VoteSet {
             self.by_pid_weight
                 .insert(vote.proposal_id.clone(), signed.clone());
         }
-        let result = if set.quorum_reached_at(&vote.chain_id, vote.epoch_id, count, &signed) {
+        let result = if set.quorum_reached_for_policy(policy, vote.epoch_id, count, &signed) {
             VoteAdd::QuorumOf(vote.proposal_id.clone())
-        } else if set.quorum_reached_at(
-            &vote.chain_id,
+        } else if set.quorum_reached_for_policy(
+            policy,
             vote.epoch_id,
             self.count_total,
             &self.weight_total,
@@ -70,29 +70,36 @@ impl VoteSet {
         self.votes.insert(vote.validator.clone(), vote);
         result
     }
-    pub(super) fn quorum_pid(&self, chain: &[u8], epoch: i64, set: &ValidatorSet) -> Option<Bytes> {
+    pub(super) fn quorum_pid(
+        &self,
+        policy: QuorumPolicy,
+        epoch: i64,
+        set: &ValidatorSet,
+    ) -> Option<Bytes> {
         self.by_pid_weight
             .iter()
             .find(|(pid, w)| {
-                pid.as_slice() != NIL && set.quorum_reached_at(chain, epoch, self.count(pid), w)
+                pid.as_slice() != NIL
+                    && set.quorum_reached_for_policy(policy, epoch, self.count(pid), w)
             })
             .map(|(p, _)| p.clone())
     }
-    pub(super) fn quorum(&self, chain: &[u8], epoch: i64, set: &ValidatorSet) -> VoteAdd {
-        if let Some(pid) = self.quorum_pid(chain, epoch, set) {
+    pub(super) fn quorum(&self, policy: QuorumPolicy, epoch: i64, set: &ValidatorSet) -> VoteAdd {
+        if let Some(pid) = self.quorum_pid(policy, epoch, set) {
             VoteAdd::QuorumOf(pid)
-        } else if self.nil_quorum(chain, epoch, set) {
+        } else if self.nil_quorum(policy, epoch, set) {
             VoteAdd::QuorumOf(NIL.to_vec())
-        } else if set.quorum_reached_at(chain, epoch, self.count_total, &self.weight_total) {
+        } else if set.quorum_reached_for_policy(policy, epoch, self.count_total, &self.weight_total)
+        {
             VoteAdd::QuorumAny
         } else {
             VoteAdd::Added
         }
     }
-    pub(super) fn project(&self, set: &ValidatorSet) -> Self {
+    pub(super) fn project(&self, set: &ValidatorSet, policy: QuorumPolicy) -> Self {
         let mut out = Self::default();
         for v in self.votes.values() {
-            out.add(v.clone(), set);
+            out.add(v.clone(), set, policy);
         }
         out
     }

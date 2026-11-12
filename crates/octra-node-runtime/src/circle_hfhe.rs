@@ -129,7 +129,14 @@ fn verifier_cipher(raw: &str, cap: bool) -> Result<Cipher> {
     }
     Ok(cipher)
 }
-fn verify(input: &Value, public: &PublicKey, action: &str, cap: bool, math: bool) -> Result<Value> {
+fn verify(
+    input: &Value,
+    public: &PublicKey,
+    action: &str,
+    cap: bool,
+    math: bool,
+    keyed: bool,
+) -> Result<Value> {
     let raw = string(input, "ciphertext")?;
     let proof = string(input, "proof")?;
     let bound = action != "verify_zero";
@@ -169,7 +176,7 @@ fn verify(input: &Value, public: &PublicKey, action: &str, cap: bool, math: bool
         let commitment = commitment
             .map(|value| bytes32(&json!({"amount_commitment":value}), "amount_commitment"))
             .transpose()?;
-        if !public.supports_alias_rejection() {
+        if !public.supports_alias_rejection() || (keyed && !public.powers_ok()) {
             return Ok(false);
         }
         // The worker receives canonical reserialization, then applies its own
@@ -184,7 +191,7 @@ fn verify(input: &Value, public: &PublicKey, action: &str, cap: bool, math: bool
             ScalarRule::Prior
         };
         if let Some(commitment) = commitment {
-            proof_result(zero::verify_bound(
+            proof_result(zero::verify_bound_keyed(
                 public,
                 &decoded,
                 &proof,
@@ -196,9 +203,12 @@ fn verify(input: &Value, public: &PublicKey, action: &str, cap: bool, math: bool
                 },
                 strict,
                 rule,
+                keyed,
             ))
         } else {
-            proof_result(zero::verify_zero(public, &decoded, &proof, rule))
+            proof_result(zero::verify_zero_keyed(
+                public, &decoded, &proof, rule, keyed,
+            ))
         }
     };
     match run() {
@@ -212,6 +222,7 @@ fn run(input: &Value) -> Result<Value> {
         return Err(rejected("invalid payload"));
     }
     let cap = boolean(input, "cap", None)?;
+    let keyed = boolean(input, "proof_key", Some(false))?;
     let math = boolean(input, "math", Some(false))?;
     let pairs = boolean(input, "hfhe_pairs", Some(false))?;
     let action = string(input, "action")?;
@@ -365,7 +376,7 @@ fn run(input: &Value) -> Result<Value> {
             };
             Ok(Value::String(STANDARD.encode(commitment)))
         }
-        _ => verify(input, &public, action, cap, math),
+        _ => verify(input, &public, action, cap, math, keyed),
     }
 }
 pub(crate) fn local(input: &Value) -> Value {

@@ -93,6 +93,15 @@ int octra_pvac_commit(void* pk, void* ct, uint8_t* output) {
         std::memcpy(output, commitment.data(), 32); return 0;
     }, -1);
 }
+int octra_pvac_proof_key_digest(void* pk, uint8_t* output) {
+    return guarded<int>([&] {
+        auto digest = pvac::proof_key_digest(object<pvac::PubKey>(pk));
+        std::memcpy(output, digest.data(), 32); return 0;
+    }, -1);
+}
+int octra_pvac_pubkey_powers_ok(void* pk) {
+    return guarded<int>([&] { return pvac::pubkey_powers_ok(object<pvac::PubKey>(pk)) ? 1 : 0; }, -1);
+}
 int octra_pvac_pedersen(uint64_t amount, const uint8_t* blinding, uint8_t* output) {
     return guarded<int>([&] {
         auto value = pvac::pedersen_commit(pvac::bp::sc_from_u64(amount), pvac::sc_reduce256(blinding));

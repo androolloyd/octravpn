@@ -6,12 +6,15 @@ use super::{
     UnOp,
 };
 use num_traits::Zero;
+use std::collections::{BTreeMap, BTreeSet};
+type CacheKey = (Name, Vec<(Name, TypeId)>);
 enum Aggregate {
     Call(Name),
     Array,
     Tuple,
 }
 enum Task {
+    ConstantDone(CacheKey, BTreeSet<Name>),
     Infer(ExprId, Env),
     Unary(UnOp),
     Binary(BinOp, ExprId, ExprId),
@@ -84,10 +87,22 @@ impl Checker<'_> {
         Ok(self.nodes.intern(typ))
     }
     pub(super) fn infer(&mut self, env: &Env, id: ExprId) -> Result<TypeId> {
+        let mut inferred = BTreeMap::<CacheKey, (TypeId, BTreeSet<Name>)>::new();
+        let mut used = BTreeSet::new();
         let mut tasks = vec![Task::Infer(id, env.clone())];
         let mut values: Vec<TypeId> = vec![];
         while let Some(task) = tasks.pop() {
             match task {
+                Task::ConstantDone(key, outer) => {
+                    inferred.insert(
+                        key,
+                        (
+                            *values.last().expect("constant inferred value"),
+                            used.clone(),
+                        ),
+                    );
+                    used.extend(outer);
+                }
                 Task::Infer(id, mut env) => {
                     let expr = self.nodes.expression(id).clone();
                     let typ = match expr {
@@ -115,10 +130,10 @@ impl Checker<'_> {
                                 continue;
                             }
                             if let Some(constant) = self
-                                .contract
+                                .symbols
                                 .consts
-                                .iter()
-                                .find(|constant| constant.name == name)
+                                .get(&name[..])
+                                .map(|&index| &self.contract.consts[index])
                             {
                                 if env.active.contains(&name) {
                                     return Err(invalid(
@@ -130,9 +145,25 @@ impl Checker<'_> {
                                     ));
                                 }
                                 if self.nodes.typ(constant.typ) == &Type::Void {
-                                    Arc::make_mut(&mut env.active).push(name);
-                                    tasks.push(Task::Infer(constant.value, env));
+                                    let key = (name.clone(), (*env.locals).clone());
+                                    if let Some((typ, dependencies)) =
+                                        inferred.get(&key).filter(|(_, dependencies)| {
+                                            env.active
+                                                .iter()
+                                                .all(|name| !dependencies.contains(name))
+                                        })
+                                    {
+                                        used.extend(dependencies.iter().cloned());
+                                        values.push(*typ);
+                                    } else {
+                                        let outer = std::mem::take(&mut used);
+                                        used.insert(name.clone());
+                                        Arc::make_mut(&mut env.active).push(name);
+                                        tasks.push(Task::ConstantDone(key, outer));
+                                        tasks.push(Task::Infer(constant.value, env));
+                                    }
                                 } else {
+                                    used.insert(name);
                                     values.push(constant.typ);
                                 }
                                 continue;
@@ -167,10 +198,10 @@ impl Checker<'_> {
                         }
                         Expr::EnumVariant(name, variant) => {
                             let enumeration = self
-                                .contract
+                                .symbols
                                 .enums
-                                .iter()
-                                .find(|item| item.name == name)
+                                .get(&name[..])
+                                .map(|&index| &self.contract.enums[index])
                                 .ok_or_else(|| {
                                     invalid(
                                         [b"enum is undefined name = ".as_slice(), &name].concat(),

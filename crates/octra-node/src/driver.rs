@@ -32,6 +32,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 mod liveness;
+mod relief;
 mod upgrade;
 
 fn error(e: impl std::fmt::Display) -> Error {
@@ -654,6 +655,24 @@ impl<A: Host> DriverHost for Validator<A> {
     async fn activate(&self, number: i64) -> Result<ValidatorSet, Error> {
         let head = self.node.snapshot().map_err(error)?.head().clone();
         self.activate_at(number, head).await
+    }
+    async fn relief_plan(
+        &self,
+        number: i64,
+        current: &ValidatorSet,
+    ) -> Result<Option<octra_node_runtime::consensus_driver::ReliefPlan>, Error> {
+        self.canonical_relief_plan(number, current).await
+    }
+    async fn install_relief(&self, number: i64, target: &ValidatorSet) -> Result<(), Error> {
+        let epoch = self.epoch()?;
+        if epoch.number != number {
+            return Err("relief epoch differs".into());
+        }
+        let selected = self.activate_at(number, epoch.head.clone()).await?;
+        if &selected != target {
+            return Err("relief selection differs from durable authority".into());
+        }
+        Ok(())
     }
     async fn validators(&self, number: i64) -> Result<ValidatorSet, Error> {
         let epoch = self.epoch()?;

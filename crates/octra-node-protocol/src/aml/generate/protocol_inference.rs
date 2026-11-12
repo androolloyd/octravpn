@@ -69,9 +69,7 @@ impl Generator<'_> {
                             && (!checked || env.find(&name).is_none())
                         {
                             Type::Int
-                        } else if let Some(constant) =
-                            self.contract.consts.iter().find(|item| item.name == name)
-                        {
+                        } else if let Some(constant) = self.constant(&name) {
                             values.push(constant.typ);
                             continue;
                         } else if let Some(typ) = env.find(&name) {
@@ -135,12 +133,7 @@ impl Generator<'_> {
                                 .flatten()
                             {
                                 typ
-                            } else if let Some(function) = self
-                                .contract
-                                .functions
-                                .iter()
-                                .find(|function| function.name == name)
-                            {
+                            } else if let Some(function) = self.function_by_name(&name) {
                                 values.push(function.ret);
                                 continue;
                             } else {

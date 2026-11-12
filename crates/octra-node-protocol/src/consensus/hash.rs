@@ -252,7 +252,17 @@ pub fn validator_set_hash(set: &ValidatorSet) -> Result<Hash, Error> {
                 )?;
             }
             Ok(())
-        })
+        })?;
+        if let Some((height, entries)) = &set.authors {
+            w.put_bytes(b"octra:relief_authors")?;
+            w.put_u64(*height as u64)?;
+            w.put_list(entries, |w, (member, weight)| {
+                w.put_bytes(&member.address)?;
+                w.put_bytes(&member.pubkey)?;
+                w.put_bytes(weight.to_string().as_bytes())
+            })?;
+        }
+        Ok(())
     })
 }
 pub fn network_hash(

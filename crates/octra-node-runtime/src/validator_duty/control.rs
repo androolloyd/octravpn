@@ -18,9 +18,19 @@ pub fn eligible(
     snapshot: Result<Enrollment<'_>, &str>,
     tx: &Transaction,
 ) -> Eligibility {
+    eligible_with_marks(mode, head, bonded_epoch, snapshot, tx, false)
+}
+pub fn eligible_with_marks(
+    mode: RuleMode,
+    head: i64,
+    bonded_epoch: i64,
+    snapshot: Result<Enrollment<'_>, &str>,
+    tx: &Transaction,
+    marks: bool,
+) -> Eligibility {
     if head < 0 {
         Eligibility::Paused
-    } else if duty::expired(tx, Some(head), mode) {
+    } else if duty::expired_with_marks(tx, Some(head), mode, marks) {
         Eligibility::Expired
     } else {
         match BondedReady::parse(tx.message.as_deref()) {

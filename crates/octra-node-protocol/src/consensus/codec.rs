@@ -189,7 +189,17 @@ impl Wire for ValidatorSet {
                 .weight(&v.address)
                 .ok_or_else(|| Error::from("consensus codec: validator weight missing"))?;
             w.put_bytes(weight.to_string().as_bytes())
-        })
+        })?;
+        if let Some((height, entries)) = &self.authors {
+            w.put_bytes(b"octra:relief_authors")?;
+            w.put_u64(*height as u64)?;
+            w.put_list(entries, |w, (member, weight)| {
+                w.put_bytes(&member.address)?;
+                w.put_bytes(&member.pubkey)?;
+                w.put_bytes(weight.to_string().as_bytes())
+            })?;
+        }
+        Ok(())
     }
     fn get(r: &mut Reader<'_>) -> Result<Self, Error> {
         let weighted = r.get_bool()?;
@@ -204,8 +214,8 @@ impl Wire for ValidatorSet {
         })?;
         let set = Self::weighted(entries.clone())
             .map_err(|e| Error::from(format!("consensus codec: {e}")))?;
-        if weighted {
-            Ok(set)
+        let mut set = if weighted {
+            set
         } else {
             if entries
                 .iter()
@@ -213,8 +223,35 @@ impl Wire for ValidatorSet {
             {
                 return Err("consensus codec: unweighted validator has non-unit weight".into());
             }
-            Ok(Self::unweighted(set.validators))
+            Self::unweighted(set.validators)
+        };
+        if r.remaining() != 0 {
+            if r.get_bytes_bounded(128)? != b"octra:relief_authors" {
+                return Err("consensus codec: author tag differs".into());
+            }
+            let height = r.get_u64()? as i64;
+            let entries = r.get_list(MAX_VALIDATORS, |r| {
+                let address = string(r, 128)?;
+                let pubkey = exact(r, 32, false)?;
+                let weight = reward::parse_weight(&string(r, 256)?)
+                    .ok_or_else(|| Error::from("consensus codec: invalid validator weight"))?;
+                Ok((Validator { address, pubkey }, weight))
+            })?;
+            let authors = Self::weighted(entries)
+                .map_err(|e| Error::from(format!("consensus codec: author {e}")))?;
+            if height < 0
+                || !weighted
+                || authors.validators.iter().any(|a| {
+                    set.validators
+                        .iter()
+                        .any(|v| v.address == a.address || v.pubkey == a.pubkey)
+                })
+            {
+                return Err("consensus codec: author context differs".into());
+            }
+            set.authors = Some((height, authors.entries()?));
         }
+        Ok(set)
     }
     fn decode(bytes: &[u8]) -> Result<Self, Error> {
         let mut reader = Reader::new(bytes);
@@ -570,13 +607,20 @@ impl CatchupResponse {
         Ok(w.into_bytes())
     }
     pub fn decode(bytes: &[u8], v2: bool) -> Result<Self, Error> {
+        Self::decode_bounded(bytes, v2, 16)
+    }
+    pub fn header(bytes: &[u8]) -> Result<(Bytes, Bytes), Error> {
+        let mut r = Reader::new(bytes);
+        Ok((string(&mut r, 128)?, string(&mut r, 128)?))
+    }
+    pub fn decode_bounded(bytes: &[u8], v2: bool, max_records: usize) -> Result<Self, Error> {
         let mut r = Reader::new(bytes);
         let value = Self {
             chain_id: string(&mut r, 128)?,
             request_id: string(&mut r, 128)?,
             status: string(&mut r, 64)?,
             error_code: r.get_option(|r| string(r, 256))?,
-            records: r.get_list(16, |r| get_catchup_record(r, v2))?,
+            records: r.get_list(max_records.min(16), |r| get_catchup_record(r, v2))?,
             next_epoch: r.get_option(|r| Ok(r.get_u64()? as i64))?,
             responder_addr: string(&mut r, 128)?,
             signature: exact(&mut r, 64, true)?,

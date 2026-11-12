@@ -221,7 +221,8 @@ fn native_legacy_range_construction_and_disabled_verification() {
             expected["lc_error"]
         );
         assert_eq!(rng.consumed, 0);
-        let (prover, mut state) = build_aggregated(&public, &secret, &cipher, &bits, rule).unwrap();
+        let (prover, mut state) =
+            build_aggregated(&public, &secret, &cipher, &bits, rule, false).unwrap();
         assert_eq!(
             prover.num_gates(),
             expected["gates"].as_u64().unwrap() as usize

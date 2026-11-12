@@ -31,6 +31,7 @@ pub struct Stats {
 }
 pub struct Query {
     pub scope: Vec<u8>,
+    pub registered: bool,
     pub address: Vec<u8>,
     pub key_hash: Option<Vec<u8>>,
     pub cipher: Arc<[u8]>,
@@ -92,9 +93,16 @@ fn key(scope: &[u8], hash: bool, value: &[u8]) -> Vec<u8> {
     key
 }
 fn query_key(query: &Query) -> Vec<u8> {
-    match &query.key_hash {
-        Some(hash) => key(&query.scope, true, hash),
-        None => key(&query.scope, false, &query.address),
+    if let Some(hash) = &query.key_hash {
+        key(&query.scope, true, hash)
+    } else {
+        let mut address = if query.registered {
+            b"registered:".to_vec()
+        } else {
+            Vec::new()
+        };
+        address.extend_from_slice(&query.address);
+        key(&query.scope, false, &address)
     }
 }
 impl Cache {

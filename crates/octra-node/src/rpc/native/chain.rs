@@ -250,7 +250,17 @@ fn message(tx: &Transaction) -> std::result::Result<Vec<u8>, Fault> {
     let Some(raw) = &tx.message else {
         return Ok(b"null".to_vec());
     };
-    if tx.op_type == OpType::CircleProgramUpdate {
+    if matches!(
+        tx.op_type,
+        OpType::CircleProgramUpdate
+            | OpType::CircleAssetPutEncrypted
+            | OpType::CircleSealedSlotPut
+            | OpType::CircleBalanceCellPut
+            | OpType::CircleRegisterCellPut
+            | OpType::CircleCall
+            | OpType::Stealth
+            | OpType::Claim
+    ) {
         return Ok(b"null".to_vec());
     }
     let decoded = if raw.len() % 2 == 0 && raw.iter().all(u8::is_ascii_hexdigit) {

@@ -26,8 +26,25 @@ pub fn imperative(ast: &mut Ast, syntax: Syntax, loops: bool) -> Result<Vec<I>> 
 /// Historical Oct_emit entry path. Compilation reports and Program admission
 /// remain separate, and this does not select the frozen Prior compiler.
 pub fn protocol(ast: &mut Ast, loops: bool, checked: bool) -> Result<Vec<I>> {
+    protocol_metered(ast, loops, checked, false)
+}
+pub fn protocol_metered(
+    ast: &mut Ast,
+    loops: bool,
+    checked: bool,
+    metered: bool,
+) -> Result<Vec<I>> {
+    super::super::symbols::check(&ast.contract, metered).map_err(|message| Error::Invalid {
+        message,
+        line: 0,
+        column: 0,
+    })?;
     check_interfaces(ast)?;
     let mut generator = Generator::protocol(ast, loops, checked);
+    generator.code.meter(
+        generator.contract.declaration == super::Declaration::Program,
+        metered,
+    );
     legacy_entries(&mut generator)?;
     Ok(generator.code.into_instructions())
 }
@@ -49,12 +66,21 @@ fn legacy_entries(generator: &mut Generator<'_>) -> Result<()> {
 }
 
 pub fn linked(linked: &mut Linked, syntax: Syntax, loops: bool) -> Result<Generated> {
-    generate(
+    linked_metered(linked, syntax, loops, false)
+}
+pub fn linked_metered(
+    linked: &mut Linked,
+    syntax: Syntax,
+    loops: bool,
+    metered: bool,
+) -> Result<Generated> {
+    generate_metered(
         &mut linked.ast,
         syntax,
         loops,
         linked.direct.clone(),
         &linked.calls,
+        metered,
     )
 }
 
@@ -67,8 +93,27 @@ pub fn generate(
     direct: Vec<Name>,
     calls: &[(Name, Evidence)],
 ) -> Result<Generated> {
+    generate_metered(ast, syntax, loops, direct, calls, false)
+}
+fn generate_metered(
+    ast: &mut Ast,
+    syntax: Syntax,
+    loops: bool,
+    direct: Vec<Name>,
+    calls: &[(Name, Evidence)],
+    metered: bool,
+) -> Result<Generated> {
+    super::super::symbols::check(&ast.contract, metered).map_err(|message| Error::Invalid {
+        message,
+        line: 0,
+        column: 1,
+    })?;
     check_interfaces(ast)?;
     let mut generator = Generator::new(ast, syntax, loops, direct);
+    generator.code.meter(
+        generator.contract.declaration == super::Declaration::Program,
+        metered,
+    );
     generator.prepare_labels()?;
     let constructor = generator.contract.constructor.clone();
     generator.constructor(constructor.as_ref())?;

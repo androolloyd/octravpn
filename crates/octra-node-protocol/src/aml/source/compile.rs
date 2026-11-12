@@ -62,6 +62,7 @@ impl From<parser::Error> for CompileError {
     fn from(error: parser::Error) -> Self {
         let error = match error {
             parser::Error::Lex(error) | parser::Error::Parse(error) => error,
+            parser::Error::Unavailable(reason) => return Self::Unavailable(reason),
             parser::Error::Native(reason) => {
                 return Self::Invalid([b"compile error: ".as_slice(), &reason].concat())
             }
@@ -78,6 +79,9 @@ impl From<emit::Error> for CompileError {
     fn from(error: emit::Error) -> Self {
         match error {
             emit::Error::Failure(reason) => Self::Invalid(reason),
+            emit::Error::EmissionLimit => {
+                Self::Invalid(b"program instruction count exceeds capacity".to_vec())
+            }
             emit::Error::Invalid {
                 message,
                 line,
@@ -126,6 +130,14 @@ fn verifier_text(error: admission::VerificationError) -> Vec<u8> {
     .into_bytes()
 }
 pub fn compile_ast(ast: &ast::Ast, syntax: Syntax, loops: bool) -> Result<Compiled> {
+    compile_ast_metered(ast, syntax, loops, false)
+}
+pub fn compile_ast_metered(
+    ast: &ast::Ast,
+    syntax: Syntax,
+    loops: bool,
+    metered: bool,
+) -> Result<Compiled> {
     if loops {
         scope::check_loops(ast).map_err(CompileError::Invalid)?;
     }
@@ -146,8 +158,9 @@ pub fn compile_ast(ast: &ast::Ast, syntax: Syntax, loops: bool) -> Result<Compil
             b"program function count exceeds capacity".to_vec(),
         ));
     }
+    super::super::symbols::check(&ast.contract, metered).map_err(CompileError::Invalid)?;
     let mut linked = forms::link(ast).map_err(|error| CompileError::Invalid(error.0))?;
-    let generated = generate::linked(&mut linked, syntax, loops)?;
+    let generated = generate::linked_metered(&mut linked, syntax, loops, metered)?;
     if program && generated.code.len() > limits::INSTRUCTIONS {
         return Err(CompileError::Invalid(
             b"program instruction count exceeds capacity".to_vec(),
@@ -186,8 +199,16 @@ pub fn compile_ast(ast: &ast::Ast, syntax: Syntax, loops: bool) -> Result<Compil
     })
 }
 pub fn compile(source: &[u8], syntax: Syntax, loops: bool) -> Result<Compiled> {
+    compile_metered(source, syntax, loops, false)
+}
+pub fn compile_metered(
+    source: &[u8],
+    syntax: Syntax,
+    loops: bool,
+    metered: bool,
+) -> Result<Compiled> {
     let ast = parser::parse(source)?;
-    compile_ast(&ast, syntax, loops)
+    compile_ast_metered(&ast, syntax, loops, metered)
 }
 fn load(
     cache: &mut BTreeMap<Vec<u8>, Arc<[u8]>>,
@@ -211,14 +232,29 @@ fn parse(source: &[u8], path: &[u8], syntax: Syntax) -> Result<ast::Ast> {
     Ok(ast)
 }
 pub fn compile_multi(
-    mut resolver: impl FnMut(&[u8]) -> Option<Vec<u8>>,
+    resolver: impl FnMut(&[u8]) -> Option<Vec<u8>>,
     main_path: &[u8],
     syntax: Syntax,
     loops: bool,
 ) -> Result<Compiled> {
+    compile_multi_metered(resolver, main_path, syntax, loops, false, false)
+}
+pub fn compile_multi_metered(
+    mut resolver: impl FnMut(&[u8]) -> Option<Vec<u8>>,
+    main_path: &[u8],
+    syntax: Syntax,
+    loops: bool,
+    metered: bool,
+    program_only: bool,
+) -> Result<Compiled> {
     let mut cache = BTreeMap::new();
     let source = load(&mut cache, &mut resolver, main_path)?;
     let mut main = parse(&source, main_path, syntax)?;
+    if program_only && main.contract.declaration != ast::Declaration::Program {
+        return Err(CompileError::Invalid(
+            b"Program declaration required".to_vec(),
+        ));
+    }
     let mut imported = vec![];
     for import in &main.contract.imports {
         let source = load(&mut cache, &mut resolver, &import.path)?;
@@ -248,5 +284,5 @@ pub fn compile_multi(
     for (nodes, interfaces) in imported.into_iter().rev() {
         main.prepend_interfaces(&nodes, interfaces);
     }
-    compile_ast(&main, syntax, loops).map_err(|error| error.source(main_path))
+    compile_ast_metered(&main, syntax, loops, metered).map_err(|error| error.source(main_path))
 }

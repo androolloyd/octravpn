@@ -12,6 +12,7 @@ use std::sync::Arc;
 fn query(scope: &[u8]) -> Query {
     Query {
         scope: scope.to_vec(),
+        registered: false,
         address: b"viewer".to_vec(),
         key_hash: None,
         cipher: Arc::from(b"hfhe_v1|eA==".as_slice()),
@@ -24,6 +25,7 @@ fn rules() -> MigrationRules {
         cipher: RuleMode::Prior,
         proof: RuleMode::Prior,
         math: false,
+        keyed: false,
     }
 }
 #[tokio::test]
@@ -75,5 +77,33 @@ async fn configured_actor_cannot_fall_back_to_parent_crypto() {
         Err(Error::ReadFailed)
     ));
     assert_eq!(service.stats().await.cache_entries, 0);
+    service.shutdown().await;
+}
+
+#[tokio::test]
+async fn registered_key_reads_do_not_reuse_legacy_address_cache() {
+    let service = Service::default();
+    service
+        .query(
+            query(b"same-root"),
+            Box::new(|| Ok(Some(b"invalid-key".to_vec()))),
+        )
+        .await
+        .unwrap();
+    let mut registered = query(b"same-root");
+    registered.registered = true;
+    let status = service
+        .query(registered, Box::new(|| Ok(None)))
+        .await
+        .unwrap();
+    let mut active = rules();
+    active.keyed = true;
+    let raw = migration_status(b"viewer", b"hfhe_v1|eA==", status, active, None).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+    assert_eq!(json["key_class"], "missing");
+    assert_eq!(json["proof_key"], true);
+    // A content-addressed key can remain shared; no legacy address entry may
+    // satisfy a registered-only read with the same authenticated snapshot.
+    assert_eq!(service.stats().await.cache_entries, 2);
     service.shutdown().await;
 }

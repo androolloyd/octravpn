@@ -6,6 +6,7 @@ in a separate network-none container. No public RPC, faucet or user wallet is
 used. This gate never qualifies production proving parameters or public sync.
 """
 import argparse
+import base64
 import hashlib
 import ipaddress
 import json
@@ -201,7 +202,14 @@ def main():
             '-e', 'OCTRA_NATIVE_VPN_LOG=info,octra_node::vpn::payments::shielded::payer=debug',
             '-e', 'OCTRA_OBSERVER_RELAY_SUBMITS=1',
             '--entrypoint', 'python3', args.image, '-u', '/usr/local/bin/shielded_client.py'])
-        until(lambda: document(evidence / 'shielded-client-ready.json', 'C'), 'real native payer reconciles shielded deposit and seals route', timeout=900)
+        client_ready = until(lambda: document(evidence / 'shielded-client-ready.json', 'C'), 'real native payer reconciles shielded deposit and seals route', timeout=900)
+        assert len(client_ready['admission']) == 2
+        for hop, role in enumerate(['A', 'B']):
+            admission = client_ready['admission'][hop]
+            assert admission['target']['pool']['program'] == ready['pool']['circle']
+            assert admission['target']['directory'] == ready['directory']
+            assert base64.b64decode(admission['target']['operator'], validate=True) == bytes(ready['operator_public'][hop])
+            call(role, 'admit', keys=[admission['receipt_key']])
         initial = current(); assert len(initial['exchanges']) == 1
         call('B', 'hold_private'); call('C', 'launch')
         waiting = until(lambda: (s if len(s['exchanges']) == 3 else None) if (s := current()) else None,

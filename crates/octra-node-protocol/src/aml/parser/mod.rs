@@ -22,6 +22,7 @@ pub enum Error {
     Lex(lexer::Error),
     Parse(lexer::Error),
     Native(Vec<u8>),
+    Unavailable(Vec<u8>),
 }
 impl From<lexer::Error> for Error {
     fn from(value: lexer::Error) -> Self {
@@ -32,13 +33,59 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Lex(error) | Self::Parse(error) => std::fmt::Display::fmt(error, f),
-            Self::Native(reason) => f.write_str(&String::from_utf8_lossy(reason)),
+            Self::Native(reason) | Self::Unavailable(reason) => {
+                f.write_str(&String::from_utf8_lossy(reason))
+            }
         }
     }
 }
 impl std::error::Error for Error {}
 type Result<T> = std::result::Result<T, Error>;
+
+thread_local! {
+    static RECURSION: std::cell::Cell<Option<(usize, usize)>> = const { std::cell::Cell::new(None) };
+}
+/// Optional host resource budget. Consensus parsers keep their original grammar;
+/// RPC hosts may abort locally rather than exhaust their worker's stack.
+pub fn with_recursion_limit<T>(limit: usize, work: impl FnOnce() -> T) -> T {
+    struct Scope(Option<(usize, usize)>);
+    impl Drop for Scope {
+        fn drop(&mut self) {
+            RECURSION.with(|value| value.set(self.0));
+        }
+    }
+    let prior = RECURSION.with(|value| value.replace(Some((limit, 0))));
+    let _scope = Scope(prior);
+    work()
+}
+struct Recursion(bool);
+impl Recursion {
+    fn enter() -> Result<Self> {
+        RECURSION.with(|value| match value.get() {
+            None => Ok(Self(false)),
+            Some((limit, used)) if used < limit => {
+                value.set(Some((limit, used + 1)));
+                Ok(Self(true))
+            }
+            Some(_) => Err(Error::Unavailable(
+                b"local compiler recursion limit exceeded".to_vec(),
+            )),
+        })
+    }
+}
+impl Drop for Recursion {
+    fn drop(&mut self) {
+        if self.0 {
+            RECURSION.with(|value| {
+                if let Some((limit, used)) = value.get() {
+                    value.set(Some((limit, used - 1)));
+                }
+            });
+        }
+    }
+}
 struct Parser<'a> {
+    function_names: std::collections::BTreeSet<Name>,
     prior: bool,
     stream: Stream<'a>,
     nodes: Nodes,
@@ -169,6 +216,7 @@ pub fn prior(source: &[u8]) -> Result<Ast> {
 }
 fn syntax_mode(source: &[u8], prior: bool) -> Result<Ast> {
     let mut parser = Parser {
+        function_names: std::collections::BTreeSet::default(),
         prior,
         stream: if prior {
             Stream::prior(source)

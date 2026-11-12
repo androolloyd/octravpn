@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 //! Typed Program certificate and control-flow admission.
+mod cache;
 mod facts;
 mod flow;
 mod policy;
@@ -133,18 +134,24 @@ fn decode_with(raw: &[u8], point_ops: bool, trusted: Option<&Keys>) -> Result<Ad
     Ok(admitted)
 }
 pub fn decode(raw: &[u8], point_ops: bool, trusted: &Keys) -> Result<Admitted, Error> {
-    decode_with(raw, point_ops, Some(trusted))
+    cache::run(1, point_ops, trusted, raw, || {
+        decode_with(raw, point_ops, Some(trusted))
+    })
 }
 /// For a source package independently recompiled by the node, or reloading an
 /// authenticated stored program with native admission="source" metadata. It
 /// must not bypass attestation on an opaque deployment envelope or user flag.
 pub fn decode_source(raw: &[u8], point_ops: bool) -> Result<Admitted, Error> {
-    decode_with(raw, point_ops, None)
+    cache::run(2, point_ops, &Keys::default(), raw, || {
+        decode_with(raw, point_ops, None)
+    })
 }
 pub fn decode_deploy(raw: &[u8], point_ops: bool, trusted: &Keys) -> Result<Admitted, Error> {
     if raw.starts_with(b"OCPG") {
         decode(raw, point_ops, trusted)
     } else {
-        admission::decode(raw, point_ops)
+        cache::run(0, point_ops, &Keys::default(), raw, || {
+            admission::decode(raw, point_ops)
+        })
     }
 }

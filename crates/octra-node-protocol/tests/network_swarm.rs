@@ -149,6 +149,13 @@ async fn client(
     )
     .await
 }
+// Admission rejection can race the dialer's final confirmation read: either
+// the handshake closes or an established connection closes on its first read.
+async fn rejected_client(n: u8, address: SocketAddr) {
+    if let Ok(mut connection) = client(n, address, b"swarm-test").await {
+        assert!(connection.receive().await.is_err());
+    }
+}
 #[tokio::test]
 async fn proxy_selection_is_local_and_immutable_after_startup() {
     let listener = listener().await;
@@ -289,7 +296,7 @@ async fn handshake_keys_do_not_select_scheduled_or_unknown_validators() {
 }
 
 #[tokio::test]
-async fn membership_cutover_closes_retired_peers_when_local_becomes_observer() {
+async fn membership_cutover_preserves_live_peers_and_changes_their_role() {
     let listener = listener().await;
     let address = listener.local_addr().unwrap();
     let swarm = Swarm::new(config(address.port(), vec![], vec![], false), key(1)).unwrap();
@@ -300,16 +307,20 @@ async fn membership_cutover_closes_retired_peers_when_local_becomes_observer() {
     let retired = swarm.peers()[0].clone();
 
     swarm.set_validators(vec![public(3)]).unwrap();
-    assert!(swarm.peers().is_empty());
-    assert!(!retired.is_connected());
+    assert_eq!(swarm.peers().len(), 1);
+    assert!(retired.is_connected());
+    assert_eq!(
+        retired.peer_class(),
+        octra_node_protocol::network::budget::PeerClass::Observer
+    );
     assert!(
-        !swarm
+        swarm
             .send_to(
                 &retired.hello().node_id,
                 Frame {
                     message: 3,
-                    payload: vec![],
-                },
+                    payload: vec![]
+                }
             )
             .await
     );
@@ -351,19 +362,22 @@ async fn dead_peer_slot_cannot_bypass_observer_capacity() {
         .await
         .unwrap()
         .unwrap();
-    clients.push(client(2, address, b"swarm-test").await.unwrap());
+    // Native c49 narrows the HELLO allowlist to validator keys as soon as
+    // all eight observer slots are occupied. The stale identity cannot reach
+    // post-handshake replacement/capacity admission through that allowlist.
+    assert!(client(2, address, b"swarm-test").await.is_err());
     until(|| {
         swarm
             .connection_diagnostics()
             .outcomes
             .iter()
-            .filter(|row| row.phase == Phase::Admission && row.outcome == Outcome::Capacity)
+            .filter(|row| row.phase == Phase::Handshake && row.outcome == Outcome::UnknownKey)
             .map(|row| row.count)
             .sum::<u64>()
             > 0
     })
     .await;
-    assert_eq!(clients.len(), 10);
+    assert_eq!(clients.len(), 9);
     assert_eq!(swarm.peers().len(), 8);
     swarm.stop();
     task.await.unwrap();
@@ -642,8 +656,15 @@ async fn observers_are_bounded_and_identity_bans_survive_reconnect() {
         .peers()
         .iter()
         .all(|p| p.peer_class() == PeerClass::Observer));
-    let mut excess = client(10, address, b"swarm-test").await.unwrap();
-    assert!(excess.receive().await.is_err());
+    // Full observer admission closes at HELLO, before a session can consume
+    // validator-reserved capacity; this is the upstream c49 handshake policy.
+    assert!(client(10, address, b"swarm-test").await.is_err());
+    until(|| {
+        server.connection_diagnostics().outcomes.iter().any(|row| {
+            row.phase == Phase::Handshake && row.outcome == Outcome::UnknownKey && row.count > 0
+        })
+    })
+    .await;
     assert_eq!(server.peers().len(), 8);
     for _ in 0..3 {
         clients[0]
@@ -663,8 +684,19 @@ async fn observers_are_bounded_and_identity_bans_survive_reconnect() {
     })
     .await;
     until(|| server.peers().len() == 7).await;
-    let mut replay = client(2, address, b"swarm-test").await.unwrap();
-    assert!(replay.receive().await.is_err());
+    rejected_client(2, address).await;
+    until(|| {
+        server.connection_diagnostics().outcomes.iter().any(|row| {
+            row.phase == Phase::Admission && row.outcome == Outcome::Banned && row.count > 0
+        })
+    })
+    .await;
+    assert!(server
+        .scores()
+        .iter()
+        .any(|(key, score)| key == &[b"node:".as_slice(), &id].concat()
+            && score.bad_count == 3
+            && score.ban_until > 0.));
     assert_eq!(server.peers().len(), 7);
     server.stop();
     task.await.unwrap();

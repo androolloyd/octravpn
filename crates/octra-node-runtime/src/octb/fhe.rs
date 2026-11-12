@@ -44,6 +44,7 @@ pub struct Proof<'a> {
     pub raw: &'a [u8],
     pub commitment: Option<[u8; 32]>,
     pub math: bool,
+    pub keyed: bool,
     /// Native asynchronous suspension releases the verifier lane before work.
     pub asynchronous: bool,
 }
@@ -131,6 +132,7 @@ pub(super) fn verify(proof: Proof<'_>) -> Result<bool, Unavailable> {
         kind,
         commitment: proof.commitment,
         math: proof.math,
+        keyed: proof.keyed,
         asynchronous: proof.asynchronous,
     }) {
         Ok(Response::Verified(valid)) => Ok(valid),
@@ -320,6 +322,7 @@ impl Machine {
             raw: &raw,
             commitment: commitment.flatten(),
             math: self.options.math,
+            keyed: self.options.proof_key,
             asynchronous: self.options.async_exec,
         });
         self.finish_proof(dest, result, budget)

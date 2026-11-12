@@ -61,7 +61,30 @@ impl<A: ValidatorHistory> Publisher<A> {
         if graph.chain_id() != chain.chain_id.as_bytes() {
             return Err(invalid("execution graph differs from canonical chain"));
         }
-        let authority = self.rules(base, epoch).await?;
+        let mut authority = self.rules(base, epoch).await?;
+        // A durable same-height relief proof preserves the original proposer
+        // schedule for old rounds. These authors cannot cast new target votes.
+        // The execution result still requires the driver's authenticated POLC
+        // before it can unlock or justify any subsequent proposal.
+        if authority.relief.as_ref().is_some_and(|mark| {
+            let same_height = mark.height == proposal.epoch_id;
+            same_height && proposal.round <= mark.round
+        }) {
+            if let Some(source) = authority
+                .validators
+                .source_set(chain.chain_id.as_bytes(), proposal.epoch_id)
+            {
+                let mark = authority.relief.as_ref().expect("checked relief mark");
+                if hash::validator_set_hash(&source)
+                    .map_err(invalid)?
+                    .as_slice()
+                    != mark.source_hash
+                {
+                    return Err(invalid("proposal relief source differs"));
+                }
+                authority.validators = source;
+            }
+        }
         if let Some(reason) = driver_policy::validate_proposal_frame(
             chain.chain_id.as_bytes(),
             &authority.validators,

@@ -43,6 +43,12 @@ pub fn key(address: &[u8], code_hash: Option<&[u8]>) -> Vec<u8> {
     out
 }
 impl Record {
+    pub fn matches_verification(&self, other: &Self) -> bool {
+        self.source == other.source
+            && self.code_hash == other.code_hash
+            && self.report == other.report
+            && self.certificate == other.certificate
+    }
     pub fn encode(&self) -> Vec<u8> {
         let mut out = b"{\"version\":1,\"source\":".to_vec();
         json_string(&mut out, &self.source);
@@ -106,4 +112,19 @@ impl Record {
             code_hash,
         })
     }
+}
+
+pub mod source;
+
+/// Source_stamp from the committed c49de45c compiler/AML/policy/wire/runtime
+/// trees, generated with upstream lib/vm/dune's per-file SHA-256 recipe.
+pub const SOURCE_STAMP: &[u8] = b"dc82575c6ce78ea308000118d83b80ba7006fc77cf06c66cc98902cc85382ec5";
+pub fn consensus_id() -> Vec<u8> {
+    identity(SOURCE_STAMP)
+}
+pub fn released_id() -> Vec<u8> {
+    identity(b"b21391865660ba35426eaabc15e8d8a4d5a04a3754b73042bf57d5697fe108b6")
+}
+fn identity(stamp: &[u8]) -> Vec<u8> {
+    [b"program_source:owner:code_hash:report:state:deploy:historical:declared_compiler:base_200000:bytes_16:limit_2097152:constant_graph:scoped_code:for_limit:".as_slice(), stamp].concat()
 }

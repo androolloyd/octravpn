@@ -97,6 +97,7 @@ fn check_updates(source: &str, capture: bool) {
             depth: v["depth"].as_i64().unwrap(),
             limit: v["limit"].as_i64().unwrap(),
             profile: WasmRules {
+                proof_key: false,
                 proof_exec: v["proof"].as_bool().unwrap(),
                 wasm_float: v["float"].as_bool().unwrap(),
                 math: v["math"].as_bool().unwrap(),
@@ -108,6 +109,7 @@ fn check_updates(source: &str, capture: bool) {
             storage_proof: v["storage_proof"].as_bool().unwrap(),
             fhe_work: false,
             object_cost: v["object_cost"] == true,
+            program_inputs: false,
         };
         let before = state.snapshot();
         let params = Document::parse(&serde_json::to_vec(&v["params"]).unwrap()).unwrap();
@@ -196,6 +198,7 @@ fn updates_bind_snapshot_and_refuse_view_only_methods_without_mutation() {
         depth: 0,
         limit: 1_000_000,
         profile: WasmRules {
+            proof_key: false,
             proof_exec: true,
             wasm_float: false,
             math: false,
@@ -207,6 +210,7 @@ fn updates_bind_snapshot_and_refuse_view_only_methods_without_mutation() {
         storage_proof: true,
         fhe_work: false,
         object_cost: false,
+        program_inputs: false,
     };
     let params = Document::parse(b"[]").unwrap();
     let runtime = host::runtime();

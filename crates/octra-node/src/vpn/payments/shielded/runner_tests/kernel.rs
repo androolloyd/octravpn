@@ -201,6 +201,7 @@ pub(super) async fn run(
             },
             &wallet,
             shielded::wallet::rpc::Policy {
+                allowed_receipt_keys: vec![client.receipt.public],
                 max_channels: 16,
                 max_requests: 128,
                 max_ceiling_ou: 100,

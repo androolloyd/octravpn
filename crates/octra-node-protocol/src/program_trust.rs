@@ -8,7 +8,7 @@ use crate::{
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Keys(BTreeMap<Vec<u8>, Vec<u8>>);
 impl Keys {
     pub fn parse(raw: Option<&[u8]>) -> Result<Self, Error> {

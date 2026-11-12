@@ -120,6 +120,7 @@ fn rules(input: &Value) -> Rules {
         },
         update_policy: input["circle_policy"] == true,
         wasm: WasmRules {
+            proof_key: false,
             proof_exec: input["proof"].as_bool().unwrap(),
             wasm_float: input["float"].as_bool().unwrap(),
             math: input["math"].as_bool().unwrap(),
@@ -128,6 +129,7 @@ fn rules(input: &Value) -> Rules {
         storage_proof: input["storage_proof"].as_bool().unwrap(),
         fhe_work: input["fhe_work"] == true,
         object_cost: input["object_cost"] == true,
+        program_inputs: false,
     }
 }
 #[test]

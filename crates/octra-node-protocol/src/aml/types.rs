@@ -2,7 +2,7 @@
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 //! Native Oct_types compatibility and return-flow helpers.
 use super::ast::{Nodes, Stmt, StmtId, Type, TypeId};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 pub fn numeric(typ: &Type) -> bool {
     matches!(
         typ,
@@ -30,8 +30,9 @@ pub fn numeric_result(left: &Type, right: &Type) -> Type {
 /// Interned IDs compare structurally within the caller's own syntax arena.
 pub fn compatible(nodes: &Nodes, expected: TypeId, actual: TypeId) -> bool {
     let mut pending = vec![(expected, actual)];
+    let mut seen = BTreeSet::new();
     while let Some((expected, actual)) = pending.pop() {
-        if expected == actual {
+        if expected == actual || !seen.insert((expected, actual)) {
             continue;
         }
         let (expected, actual) = (nodes.typ(expected), nodes.typ(actual));

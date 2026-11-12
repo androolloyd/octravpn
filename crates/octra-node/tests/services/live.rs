@@ -53,6 +53,7 @@ fn proposal_rules(header: &EpochHeader) -> consensus_bundle::Rules {
             compute: mode(Rule::VmBytes),
             settle: mode(Rule::Settle),
         },
+        signing: octra_node_protocol::tx_signature::Mode::Historical,
     }
 }
 

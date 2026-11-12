@@ -488,7 +488,14 @@ fn resolve_inner<B: AsRef<[u8]>>(
                         return Ok(false);
                     }
                     check(
-                        crypto::verify_range(&public, cipher, proof, profile.strict, profile.math),
+                        crypto::verify_range_keyed(
+                            &public,
+                            cipher,
+                            proof,
+                            profile.strict,
+                            profile.math,
+                            profile.keyed,
+                        ),
                         "bad_range_proof",
                         prefix,
                         Some(prefix),
@@ -531,13 +538,14 @@ fn resolve_inner<B: AsRef<[u8]>>(
                     ));
                 }
                 check(
-                    crypto::verify_claim(
+                    crypto::verify_claim_keyed(
                         &public,
                         &send.delta,
                         &send.zero_proof,
                         &send.amount_commitment,
                         profile.strict,
                         profile.math,
+                        profile.keyed,
                     ),
                     "bad_send_binding",
                     prefix,
@@ -594,13 +602,14 @@ fn resolve_inner<B: AsRef<[u8]>>(
                         ));
                     }
                     check(
-                        crypto::verify_claim(
+                        crypto::verify_claim_keyed(
                             &public,
                             &claim.cipher,
                             &claim.proof,
                             &output.amount_commitment,
                             profile.strict,
                             profile.math,
+                            profile.keyed,
                         ),
                         "bad_zero_proof",
                         b"bound zero proof verification failed: ",
@@ -750,12 +759,13 @@ impl SingleRanges {
                 (&self.send.delta, &self.send.range_delta)
             };
             check(
-                crypto::verify_range(
+                crypto::verify_range_keyed(
                     &self.public,
                     cipher,
                     proof,
                     self.profile.strict,
                     self.profile.math,
+                    self.profile.keyed,
                 ),
                 "bad_range_proof",
                 b"",

@@ -49,6 +49,8 @@ pub(crate) enum Request {
         kind: u8,
         commitment: Option<[u8; 32]>,
         math: bool,
+        #[serde(default)]
+        keyed: bool,
         asynchronous: bool,
     },
 }
@@ -218,11 +220,12 @@ impl Local {
                 kind,
                 commitment,
                 math,
+                keyed,
                 asynchronous: _,
             } => {
                 let result = || -> Result<bool, Error> {
                     let key = PublicKey::from_bytes(key.bytes()).map_err(|error| native(&error))?;
-                    if !key.supports_alias_rejection() {
+                    if !key.supports_alias_rejection() || (keyed && !key.powers_ok()) {
                         return Ok(false);
                     }
                     let cipher =
@@ -240,9 +243,11 @@ impl Local {
                         ScalarRule::Prior
                     };
                     match kind {
-                        0 => zero::verify_zero(&key, &cipher, &proof, rule),
-                        1 => zero::verify_embedded_range(&key, &cipher, &proof, true, rule),
-                        2 => zero::verify_bound(
+                        0 => zero::verify_zero_keyed(&key, &cipher, &proof, rule, keyed),
+                        1 => zero::verify_embedded_range_keyed(
+                            &key, &cipher, &proof, true, rule, keyed,
+                        ),
+                        2 => zero::verify_bound_keyed(
                             &key,
                             &cipher,
                             &proof,
@@ -250,6 +255,7 @@ impl Local {
                             BoundProfile::Standard,
                             true,
                             rule,
+                            keyed,
                         ),
                         _ => return Err(Error::Invalid),
                     }

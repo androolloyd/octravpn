@@ -169,13 +169,14 @@ fn inner(
         let cfg = ctx.config();
         let (mut next, reason, changed) = tagged(
             "validator set fold update rejected",
-            load(state)?.advance(
+            load(state)?.advance_with_marks(
                 &cfg,
                 ctx.cap_mode,
                 request.chain,
                 ctx.start(),
                 request.epoch,
                 ctx.parent.as_ref(),
+                ctx.duty_marks == RuleMode::Active,
             ),
         )?;
         let locked = if ctx.seat_mode == RuleMode::Active {

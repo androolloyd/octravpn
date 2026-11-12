@@ -93,6 +93,10 @@ impl State {
                 b"set_hash",
                 STANDARD.encode(&f.set_hash).as_bytes(),
             );
+            if let Some(round) = f.round {
+                name(&mut out, b"round");
+                out.extend_from_slice(round.to_string().as_bytes());
+            }
             out.push(b'}');
         }
         out.push(b']');
@@ -284,9 +288,17 @@ fn finality(d: &Document, v: &Value) -> Result<Final, Error> {
     if epoch < 0 {
         return Err("validator duty final epoch is negative".into());
     }
+    let round = d
+        .field(v, b"round")
+        .map(|v| integer(v, "validator duty final round", true))
+        .transpose()?;
+    if round.is_some_and(|round| !(0..=crate::consensus::codec::MAX_ROUND).contains(&round)) {
+        return Err("validator duty final round is invalid".into());
+    }
     Ok(Final {
         epoch,
         proposal_id,
         set_hash,
+        round,
     })
 }

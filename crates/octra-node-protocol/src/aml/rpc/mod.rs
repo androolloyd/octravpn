@@ -100,13 +100,17 @@ impl Rules {
         }
     }
 }
-fn is_program(raw: &[u8]) -> bool {
-    parser::parse(raw).is_ok_and(|ast| ast.contract.declaration == Declaration::Program)
+fn is_program(raw: &[u8]) -> Result<bool> {
+    match parser::parse(raw) {
+        Ok(ast) => Ok(ast.contract.declaration == Declaration::Program),
+        Err(parser::Error::Unavailable(reason)) => Err(Error::Unavailable(reason)),
+        Err(_) => Ok(false),
+    }
 }
 pub fn single(source: &[u8], rules: Rules) -> Result<Vec<u8>> {
     validate(source, None, None)?;
-    if is_program(source) {
-        let built = package::compile_at(
+    if is_program(source)? {
+        let built = package::compile_at_metered(
             b"main.aml",
             vec![crate::program_wire::Source {
                 path: b"main.aml".to_vec(),
@@ -115,10 +119,11 @@ pub fn single(source: &[u8], rules: Rules) -> Result<Vec<u8>> {
             rules.compiler,
             rules.point_ops,
             rules.loops,
+            true,
         )?;
         compiled(&built.result, Some(&built.package))
     } else {
-        let compiled_source = source::compile(source, rules.syntax(), rules.loops)?;
+        let compiled_source = source::compile_metered(source, rules.syntax(), rules.loops, true)?;
         let result = compiler::source_result(
             &compiled_source,
             Version::Source,
@@ -185,8 +190,13 @@ pub fn multi(doc: &Document, object: Option<&Value>, rules: Rules) -> Result<Vec
         .iter()
         .map(|file| (file.path.as_slice(), file.source.as_slice()))
         .collect();
-    if sources.get(main).is_some_and(|raw| is_program(raw)) {
-        let built = package::compile_at(
+    if sources
+        .get(main)
+        .map(|raw| is_program(raw))
+        .transpose()?
+        .unwrap_or(false)
+    {
+        let built = package::compile_at_metered(
             main,
             files
                 .into_iter()
@@ -198,14 +208,17 @@ pub fn multi(doc: &Document, object: Option<&Value>, rules: Rules) -> Result<Vec
             rules.compiler,
             rules.point_ops,
             rules.loops,
+            true,
         )?;
         return compiled(&built.result, Some(&built.package));
     }
-    let compiled_source = source::compile_multi(
+    let compiled_source = source::compile_multi_metered(
         |path| sources.get(path).map(|raw| raw.to_vec()),
         main,
         rules.syntax(),
         rules.loops,
+        true,
+        false,
     )?;
     let material = compiler::ordered_sources(sources.iter().map(|(path, raw)| (*path, *raw)));
     let result = compiler::source_result(

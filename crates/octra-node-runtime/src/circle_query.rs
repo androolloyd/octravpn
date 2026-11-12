@@ -349,6 +349,7 @@ impl<'a> Query<'a> {
                 fhe_work: self.profile.fhe_work == RuleMode::Active,
                 object_cost: self.profile.object_cost,
                 proof_exec: self.profile.proof_exec == RuleMode::Active,
+                proof_key: self.profile.proof_key == RuleMode::Active,
                 math: self.profile.math,
                 point_ops: self.profile.point_ops,
                 is_view: true,

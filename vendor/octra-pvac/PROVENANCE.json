@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/octra-labs/lite_node",
-  "commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "commit": "c49de45cf49ebbc2e5c0697eb956cbcada5845e7",
   "license": "BSD-3-Clause",
   "source_sha256": {
     "pvac/.gitignore": "9cc1f6a75eace21d7d1a72036da86b46400a82315d43e7f89361ccf322ba8eea",
@@ -12,13 +12,13 @@
     "pvac/include/pvac/core/pvac_compress.hpp": "8e5aeb2497f3487f5a93ccab9acf597547bbabcc06b36c966bab6a4dce6b7d8d",
     "pvac/include/pvac/core/random.hpp": "7b59e5ee4c120973113505b60aa8b62bff85ac7686d50ce9fe7b5e1cac9efa1e",
     "pvac/include/pvac/core/seedable_rng.hpp": "204dde45bb99429827a4758a51121ffcb6a8e911c2ecfaed49ab5d374dc2d616",
-    "pvac/include/pvac/core/types.hpp": "d1f00321448e08a5b2079f484d8bb6923641f7cd375b2948eea058123625d3ca",
+    "pvac/include/pvac/core/types.hpp": "7da9cf8e4f5f473bfdfbc2bc286f5bc82270f15244b59bad3e0b1c4c7db58e93",
     "pvac/include/pvac/crypto/bulletproofs/gadgets.hpp": "ded9002736fe5caf7607fded2a783d7c204fe69e430d684dfc63a0537cf5dbe4",
     "pvac/include/pvac/crypto/bulletproofs/generators.hpp": "54541edda0e7a8bc4d91d8d57064e69f23a3dc0df41406fc4c9febedf03f9749",
-    "pvac/include/pvac/crypto/bulletproofs/inner_product.hpp": "2ee2b6c3bea7606881ad9ac492786686ec7fb8f65ba2ba8ca555dadb52c405d8",
+    "pvac/include/pvac/crypto/bulletproofs/inner_product.hpp": "243f97bf64c44d7d38d09bdd52b76f2de074f9e684dd8823c83f555f783211dd",
     "pvac/include/pvac/crypto/bulletproofs/r1cs.hpp": "5aa169749faf4b54189158ebc936a605e10f822c68df453e3dfae471a72e327a",
     "pvac/include/pvac/crypto/bulletproofs/r1cs_limits.hpp": "cad8ceb8bf6b470fc4e8eb6988d5476dbd406d5bd98ed15c3b0d97c34778febf",
-    "pvac/include/pvac/crypto/bulletproofs/r1cs_prover.hpp": "decf51b93b7b1d68a2cc681147654c2ba27285976c06e1a1101d5a38cf286348",
+    "pvac/include/pvac/crypto/bulletproofs/r1cs_prover.hpp": "94c4ff6209fc76688bd575933f4c4f0b37e5ab94133dc4679d79c0557226b50c",
     "pvac/include/pvac/crypto/bulletproofs/r1cs_types.hpp": "e7d1a0bbf38767e5de757afbd73f9c4153d17035aee667fb46a4212b3c24bc67",
     "pvac/include/pvac/crypto/bulletproofs/r1cs_verifier.hpp": "a0e21cc2526fa6b02c0d45f4110f87f829e1ba09620ed6f3a65fba9e0384597a",
     "pvac/include/pvac/crypto/bulletproofs/transcript.hpp": "075423f25e6449e526a84d5a3837a402238fdb11fbd2a4673fb5fb027c3ca45d",
@@ -32,11 +32,11 @@
     "pvac/include/pvac/crypto/toeplitz.hpp": "75361810219017961de38b7a7d9e837fbee074f018f877d3ffe6d6f74ba9bbeb",
     "pvac/include/pvac/crypto/toeplitz_full.hpp": "630830831a4f5fc25fec1f265b301cc11d5ad7fb454275ae641f3be6c46f28cb",
     "pvac/include/pvac/ops/arithmetic.hpp": "5a0f71daae1bf57778669671517990cfdc0e37c50b8d9776faf50f0133d88d79",
-    "pvac/include/pvac/ops/commit.hpp": "b6f546a0b7495e37b2f058d7aaa79dba04c391774adcb1fee5565ddf632e8183",
+    "pvac/include/pvac/ops/commit.hpp": "3db24b6aed21bb94bb66e81882adedba423d97c15b288d379925c16fe636858b",
     "pvac/include/pvac/ops/decrypt.hpp": "87e70d2d974914face97b37f73d7bfd47a307620458fbb101455a805c5e0a207",
     "pvac/include/pvac/ops/encrypt.hpp": "84378bf1eda7d65fb5856dc2753a8aab7aaa8627721a732c22340d3305f3ba7d",
     "pvac/include/pvac/ops/layer_coeffs.hpp": "a69bff914ae319a907b44c9c961cf31b61faba29a7d11c0aaf128455d371dd49",
-    "pvac/include/pvac/ops/range_proof.hpp": "fd44a098d79c20bb62576084fc255f7a1454440ccce74100696405bb27de388c",
+    "pvac/include/pvac/ops/range_proof.hpp": "61f60713cabf3776a8555dcd722da6399b6618e7db0ac8fae0f0acb8f78e0842",
     "pvac/include/pvac/ops/recrypt.hpp": "156aeba8d18c85e2991f5d8a027a5b923b1021a20df9b78f1e5802c339aa977c",
     "pvac/include/pvac/ops/recrypt_arith_proof.hpp": "8a2267b9801806183c551d4659026177be1cb5045a98b55cad818a5d71961d5d",
     "pvac/include/pvac/ops/recrypt_capsule.hpp": "c87fab0962ead501ecdbacbd7b2796e5e3a1f7929b6a3f499a5dbc51f8351403",
@@ -67,7 +67,7 @@
     "pvac/include/pvac/ops/sha256_trace.hpp": "628e1dcb9a7433e544ade49e1eecf6fa335bd82233d1d7cb51e6ee25a50969bd",
     "pvac/include/pvac/ops/tape_verify.hpp": "00d9205e81d0f846988e63543ca49f7f9247b85e57e1ce45ef7c947d97f92c9b",
     "pvac/include/pvac/ops/verify_zero.hpp": "c52f6d942254aa8b75ef9b37b29646d6bb8ae77b5bc9e579a06cf01b16995ac2",
-    "pvac/include/pvac/ops/verify_zero_circuit.hpp": "a702f02202aa7260ea3853cd9f7c532b01f9424a8a2138dfbde1fac494fd20fc",
+    "pvac/include/pvac/ops/verify_zero_circuit.hpp": "8dd3bafc5cf0e55fe0f72d2037ef3b4d1d546f54287e95fffeaadfd477fec679",
     "pvac/include/pvac/pvac.hpp": "3adee622e764cb9f82a6aae5e78fac19797936164f2200dfbf97c03fe798cedb",
     "pvac/include/pvac/pvac_native.hpp": "45ef4ff7245752594680ee51b645be048699512ce0849ad97664c911d1eed9e6",
     "pvac/include/pvac/pvac_recrypt_experimental.hpp": "90eb0270501039e03b2abc831673d40fc701d4ef3422c39c92428b1a24ec3a84",
@@ -78,6 +78,7 @@
     "pvac/include/pvac/utils/text.hpp": "67a0dfb05f88c64aa447907665dbe88add957a18e495f39303b221d0f7440cff",
     "pvac/pvac_c_api.cpp": "5e60c148352656bf9a43b234a784a8f4d51c6caaea198e3fd5883c9fb8c8d590",
     "pvac/pvac_c_api.h": "2099dfe09e0e21bca780acd35c379a2fbf850761e79cb846957bc2623311fc00",
-    "pvac_ffi/pvac_serialize.hpp": "aed4b62117bc1fb9d80e64220a9aa1b6060c626bd9c1721c38c673fd8bae87cc"
+    "pvac_ffi/pvac_serialize.hpp": "aed4b62117bc1fb9d80e64220a9aa1b6060c626bd9c1721c38c673fd8bae87cc",
+    "pvac/include/pvac/crypto/bulletproofs/prover_msm.hpp": "708ef06d2e70671ad88c274458e93c3701a87724a47d1160acd179073be385ff"
   }
 }

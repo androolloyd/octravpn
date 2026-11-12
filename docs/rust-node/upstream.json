@@ -12,5 +12,6 @@
   "qualification_scope": "Finite source-bound local execution, native comparisons, snapshot/catch-up/restart and observer progress retain their recorded scope. The interface/operator successor awaits final combined source/binary/workload qualification; universal native equivalence, sustained public serving/peer retention, public paid service and Mainnet remain unqualified.",
   "local_paid_checkpoint": "docs/rust-node/checkpoints/2026-10-15/native-vpn.json",
   "formal_checkpoint": "docs/rust-node/checkpoints/2026-10-15/formal.json",
-  "interface_source_map": "docs/rust-node/interface-scope.json"
+  "interface_source_map": "docs/rust-node/interface-scope.json",
+  "candidate": "docs/rust-node/candidate.json"
 }

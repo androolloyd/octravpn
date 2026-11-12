@@ -41,6 +41,7 @@ struct Inner<H> {
     host: H,
     swarm: Swarm,
     slots: Mutex<Slots>,
+    work: crate::query_work::Service,
 }
 pub struct Bundles<H>(Arc<Inner<H>>);
 impl<H> Clone for Bundles<H> {
@@ -65,7 +66,23 @@ impl<H> Drop for Reader<H> {
 }
 impl<H: Host> Bundles<H> {
     pub fn new(chain: Bytes, address: Bytes, host: H, swarm: Swarm) -> Self {
+        Self::with_work(
+            chain,
+            address,
+            host,
+            swarm,
+            crate::query_work::Service::default(),
+        )
+    }
+    pub fn with_work(
+        chain: Bytes,
+        address: Bytes,
+        host: H,
+        swarm: Swarm,
+        work: crate::query_work::Service,
+    ) -> Self {
         Self(Arc::new(Inner {
+            work,
             chain,
             address,
             host,
@@ -90,6 +107,18 @@ impl<H: Host> Bundles<H> {
                 {
                     return Ok(true);
                 }
+                let Some(permit) = self
+                    .0
+                    .work
+                    .start(
+                        peer,
+                        crate::query_work::Service::validator(&self.0.host.validators()?, peer),
+                        1,
+                    )
+                    .await
+                else {
+                    return Ok(true);
+                };
                 let id: ProposalId = query
                     .proposal_id
                     .as_slice()
@@ -112,11 +141,15 @@ impl<H: Host> Bundles<H> {
                     .0
                     .host
                     .sign(&hash::bundle_response_sign_bytes(&response)?)?;
-                peer.enqueue_wait(Frame {
-                    message: 0x37,
-                    payload: response.encode()?,
-                })
-                .await;
+                permit
+                    .send(
+                        Frame {
+                            message: 0x37,
+                            payload: response.encode()?,
+                        },
+                        1,
+                    )
+                    .await;
                 Ok(true)
             }
             0x37 => {

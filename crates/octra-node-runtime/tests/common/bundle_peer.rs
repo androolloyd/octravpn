@@ -331,20 +331,29 @@ pub(crate) async fn node(
     };
     let clock = Arc::new(AtomicI64::new(0));
     let monotonic = clock.clone();
-    let finality = Finality::new(
+    let work = octra_node_runtime::query_work::Service::default();
+    let finality = Finality::with_work(
         chain.to_vec(),
         address.clone(),
         authority.clone(),
         swarm.clone(),
         Arc::new(move || monotonic.load(Ordering::SeqCst)),
+        work.clone(),
     );
-    let roots = EpochRoots::new(
+    let roots = EpochRoots::with_work(
         chain.to_vec(),
         address.clone(),
         authority.clone(),
         swarm.clone(),
+        work.clone(),
     );
-    let bundles = Bundles::new(chain.to_vec(), address, authority.clone(), swarm.clone());
+    let bundles = Bundles::with_work(
+        chain.to_vec(),
+        address,
+        authority.clone(),
+        swarm.clone(),
+        work,
+    );
     let (gate, receive) = watch::channel(true);
     let seen = Arc::new(Mutex::new(vec![]));
     let consensus = Arc::default();

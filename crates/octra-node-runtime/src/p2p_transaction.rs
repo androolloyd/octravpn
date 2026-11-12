@@ -14,9 +14,11 @@ use octra_node_protocol::{
     transaction_payload::{self, Limits},
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Rules {
     pub max_drift: f64,
+    pub signing: octra_node_protocol::tx_signature::Mode,
+    pub duty_marks: bool,
     pub duty: Option<(i64, RuleMode)>,
     pub bft: bool,
 }
@@ -28,6 +30,7 @@ pub enum Verdict {
     TimestampDrift,
     InvalidSignature,
 }
+#[allow(clippy::needless_pass_by_value)] // Retain the owned per-message policy API.
 pub fn admit(tx: &Transaction, now: f64, rules: Rules) -> Result<Verdict, Error> {
     if admission::address_route(tx).is_err() {
         return Ok(Verdict::InvalidAddress);
@@ -37,11 +40,11 @@ pub fn admit(tx: &Transaction, now: f64, rules: Rules) -> Result<Verdict, Error>
     }
     if !(tx.timestamp.is_finite() && now.is_finite())
         || ((tx.timestamp - now).abs() > rules.max_drift
-            && !admission::duty_retry_at(tx, now, rules.duty, rules.bft))
+            && !admission::duty_retry_with_marks(tx, now, rules.duty, rules.bft, rules.duty_marks))
     {
         return Ok(Verdict::TimestampDrift);
     }
-    if admission::signature(tx, tx.public_key.as_deref()).is_err() {
+    if admission::signature_at(&rules.signing, tx, tx.public_key.as_deref()).is_err() {
         return Ok(Verdict::InvalidSignature);
     }
     match admission::payload(tx, Limits::default()) {
@@ -53,28 +56,49 @@ pub fn admit(tx: &Transaction, now: f64, rules: Rules) -> Result<Verdict, Error>
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
     Send(Vec<u8>),
+    /// Requested hashes; transaction lookup and serialization happen at write time.
+    Serve(Vec<Vec<u8>>),
     Broadcast(Vec<u8>),
     ReportBad(&'static str),
     Close,
 }
 /// Apply gossip effects to the authenticated connection that produced them.
 /// A disconnected or backpressured peer does not undo accepted queue admission.
-pub async fn deliver(
+pub async fn deliver<F>(
     swarm: &octra_node_protocol::network::swarm::Swarm,
     peer: &octra_node_protocol::network::session::Peer,
     effect: Effect,
-) -> Result<(), octra_node_protocol::network::Error> {
-    use octra_node_protocol::network::{frame::Frame, swarm::SEND_DEADLINE};
+    find: F,
+) -> Result<(), octra_node_protocol::network::Error>
+where
+    F: Fn(&[u8]) -> Option<Transaction> + Send + Sync + 'static,
+{
+    use octra_node_protocol::network::frame::Frame;
     match effect {
         Effect::Send(payload) => {
-            peer.enqueue(
-                Frame {
-                    message: 0x20,
-                    payload,
-                },
-                SEND_DEADLINE,
-            )
-            .await;
+            peer.queue_tx(Frame {
+                message: 0x20,
+                payload,
+            });
+        }
+        Effect::Serve(hashes) => {
+            let find = std::sync::Arc::new(find);
+            let builders = hashes
+                .into_iter()
+                .map(|hash| {
+                    let find = find.clone();
+                    move || {
+                        let transaction = find(&hash)?;
+                        Message::Transaction {
+                            hash,
+                            json: transaction.to_json_bytes().ok()?,
+                        }
+                        .encode()
+                        .ok()
+                    }
+                })
+                .collect();
+            peer.queue_batch(0x20, builders);
         }
         Effect::Broadcast(payload) => {
             swarm
@@ -178,6 +202,8 @@ impl Ingress {
             peer,
             payload,
             Rules {
+                signing: context.rules.signing.clone(),
+                duty_marks: context.rules.duty_marks,
                 max_drift,
                 duty: context.rules.duty,
                 bft: context.rules.bft,
@@ -215,20 +241,7 @@ impl Ingress {
                     ));
                 }
             }
-            Plan::Serve(hashes) => {
-                for h in hashes {
-                    if let Some(tx) = host.find(&h) {
-                        host.emit(Effect::Send(
-                            Message::Transaction {
-                                hash: h,
-                                json: tx.to_json_bytes().map_err(unavailable)?,
-                            }
-                            .encode()
-                            .map_err(unavailable)?,
-                        ));
-                    }
-                }
-            }
+            Plan::Serve(hashes) => host.emit(Effect::Serve(hashes)),
             Plan::Receive {
                 hash: advertised,
                 json,

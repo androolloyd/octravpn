@@ -58,6 +58,7 @@ impl Parser<'_> {
         self.expr_bp(0, 1)
     }
     fn expr_bp(&mut self, depth: usize, minimum: usize) -> Result<ExprId> {
+        let _recursion = super::Recursion::enter()?;
         if depth > limits::PARSER_DEPTH {
             return Err(self.error("expression nesting exceeds limit"));
         }

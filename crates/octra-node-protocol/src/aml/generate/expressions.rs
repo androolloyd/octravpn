@@ -59,14 +59,9 @@ impl Generator<'_> {
             self.code
                 .error([b"unknown function: ".as_slice(), name].concat())
         })?;
-        let target = self
-            .contract
-            .functions
-            .iter()
-            .find(|function| function.name == name)
-            .ok_or(Error::Unavailable(
-                "compiler function-label transport differs",
-            ))?;
+        let target = self.function_by_name(name).ok_or(Error::Unavailable(
+            "compiler function-label transport differs",
+        ))?;
         let params = target.params.clone();
         if self.code.is_protocol() {
             for (index, _) in params.iter().enumerate() {
@@ -173,6 +168,31 @@ impl Generator<'_> {
                         tasks.push(Task::Expr(address));
                     }
                     Expr::Var(name) => {
+                        let mode = if self.code.is_protocol() && !self.code.is_prior() {
+                            [
+                                (b"epoch".as_slice(), 1),
+                                (b"epoch_time".as_slice(), 2),
+                                (b"value".as_slice(), 4),
+                            ]
+                            .into_iter()
+                            .fold(0, |mode, (name, bit)| {
+                                if self.code.protocol_checked() != Some(true)
+                                    || self.local(name).is_none()
+                                {
+                                    mode | bit
+                                } else {
+                                    mode
+                                }
+                            })
+                        } else {
+                            0
+                        };
+                        let name = self
+                            .symbols
+                            .resolve(self.contract, self.nodes, mode, &name)
+                            .map_err(|_| {
+                                Error::Unavailable("compiler constant expansion is cyclic")
+                            })?;
                         if let Some(checked) = self
                             .code
                             .protocol_checked()
@@ -198,9 +218,7 @@ impl Generator<'_> {
                                 continue;
                             }
                         }
-                        if let Some(constant) =
-                            self.contract.consts.iter().find(|item| item.name == name)
-                        {
+                        if let Some(constant) = self.constant(&name) {
                             // Native generation would not terminate on an unchecked
                             // typed constant cycle. A host failure grants no rejection.
                             if constants.contains(&name) {

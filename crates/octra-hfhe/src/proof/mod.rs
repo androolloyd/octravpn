@@ -4,6 +4,7 @@
 pub mod gadgets;
 pub mod generators;
 pub mod inner_product;
+pub mod key;
 pub mod r1cs;
 pub mod range;
 pub mod transcript;

@@ -221,6 +221,17 @@ impl Registry {
         self.prune(now);
         self.rows.values()
     }
+    pub fn host_key(&self, now: f64, host: &[u8], keys: &[Vec<u8>]) -> Option<Vec<u8>> {
+        self.rows
+            .values()
+            .filter(|record| {
+                record.host == host
+                    && live(now, self.ttl, record.timestamp)
+                    && keys.contains(&record.public_key)
+            })
+            .map(|record| record.node_id.clone())
+            .min()
+    }
     /// The caller validates the signature, chain and transport policy before insertion.
     pub fn add(&mut self, now: f64, record: Record) -> Result<Added, Error> {
         self.prune(now);

@@ -37,3 +37,31 @@ fn imported_keys_and_ciphertexts_preserve_arithmetic_and_commitments() {
     assert!(SecretKey::from_bytes(b"bad").is_err());
     assert!(Cipher::from_bytes(b"bad", true).is_err());
 }
+
+#[test]
+fn proof_key_binding_and_power_checks_match_rust_on_valid_and_mutated_keys() {
+    let (native, _) = keygen(&[23; 32]).unwrap();
+    let rust = octra_hfhe::keys::PublicKey::from_bytes(&native.to_bytes().unwrap()).unwrap();
+    assert_eq!(
+        native.proof_key_digest().unwrap(),
+        octra_hfhe::proof::key::digest(&rust)
+    );
+    assert!(native.powers_ok().unwrap() && rust.powers_ok());
+    let mut raw = rust.to_raw_bytes();
+    // v5 ends in 337 field powers followed by commitment(32) and profile(1).
+    let first_power = raw.len() - 33 - 337 * 16;
+    raw[first_power] = 2;
+    let changed_rust = octra_hfhe::keys::PublicKey::from_bytes(&raw).unwrap();
+    // The bridge caps transport bytes; a default key's expanded raw image is
+    // larger. Feed it the same compressed wire format as the valid control.
+    let changed_native = PublicKey::from_bytes(&changed_rust.to_bytes().unwrap()).unwrap();
+    assert!(!changed_native.powers_ok().unwrap() && !changed_rust.powers_ok());
+    assert_eq!(
+        changed_native.proof_key_digest().unwrap(),
+        octra_hfhe::proof::key::digest(&changed_rust)
+    );
+    assert_ne!(
+        changed_native.proof_key_digest().unwrap(),
+        native.proof_key_digest().unwrap()
+    );
+}

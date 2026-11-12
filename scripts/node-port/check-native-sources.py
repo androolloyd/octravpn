@@ -21,24 +21,29 @@ def main():
     mode.add_argument("--vendored-only", action="store_true",
                       help="check local provenance hashes without independently reproducing the upstream patch")
     args = parser.parse_args()
-    pin = json.loads((ROOT / "docs/rust-node/upstream.json").read_text())["commit"]
-    if args.upstream:
-        actual = subprocess.check_output(["git", "-C", str(args.upstream), "rev-parse", "HEAD"], text=True).strip()
-        if actual != pin: raise SystemExit("upstream pin mismatch")
+    baseline = json.loads((ROOT / "docs/rust-node/upstream.json").read_text())
+    pins = {baseline["commit"]}
+    if baseline.get("candidate"):
+        pins.add(json.loads((ROOT / baseline["candidate"]).read_text())["commit"])
+
+    def source(commit, name):
+        if commit not in pins:
+            raise SystemExit(f"unrecorded native source pin: {commit}")
+        return subprocess.check_output(["git", "-C", str(args.upstream), "show", f"{commit}:{name}"])
     pvac = ROOT / "vendor/octra-pvac"
     report = json.loads((pvac / "PROVENANCE.json").read_text())
-    if report["commit"] != pin: raise SystemExit("PVAC pin mismatch")
+    if report["commit"] not in pins: raise SystemExit("PVAC pin mismatch")
     for name, expected in report["source_sha256"].items():
         if digest(pvac / name) != expected:
             raise SystemExit(f"modified PVAC source: {name}")
         if args.upstream:
-            raw = subprocess.check_output(["git", "-C", str(args.upstream), "show", f"HEAD:{name}"])
+            raw = source(report["commit"], name)
             if hashlib.sha256(raw).hexdigest() != expected:
                 raise SystemExit(f"upstream PVAC hash mismatch: {name}")
     engine = ROOT / "vendor/octra-circle-wasm-host"
     report = json.loads((engine / "PROVENANCE.json").read_text())
     patch = ROOT / "scripts/node-port/circle-host-rust-api.patch"
-    if report["commit"] != pin or digest(patch) != report["patch_sha256"]:
+    if report["commit"] not in pins or digest(patch) != report["patch_sha256"]:
         raise SystemExit("Circle host pin or patch mismatch")
     for name, expected in report["adapted_sha256"].items():
         if digest(engine / name) != expected:
@@ -49,7 +54,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="octra-native-source-check-") as temp:
         fresh = pathlib.Path(temp)
         for name, expected in report["upstream_sha256"].items():
-            raw = subprocess.check_output(["git", "-C", str(args.upstream), "show", f"HEAD:{report['source_directory']}/{name}"])
+            raw = source(report["commit"], f"{report['source_directory']}/{name}")
             if hashlib.sha256(raw).hexdigest() != expected: raise SystemExit(f"upstream host hash mismatch: {name}")
             path = fresh / name
             path.parent.mkdir(parents=True, exist_ok=True)

@@ -5,13 +5,12 @@ use crate::state_batch::StateBatch;
 use num_traits::Zero;
 use octra_node_protocol::{
     control_payload::{BondedReady, LegacyReady, ValidatorUpdate},
-    duty,
     state::Ledger,
     transaction::{RuleMode, Transaction},
     validator::{
         policy::Policy,
         ready,
-        set_fold::{self, Proof, State},
+        set_fold::{self, Evidence, State},
         update,
     },
 };
@@ -105,19 +104,54 @@ impl<F: EpochFold> Host<'_, F> {
         state: &StateBatch,
         head: i64,
         address: &[u8],
-        proof: Option<&Proof>,
+        proof: &Evidence,
     ) -> Result<Option<State>, Failure> {
         let ctx = self.resolve(state)?;
         if ctx.mode == RuleMode::Prior {
             return Ok(None);
         }
+        let retained = state;
         let state = load_fold(state)?;
         let cfg = ctx.config();
         let active = ctx.members.iter().any(|m| m == address);
         checked(
             "validator_ready_rejected",
             match proof {
-                Some(proof) => state.apply_proof(
+                Evidence::Marks(claims) => {
+                    checked(
+                        "validator_ready_rejected",
+                        state.check_mark_claims(&cfg, self.epoch, claims),
+                    )?;
+                    let sets = claims
+                        .iter()
+                        .filter_map(|claim| {
+                            match crate::compute_roots::retained_set(retained, claim.epoch) {
+                                Ok(Some(set)) => Some(Ok(set)),
+                                Ok(None) => None,
+                                Err(error) => Some(Err(Failure::Host(error))),
+                            }
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    state.apply_mark_claims(
+                        &cfg,
+                        ctx.cap_mode,
+                        self.chain,
+                        self.epoch,
+                        active,
+                        address,
+                        &sets,
+                        claims,
+                    )
+                }
+                Evidence::Commit(proof)
+                    if ctx.duty_marks == RuleMode::Active
+                        && state
+                            .find_final(proof.vote.epoch_id)
+                            .is_some_and(|finality| finality.round.is_some()) =>
+                {
+                    Err("validator duty commit replaced by marks".into())
+                }
+                Evidence::Commit(proof) => state.apply_proof(
                     &cfg,
                     ctx.cap_mode,
                     self.chain,
@@ -126,7 +160,7 @@ impl<F: EpochFold> Host<'_, F> {
                     address,
                     proof,
                 ),
-                None => state.note_pulse(
+                Evidence::Pulse => state.note_pulse(
                     &cfg,
                     ctx.cap_mode,
                     (ctx.ready_exec_mode == RuleMode::Active).then(|| head.wrapping_add(1)),
@@ -154,11 +188,18 @@ impl<F: EpochFold> Host<'_, F> {
             ));
         }
         let proof = if ctx.mode == RuleMode::Prior {
-            None
+            Evidence::Pulse
         } else {
-            checked(TAG, duty::proof_of_message(tx.message.as_deref()))?
+            checked(
+                TAG,
+                set_fold::evidence_of_message(
+                    ctx.duty_marks == RuleMode::Active,
+                    &ctx.config(),
+                    tx.message.as_deref(),
+                ),
+            )?
         };
-        if proof.as_ref().is_some_and(|p| p.vote.validator != tx.from) {
+        if matches!(&proof, Evidence::Commit(proof) if proof.vote.validator != tx.from) {
             return Err(rejected(TAG, "validator set fold proof owner mismatch"));
         }
         let reference = if ctx.ready_exec_mode == RuleMode::Prior {
@@ -179,7 +220,7 @@ impl<F: EpochFold> Host<'_, F> {
             TAG,
             prior.mark_ready(self.epoch, &tx.from, &payload.consensus_public_key),
         )?;
-        let fold = self.update_ready(state, payload.head_epoch, &tx.from, proof.as_ref())?;
+        let fold = self.update_ready(state, payload.head_epoch, &tx.from, &proof)?;
         let mode = if ctx.standard_mode == RuleMode::Prior {
             ctx.ready_ref_mode
         } else {

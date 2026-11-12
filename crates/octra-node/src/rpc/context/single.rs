@@ -46,6 +46,7 @@ impl Context {
             status: Some(options.status),
             tokens: Some(octra_node_runtime::token_rpc::Actor::new()),
             history_epoch_limit: 100,
+            public_history: crate::rpc::public_history::Service::default(),
             fees: options.fees,
             http: options.http,
         })

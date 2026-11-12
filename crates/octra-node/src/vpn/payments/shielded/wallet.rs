@@ -253,8 +253,27 @@ impl Wallet {
                 .fetch_one(&mut *tx)
                 .await?;
             ensure!(
-                count < i64::from(request.max_channels),
+                count < i64::from(request.total_channels),
                 "private channel capacity exhausted"
+            );
+            // Authenticate ownership from ciphertext, including pre-upgrade rows
+            // whose indexing bucket was zero. Existing paid/replay records stay intact.
+            let rows: Vec<(Vec<u8>, Vec<u8>)> =
+                sqlx::query_as("SELECT tag,value FROM wallet_records WHERE kind=?")
+                    .bind(i64::from(CHANNEL))
+                    .fetch_all(&mut *tx)
+                    .await?;
+            let mut owned = 0_u32;
+            for (tag, raw) in rows {
+                let tag: [u8; 32] = tag
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("private channel tag differs"))?;
+                let channel: Channel = self.0.disk.decode(CHANNEL, &tag, &raw)?;
+                owned += u32::from(channel.receipt_key == request.receipt_key);
+            }
+            ensure!(
+                owned < request.max_channels,
+                "private payer channel capacity exhausted"
             );
         }
         let mut meta: Meta = self

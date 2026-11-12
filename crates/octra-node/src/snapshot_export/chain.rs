@@ -5,7 +5,7 @@ use super::{
     Result, Sha256, STANDARD,
 };
 use octra_node_protocol::{
-    consensus::{hash, qc, CatchupFinality, Finalize, ValidatorSet},
+    consensus::{hash, policy, qc, CatchupFinality, Finalize, ValidatorSet},
     control_payload::ValidatorUpdate,
     state_sync::anchor::{self, Anchor, Source, Step},
     validator::update::{ACTIVE_KEY, PENDING_KEY},
@@ -22,15 +22,18 @@ struct Chain {
 fn same(left: &ValidatorSet, right: &ValidatorSet) -> Result<bool> {
     Ok(hash::validator_set_hash(left)? == hash::validator_set_hash(right)?)
 }
-fn update(raw: &[u8], chain: &[u8]) -> Result<(ValidatorUpdate, ValidatorSet)> {
+fn update(raw: &[u8], chain: &[u8], head: i64) -> Result<(ValidatorUpdate, ValidatorSet)> {
     let update = ValidatorUpdate::parse(Some(raw))?;
     ensure!(
         update.to_bytes() == raw,
         "state sync validator update is not exact"
     );
-    let set = update
-        .validator_set()?
-        .for_epoch(chain, update.activate_epoch)?;
+    let raw_set = update.validator_set()?;
+    let set = if policy::quorum_rule(chain, head) == policy::Rule::Stake {
+        raw_set
+    } else {
+        raw_set.for_epoch(chain, update.activate_epoch)?
+    };
     Ok((update, set))
 }
 pub(super) async fn finality<A: Host>(
@@ -80,8 +83,8 @@ async fn proof<A: Host>(
         .head_for_epoch(u64::try_from(epoch)?)
         .await?;
     let state = node.store.reader().snapshot_at(&head).await?;
-    let key = match source {
-        Source::Pending => PENDING_KEY,
+    let key = match &source {
+        Source::Pending | Source::Relief(_) => PENDING_KEY,
         Source::Active => ACTIVE_KEY,
     };
     ensure!(
@@ -143,7 +146,11 @@ async fn bridge<A: Host>(
         };
         // The original retained record was reauthenticated by Publisher above;
         // the restricted QC must independently meet the preceding set's quorum.
-        if !prior.set.is_validator(&record.finalize.header.creator_addr) {
+        if !prior.set.is_author(
+            &record.finalize.chain_id,
+            epoch,
+            &record.finalize.header.creator_addr,
+        ) {
             continue;
         }
         let mut restricted = record.finalize;
@@ -209,7 +216,7 @@ async fn walk<A: Host>(
             seen.insert(Sha256::digest(&raw).to_vec()),
             "state sync validator transition chain has a cycle"
         );
-        let (item, next_set) = update(&raw, chain_id)?;
+        let (item, next_set) = update(&raw, chain_id, epoch)?;
         if same(&next_set, &stop.set)? {
             break stop.clone();
         }
@@ -265,12 +272,23 @@ async fn walk<A: Host>(
                 .await?
                 .context("state sync validator bridge is unavailable")?,
         };
-        prior.epoch = item.activate_epoch.max(step.finalize.epoch_id);
+        prior.epoch = if policy::quorum_rule(chain_id, epoch) == policy::Rule::Stake {
+            step.finalize.epoch_id
+        } else {
+            item.activate_epoch.max(step.finalize.epoch_id)
+        };
         prior.steps.push(step);
         prior.set = next_set;
     }
     ensure!(
-        same(&prior.set, active)?,
+        same(
+            &if policy::quorum_rule(chain_id, epoch) == policy::Rule::Stake {
+                prior.set.for_epoch(chain_id, epoch)?
+            } else {
+                prior.set.clone()
+            },
+            active
+        )?,
         "state sync active validator set differs from history"
     );
     ensure!(
@@ -279,7 +297,7 @@ async fn walk<A: Host>(
     );
     Ok(prior.steps)
 }
-pub(super) async fn build<A: Host>(node: &Node<A>, config: &Config, head: &Head) -> Result<Anchor> {
+async fn build_plain<A: Host>(node: &Node<A>, config: &Config, head: &Head) -> Result<Anchor> {
     let authority = bootstrap::Authority::new(config.network.clone())?;
     let record = finality(node, &authority, head.cursor.epoch.0)
         .await?
@@ -292,14 +310,30 @@ pub(super) async fn build<A: Host>(node: &Node<A>, config: &Config, head: &Head)
     let mut stops = Vec::new();
     if let Some(raw) = node.store.checkpoint_certificate().await? {
         let verified = authority.trust().verify_persisted(&raw)?;
-        let value = verified
+        let checked = verified
             .anchor()
-            .context("snapshot floor finality missing")?
-            .anchor();
+            .context("snapshot floor finality missing")?;
+        let value = checked.anchor();
+        let (epoch, mut set) =
+            if policy::quorum_rule(&value.finalize.chain_id, head.cursor.epoch.0 as i64)
+                == policy::Rule::Stake
+            {
+                let (epoch, set) = checked.transition_base();
+                (epoch, set.clone())
+            } else {
+                (value.finalize.epoch_id, value.validator_set.clone())
+            };
+        if set
+            .authors
+            .as_ref()
+            .is_some_and(|(epoch, _)| *epoch != head.cursor.epoch.0 as i64)
+        {
+            set.authors = None;
+        }
         stops.push(Chain {
             steps: value.steps.clone(),
-            set: value.validator_set.clone(),
-            epoch: value.finalize.epoch_id,
+            set,
+            epoch,
         });
     }
     let path = config.certificate.clone();
@@ -309,12 +343,30 @@ pub(super) async fn build<A: Host>(node: &Node<A>, config: &Config, head: &Head)
         // Invalid old publication is only a cache miss; it cannot supply trust.
         if let Ok(verified) = authority.trust().verify_persisted(&raw) {
             if let Some(value) = verified.anchor() {
-                let value = value.anchor();
+                let checked = value;
+                let value = checked.anchor();
                 if value.finalize.epoch_id <= record.finalize.epoch_id {
+                    let (epoch, mut set) = if policy::quorum_rule(
+                        &value.finalize.chain_id,
+                        head.cursor.epoch.0 as i64,
+                    ) == policy::Rule::Stake
+                    {
+                        let (epoch, set) = checked.transition_base();
+                        (epoch, set.clone())
+                    } else {
+                        (value.finalize.epoch_id, value.validator_set.clone())
+                    };
+                    if set
+                        .authors
+                        .as_ref()
+                        .is_some_and(|(epoch, _)| *epoch != head.cursor.epoch.0 as i64)
+                    {
+                        set.authors = None;
+                    }
                     stops.push(Chain {
                         steps: value.steps.clone(),
-                        set: value.validator_set.clone(),
-                        epoch: value.finalize.epoch_id,
+                        set,
+                        epoch,
                     });
                 }
             }
@@ -330,6 +382,18 @@ pub(super) async fn build<A: Host>(node: &Node<A>, config: &Config, head: &Head)
     let mut errors = Vec::new();
     for stop in stops {
         if steps.is_some() {
+            break;
+        }
+        // An imported checkpoint can contain a relief proof whose parent is
+        // below our local history floor. Reauthenticate that exact path against
+        // the current finality before requiring an additional transition.
+        let retained = Anchor {
+            steps: stop.steps.clone(),
+            finalize: record.finalize.clone(),
+            validator_set: record.validator_set.clone(),
+        };
+        if let Ok(retained) = retained.compact(authority.trust().validators) {
+            steps = Some(retained.steps);
             break;
         }
         match walk(node, &authority, head, &record.validator_set, stop, &base).await {
@@ -350,4 +414,96 @@ pub(super) async fn build<A: Host>(node: &Node<A>, config: &Config, head: &Head)
     anchor
         .compact(authority.trust().validators)
         .map_err(Into::into)
+}
+
+pub(super) async fn build<A: Host>(node: &Node<A>, config: &Config, head: &Head) -> Result<Anchor> {
+    // Relief reconstruction carries several authenticated sets and finalities
+    // across reads. Keep that working future off every export caller's stack.
+    Box::pin(async {
+        use octra_node_protocol::consensus::relief;
+        use octra_node_runtime::canonical::ReliefSource;
+        let epoch = i64::try_from(head.cursor.epoch.0)?;
+        let authority = bootstrap::Authority::new(config.network.clone())?;
+        let chain_id = authority.network().identity.chain_id.as_bytes();
+        if epoch <= 0 || policy::quorum_rule(chain_id, epoch) != policy::Rule::Stake {
+            return build_plain(node, config, head).await;
+        }
+        let Some(previous) = node
+            .store
+            .reader()
+            .head_for_epoch_opt(head.cursor.epoch.0 - 1)
+            .await?
+        else {
+            return build_plain(node, config, head).await;
+        };
+        let ReliefSource::Committed(Some(mark)) =
+            node.store.reader().relief_after(&previous).await?
+        else {
+            return build_plain(node, config, head).await;
+        };
+        if epoch >= mark.activate_epoch {
+            return build_plain(node, config, head).await;
+        }
+        let parent_epoch = mark
+            .height
+            .checked_sub(1)
+            .context("state sync relief epoch underflow")?;
+        let Some(parent_head) = node
+            .store
+            .reader()
+            .head_for_epoch_opt(u64::try_from(parent_epoch)?)
+            .await?
+        else {
+            // Canonical history is immutable after import. Only the import floor
+            // can hide this parent; the authenticated checkpoint carries its proof.
+            return build_plain(node, config, head).await;
+        };
+        let parent = build_plain(node, config, &parent_head).await?;
+        let checked = anchor::verify_path(authority.trust().validators, &parent.encode()?)?;
+        let current = checked
+            .transition_base()
+            .1
+            .for_epoch(chain_id, mark.height)?;
+        let state = node.store.reader().snapshot_at(&parent_head).await?;
+        let raw = state
+            .get(&[b"meta", PENDING_KEY])
+            .context("state sync relief plan is missing")?;
+        let (plan, target) = update(raw, chain_id, epoch)?;
+        let selected = relief::Plan {
+            chain_id,
+            height: epoch,
+            current: &current,
+            activate_epoch: plan.activate_epoch,
+            target: &target,
+            fingerprint: plan.fingerprint.as_bytes(),
+        }
+        .restore_with_authors(&mark)?
+        .context("state sync relief is expired")?;
+        let record = finality(node, &authority, head.cursor.epoch.0)
+            .await?
+            .context("state sync checkpoint finality is missing")?;
+        ensure!(
+            same(&selected, &record.validator_set)?,
+            "state sync relief set differs"
+        );
+        let mut steps = parent.steps;
+        steps.push(
+            proof(
+                node,
+                parent_epoch,
+                raw,
+                Source::Relief(mark),
+                parent.finalize,
+            )
+            .await?,
+        );
+        Anchor {
+            steps,
+            finalize: record.finalize,
+            validator_set: record.validator_set,
+        }
+        .compact(authority.trust().validators)
+        .map_err(Into::into)
+    })
+    .await
 }

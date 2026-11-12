@@ -268,12 +268,26 @@ impl Transcript {
             total_weight,
             quorum_weight,
             weighted,
+            authors,
         } = validators;
         self.length(validators.len());
         for validator in validators {
             let Validator { address, pubkey } = validator;
             self.bytes(address);
             self.bytes(pubkey);
+        }
+        match authors {
+            None => self.bytes(&[0]),
+            Some((height, entries)) => {
+                self.bytes(&[1]);
+                self.bytes(&height.to_le_bytes());
+                self.length(entries.len());
+                for (member, weight) in entries {
+                    self.bytes(&member.address);
+                    self.bytes(&member.pubkey);
+                    self.integer(weight);
+                }
+            }
         }
         self.length(weights.len());
         for (address, weight) in weights {
@@ -423,6 +437,7 @@ mod tests {
                 total_weight: 5.into(),
                 quorum_weight: 4.into(),
                 weighted: true,
+                authors: None,
             };
             let sync = RoundSync {
                 chain_id: b"audit-fixture".to_vec(),

@@ -12,12 +12,14 @@ use octra_node_protocol::{
 };
 
 pub struct Rules {
+    pub signing: octra_node_protocol::tx_signature::Mode,
     pub bft: bool,
     pub profile: Profile,
     pub compute: RuleMode,
     pub settle: RuleMode,
     pub proof: RuleMode,
     pub duty: Option<(i64, RuleMode)>,
+    pub duty_marks: bool,
     pub queue_head: Option<i64>,
     pub stealth_minimum: BigInt,
 }
@@ -53,9 +55,20 @@ pub fn stage(
     transaction::check_compute(rules.compute, rules.settle, std::slice::from_ref(tx))
         .map_err(|e| e.to_string())?;
     let tx = prepare(tx, ledger).map_err(|e| e.reason)?;
+    rules
+        .signing
+        .check_active(std::slice::from_ref(&tx))
+        .map_err(str::to_owned)?;
+    if tx.to_json_bytes().map_err(|e| e.to_string())?.len()
+        > octra_node_protocol::network::transaction_gossip::MAX_JSON
+    {
+        return Err("transaction JSON exceeds relay limit".into());
+    }
+    transaction_payload::admit(transaction_payload::Limits::default(), &tx)
+        .map_err(|e| e.to_string())?;
     let head = rules.duty.map(|(h, _)| h);
     let mode = rules.duty.map_or(RuleMode::Prior, |(_, m)| m);
-    if duty::expired(&tx, head, mode) {
+    if duty::expired_with_marks(&tx, head, mode, rules.duty_marks) {
         return Err("validator ready head has expired".into());
     }
     if rules.bft && !rules.profile.consensus_admits(tx.op_type) {
@@ -75,7 +88,7 @@ pub fn stage(
     )?;
     let hash = hex::encode(tx.hash().map_err(|e| e.to_string())?).into_bytes();
     pool.preview(preview::Message::Check(rules.queue_head, hash.clone()))?;
-    let drops = pool.expire_duty(Some(&tx.from), head, mode, clock);
+    let drops = pool.expire_duty_with_marks(Some(&tx.from), head, mode, rules.duty_marks, clock);
     if !drops.is_empty() {
         host.save_drops(&drops);
         for drop in &drops {
@@ -190,12 +203,17 @@ pub fn submit(
         bft: rules.bft,
         profile: &rules.profile,
         duty: rules.duty,
+        duty_marks: rules.duty_marks,
         limits: transaction_payload::Limits::default(),
     };
     let account = ledger.account(&tx.from);
     admission::pre_signature(tx, account.is_some(), &pre)?;
     let tx = prepare(tx, ledger)?;
-    admission::signature(&tx, account.and_then(|a| a.public_key.as_deref()))?;
+    admission::signature_at(
+        &rules.signing,
+        &tx,
+        account.and_then(|a| a.public_key.as_deref()),
+    )?;
     admission::payload(&tx, transaction_payload::Limits::default())?;
     admission::post_signature(
         &tx,

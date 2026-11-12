@@ -102,8 +102,10 @@ impl State {
                 settle: RuleMode::Prior,
                 proof: RuleMode::Active,
                 duty: None,
+                duty_marks: false,
                 queue_head: Some(0),
                 stealth_minimum: 5000.into(),
+                signing: octra_node_protocol::tx_signature::Mode::Historical,
             },
         }
     }
@@ -181,7 +183,11 @@ impl Handler for Dispatch {
                 effects
             };
             for effect in effects {
-                p2p_transaction::deliver(&swarm, &peer, effect).await?;
+                let state = state.clone();
+                p2p_transaction::deliver(&swarm, &peer, effect, move |hash| {
+                    state.lock().unwrap().pool.find(hash).cloned()
+                })
+                .await?;
             }
             Ok(())
         })

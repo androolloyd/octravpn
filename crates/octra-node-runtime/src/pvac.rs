@@ -10,6 +10,9 @@ use std::{
 };
 pub trait Source: Send + Sync + 'static {
     fn get(&self, hash: &[u8]) -> Result<Option<Vec<u8>>, Error>;
+    fn legacy(&self, _address: &[u8]) -> Result<Option<Vec<u8>>, Error> {
+        Ok(None)
+    }
 }
 /// Transport bound for canonical stored blobs, separate from the native 5MB
 /// incoming registration envelope. The crypto decoder bounds expanded images.
@@ -96,6 +99,43 @@ pub fn valid_hash(hash: &[u8]) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
 }
 impl Source for Files {
+    fn legacy(&self, address: &[u8]) -> Result<Option<Vec<u8>>, Error> {
+        if address.len() != 47
+            || !address.starts_with(b"oct")
+            || !address.iter().all(u8::is_ascii_alphanumeric)
+        {
+            return Ok(None);
+        }
+        let name =
+            std::str::from_utf8(address).map_err(|_| Error("invalid public key address".into()))?;
+        let path = self.0.join(format!("{name}.pk"));
+        let mut options = fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+            );
+        }
+        let file = match options.open(&path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(Error(error.to_string())),
+        };
+        let meta = file.metadata().map_err(|e| Error(e.to_string()))?;
+        if !meta.is_file() || meta.len() > MAX_BLOB_BYTES as u64 {
+            return Err(Error("legacy pvac blob unavailable".into()));
+        }
+        let mut raw = Vec::new();
+        file.take(MAX_BLOB_BYTES as u64 + 1)
+            .read_to_end(&mut raw)
+            .map_err(|e| Error(e.to_string()))?;
+        if raw.len() > MAX_BLOB_BYTES {
+            return Err(Error("legacy pvac blob too large".into()));
+        }
+        Ok(Some(raw))
+    }
     fn get(&self, hash: &[u8]) -> Result<Option<Vec<u8>>, Error> {
         if !valid_hash(hash) {
             return Err(Error("invalid pvac blob hash".into()));
@@ -162,4 +202,20 @@ pub fn bound(
         return Err(Error("pvac blob hash mismatch".into()));
     }
     Ok(Some(raw.into()))
+}
+
+/// Mutable execution before Program_inputs can use the native legacy disk key.
+/// Read-only snapshots deliberately continue to call `bound` directly.
+pub fn live(
+    source: Option<&Arc<dyn Source>>,
+    state: &Snapshot,
+    address: &[u8],
+    registered: bool,
+) -> Result<Option<Arc<[u8]>>, Error> {
+    if registered || state.get(&[b"pvac_hashes", address]).is_some() {
+        return bound(source, state, address);
+    }
+    source.map_or(Ok(None), |source| {
+        source.legacy(address).map(|value| value.map(Arc::from))
+    })
 }

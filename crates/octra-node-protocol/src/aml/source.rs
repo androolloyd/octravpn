@@ -3,7 +3,10 @@
 //! Native Aml_source.owns selection between source and prior/forms syntax.
 use super::lexer::{Error, Stream, Symbol as S, Token as T, Word as W};
 mod compile;
-pub use compile::{compile, compile_ast, compile_multi, CompileError, Compiled};
+pub use compile::{
+    compile, compile_ast, compile_ast_metered, compile_metered, compile_multi,
+    compile_multi_metered, CompileError, Compiled,
+};
 fn modifier(token: &T) -> bool {
     matches!(
         token,

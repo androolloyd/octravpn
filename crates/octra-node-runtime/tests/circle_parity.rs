@@ -21,7 +21,7 @@ fn rust_host_matches_pristine_engine_storage_events_metering_and_refusals() {
             &std::fs::read(path).expect("read explicitly selected native registry fixture"),
         )
         .unwrap(),
-        None => serde_json::from_str(include_str!("fixtures/circle-engine.json")).unwrap(),
+        None => serde_json::from_str(include_str!("fixtures/circle-engine-c49.json")).unwrap(),
     };
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     // The strict native fixture binds one exact portable artifact. Isolated
@@ -34,22 +34,38 @@ fn rust_host_matches_pristine_engine_storage_events_metering_and_refusals() {
         .expect("build or explicitly select the registry WASM before runtime parity tests");
     assert_eq!(hex::encode(Sha256::digest(&wasm)), fixture["wasm_sha256"]);
     let pin: Value =
-        serde_json::from_slice(&std::fs::read(root.join("docs/rust-node/upstream.json")).unwrap())
+        serde_json::from_slice(&std::fs::read(root.join("docs/rust-node/candidate.json")).unwrap())
             .unwrap();
     assert_eq!(fixture["upstream_commit"], pin["commit"]);
-    let adopted: Value = serde_json::from_slice(
+    let provenance: Value = serde_json::from_slice(
         &std::fs::read(root.join("vendor/octra-circle-wasm-host/PROVENANCE.json")).unwrap(),
     )
     .unwrap();
-    assert_eq!(adopted["commit"], pin["commit"]);
-    let source = adopted["source_directory"].as_str().unwrap();
-    let expected_sources: serde_json::Map<String, Value> = adopted["upstream_sha256"]
+    assert_eq!(provenance["commit"], pin["commit"]);
+    let source = provenance["source_directory"].as_str().unwrap();
+    let expected_sources: serde_json::Map<String, Value> = provenance["upstream_sha256"]
         .as_object()
         .unwrap()
         .iter()
         .map(|(path, hash)| (format!("{source}/{path}"), hash.clone()))
         .collect();
     assert_eq!(fixture["source_sha256"], Value::Object(expected_sources));
+    for (field, path) in [
+        (
+            "generator_sha256",
+            "scripts/circle-apps/test-registry-native.py",
+        ),
+        (
+            "harness_sha256",
+            "scripts/circle-apps/registry_native_tests.rs",
+        ),
+    ] {
+        assert_eq!(
+            fixture[field],
+            hex::encode(Sha256::digest(std::fs::read(root.join(path)).unwrap())),
+            "stale native registry oracle: {path}"
+        );
+    }
     for (name, hash) in fixture["app_source_sha256"].as_object().unwrap() {
         assert_eq!(
             hex::encode(Sha256::digest(std::fs::read(root.join(name)).unwrap())),
@@ -60,6 +76,11 @@ fn rust_host_matches_pristine_engine_storage_events_metering_and_refusals() {
     let runtime = CircleRuntime::new(Arc::new(NoHfhe));
     let cases = fixture["cases"].as_array().unwrap();
     assert_eq!(cases.len(), 9);
+    let historical: Value =
+        serde_json::from_str(include_str!("fixtures/circle-engine.json")).unwrap();
+    for (current, old) in cases.iter().zip(historical["cases"].as_array().unwrap()) {
+        assert_eq!(current["input"], old["input"], "historical registry input");
+    }
     for case in cases {
         let mut input = case["input"].clone();
         input["code_b64"] = Value::String(STANDARD.encode(&wasm));

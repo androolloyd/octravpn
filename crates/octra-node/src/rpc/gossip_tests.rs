@@ -52,6 +52,8 @@ fn rules() -> p2p_transaction::Rules {
         max_drift: 300.,
         duty: None,
         bft: true,
+        signing: octra_node_protocol::tx_signature::Mode::Historical,
+        duty_marks: false,
     }
 }
 fn state(tx: &Transaction) -> StateBatch {
@@ -102,17 +104,7 @@ fn inventory_and_get_do_not_fold_accounts_and_sender_lookup_is_lazy() {
     host.effects.clear();
     let get = Message::Get(vec![hash(&tx)]).encode().unwrap();
     assert!(host.receive(&mut ingress, b"peer", &get, rules()).unwrap());
-    assert_eq!(
-        host.effects,
-        vec![Effect::Send(
-            Message::Transaction {
-                hash: hash(&tx),
-                json: tx.to_json_bytes().unwrap()
-            }
-            .encode()
-            .unwrap()
-        )]
-    );
+    assert_eq!(host.effects, vec![Effect::Serve(vec![hash(&tx)])]);
     host.effects.clear();
     // A fresh transaction reaches only its sender account and remains subject
     // to the separate complete submit_peer admission after this parser returns.
@@ -226,7 +218,11 @@ impl Handler for Reader {
                 std::mem::take(&mut host.effects)
             };
             for effect in effects {
-                p2p_transaction::deliver(&swarm, &peer, effect).await?;
+                let state = state.clone();
+                p2p_transaction::deliver(&swarm, &peer, effect, move |hash| {
+                    p2p_transaction::Host::find(&state.lock().unwrap().0, hash)
+                })
+                .await?;
             }
             Ok(())
         })

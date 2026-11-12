@@ -1,4 +1,4 @@
-//! Differential startup/profile commitments from the unchanged adopted native
+//! Differential startup/profile commitments from the committed candidate native
 //! modules. Epoch-only selectors do not authenticate execution-rule activation.
 use octra_node_protocol::{
     consensus::{
@@ -21,9 +21,9 @@ use std::{
     path::PathBuf,
 };
 
-const NATIVE_PIN: &str = "7f9be4489870645cfcc95439638cde40f5da9f50";
-const NATIVE_SOURCES_SHA: &str = "ddefd67b70c877129f1678655715abf6a6a0a1b652c0394be552a4eb8c31e141";
-const ORACLE_SHA: &str = "0c6a9bb1a34c3e457008c7d41f0ebd4f2dee587f448d8f71d14178f091f39925";
+const NATIVE_PIN: &str = "c49de45cf49ebbc2e5c0697eb956cbcada5845e7";
+const NATIVE_SOURCES_SHA: &str = "528abda003447af13945e0313c7d82707b484bbbae3e461995fb8f883dbeddf0";
+const ORACLE_SHA: &str = "efec28c25ef4133112fbb3fa42b93558e225fb33ac9b977816bcc6f237030667";
 const INPUTS_SHA: &str = "998eeabecce66b4c3660dc539d9b63333d3b5e7a5894b5ff0c19652ef61c6a23";
 const SELECTOR_SCOPE: &str =
     "epoch-only compatibility profile; not authenticated execution-rule activation";
@@ -179,7 +179,7 @@ fn mode(value: RuleMode) -> &'static str {
 }
 fn epochs(chain: &[u8]) -> Vec<i64> {
     let mut probes = BTreeSet::from([0, 1, Nonce::MAX.get()]);
-    for epoch in rules::profile_epochs(chain) {
+    for epoch in profile::epochs(chain) {
         if epoch > 0 {
             probes.insert(epoch - 1);
         }
@@ -316,7 +316,7 @@ fn compare(input: &Input, expected: &NativeCase) {
         rows.iter().map(|row| row.epoch).collect::<Vec<_>>(),
         epochs(chain)
     );
-    let boundaries = rules::profile_epochs(chain);
+    let boundaries = profile::epochs(chain);
     for row in rows {
         for hash in [&row.compat_hash, &row.standard_hash, &row.selected_hash] {
             digest(hash);
@@ -367,14 +367,14 @@ fn compare(input: &Input, expected: &NativeCase) {
 }
 
 #[test]
-fn unchanged_native_settings_profiles_and_hashes() {
+fn current_native_settings_profiles_and_hashes() {
     assert_eq!(hex::encode(Sha256::digest(INPUTS)), INPUTS_SHA);
     let inputs: Inputs = serde_json::from_slice(INPUTS).expect("typed native profile inputs");
     assert_eq!(inputs.schema, "octra_native_consensus_profile_inputs_v1");
     let path = std::env::var_os("OCTRA_NATIVE_PROFILE_FIXTURE").map_or_else(
         || {
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/fixtures/consensus-profile-native.json")
+                .join("tests/fixtures/consensus-profile-c49.json")
         },
         PathBuf::from,
     );
@@ -393,6 +393,37 @@ fn unchanged_native_settings_profiles_and_hashes() {
     assert_eq!(fixture.native_sources_sha256, NATIVE_SOURCES_SHA);
     assert_eq!(fixture.oracle_source_sha256, ORACLE_SHA);
     assert_eq!(fixture.case_inputs_sha256, INPUTS_SHA);
+    let provenance_bytes = include_bytes!("fixtures/consensus-profile-c49-provenance.json");
+    assert_eq!(
+        hex::encode(Sha256::digest(provenance_bytes)),
+        fixture.build_provenance_sha256
+    );
+    let provenance: serde_json::Value = serde_json::from_slice(provenance_bytes).unwrap();
+    let inventory: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../docs/rust-node/source-map-candidate.json"
+    ))
+    .unwrap();
+    assert_eq!(provenance["upstream_commit"], NATIVE_PIN);
+    assert_eq!(inventory["upstream_commit"], NATIVE_PIN);
+    for (path, hash) in provenance["source_sha256"].as_object().unwrap() {
+        // The runtime inventory excludes dune build recipes. This exact native
+        // recipe defines the independently reproduced 241-file compiler stamp.
+        if path == "lib/vm/dune" {
+            assert_eq!(
+                hash.as_str(),
+                Some("8d8fafa8e566621c1e9920aecee4557a6feaeb90ab281bf7ae5cd97aebcaf1e4")
+            );
+        } else {
+            assert_eq!(&inventory["files"][path], hash, "candidate source {path}");
+        }
+    }
+    assert_eq!(
+        hex::encode(Sha256::digest(include_bytes!(
+            "../../../scripts/node-port/candidate-profile-oracle.ml"
+        ))),
+        ORACLE_SHA
+    );
+
     for hash in [
         &fixture.capture_sha256,
         &fixture.build_provenance_sha256,

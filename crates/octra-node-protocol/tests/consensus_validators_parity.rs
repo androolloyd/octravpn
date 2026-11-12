@@ -8,12 +8,29 @@ use octra_node_protocol::consensus::{
 use serde_json::{json, Value};
 fn fixture() -> Value {
     let value: Value =
-        serde_json::from_str(include_str!("fixtures/consensus-validators.json")).unwrap();
-    let manifest: Value =
-        serde_json::from_str(include_str!("../../../docs/rust-node/source-map.json")).unwrap();
+        serde_json::from_str(include_str!("fixtures/consensus-validators-c49.json")).unwrap();
+    let manifest: Value = serde_json::from_str(include_str!(
+        "../../../docs/rust-node/source-map-candidate.json"
+    ))
+    .unwrap();
     assert_eq!(value["upstream_commit"], manifest["upstream_commit"]);
     for (p, h) in value["source_sha256"].as_object().unwrap() {
         assert_eq!(*h, manifest["files"][p]);
+    }
+    use sha2::{Digest, Sha256};
+    assert_eq!(
+        value["historical_fixture_sha256"],
+        hex::encode(Sha256::digest(include_bytes!(
+            "fixtures/consensus-validators.json"
+        )))
+    );
+    let historical: Value =
+        serde_json::from_str(include_str!("fixtures/consensus-validators.json")).unwrap();
+    let cases = value["cases"].as_array().unwrap();
+    let prior = historical["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), prior.len());
+    for (new, old) in cases.iter().zip(prior) {
+        assert_eq!(new["input"], old["input"]);
     }
     value
 }
@@ -104,7 +121,7 @@ fn execute(v: &Value) -> Result<Value, Error> {
     })
 }
 #[test]
-fn native_validator_sets_quorum_leaders_canonical_wire_and_time() {
+fn current_native_validator_sets_quorum_leaders_canonical_wire_and_time() {
     for (index, case) in fixture()["cases"].as_array().unwrap().iter().enumerate() {
         assert_eq!(
             result(execute(&case["input"])),

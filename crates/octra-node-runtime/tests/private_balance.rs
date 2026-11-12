@@ -93,6 +93,8 @@ fn native_verified_plans_account_roots_and_rollback() {
             encrypted_data: input["payload"].as_str().map(|_| bytes(&input["payload"])),
         };
         let profile = Profile {
+            keyed: false,
+            registered: false,
             fields: if input["unique"] == true {
                 RuleMode::Active
             } else {

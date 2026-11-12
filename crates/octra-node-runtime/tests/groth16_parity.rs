@@ -318,6 +318,7 @@ fn circle_host_executes_private_admin_handoff_rotation_and_rejects_replay() {
             depth: 0,
             limit: 1_000_000,
             profile: WasmRules {
+                proof_key: false,
                 wasm_float: false,
                 proof_exec: true,
                 math: true,
@@ -330,6 +331,7 @@ fn circle_host_executes_private_admin_handoff_rotation_and_rejects_replay() {
             storage_proof: true,
             fhe_work: true,
             object_cost: true,
+            program_inputs: false,
         };
         let attempted = circle_call::execute(
             &runtime,

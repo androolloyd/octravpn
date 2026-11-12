@@ -11,6 +11,45 @@ pub(super) struct ReplayRetry {
 }
 
 impl<H: Host, C: Publication> Driver<H, C> {
+    pub(super) async fn search_proof(&mut self) -> Result<(), Error> {
+        use octra_node_protocol::consensus::{policy, proof_search::Search, RoundStep};
+        let state = self.engine.state();
+        let complete = state.valid_value.as_ref().is_some_and(|h| {
+            octra_node_protocol::consensus::hash::proposal_id(h)
+                .is_ok_and(|pid| self.engine.find_tx_hashes(&pid).is_some())
+        });
+        let enabled = self.initialized
+            && self.engine.validators().is_validator(&self.address)
+            && self.votes.allowed(self.readiness())
+            && self.engine.quorum_policy().select(state.height) == policy::Rule::Stake
+            && !self.engine.round_wait()
+            && !complete
+            && self.engine.am_i_leader()?;
+        let prior = if complete {
+            None
+        } else {
+            self.proof_search.take()
+        };
+        let (search, request) = Search::step(
+            prior,
+            self.engine.validators().n,
+            state.height,
+            state.round,
+            self.engine.known_proof_round(),
+            enabled,
+            self.now(),
+        );
+        self.engine.set_proof_search(if enabled {
+            search.as_ref().map(|s| s.target)
+        } else {
+            None
+        });
+        self.proof_search = search;
+        if let Some(round) = request {
+            self.round_sync(round, RoundStep::Prevote, true).await?;
+        }
+        Ok(())
+    }
     pub(super) fn clear_round_sync_jump(&mut self) {
         let state = self.engine.state();
         let height = state.height;

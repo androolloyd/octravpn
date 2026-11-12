@@ -3,6 +3,7 @@
 //! Quorum certificates are accepted only after field, membership and signature checks.
 use super::{
     hash, policy,
+    policy::QuorumPolicy,
     types::{Bytes, CommitCertificate, Finalize, ParentCommit, ValidatorSet, VoteType, NIL},
     Error,
 };
@@ -19,10 +20,25 @@ pub fn validate_certificate(
     certificate: &CommitCertificate,
     strict: bool,
 ) -> Result<(), Error> {
+    validate_certificate_for_policy(
+        policy::QuorumPolicy::for_chain(chain_id),
+        chain_id,
+        set,
+        certificate,
+        strict,
+    )
+}
+pub fn validate_certificate_for_policy(
+    policy: policy::QuorumPolicy,
+    chain_id: &[u8],
+    set: &ValidatorSet,
+    certificate: &CommitCertificate,
+    strict: bool,
+) -> Result<(), Error> {
     if certificate.chain_id != chain_id {
         return Err("chain_id".into());
     }
-    let effective = set.for_epoch(chain_id, certificate.epoch_id)?;
+    let effective = set.for_policy(policy, certificate.epoch_id)?;
     if certificate.header.chain_id != certificate.chain_id {
         return Err("header_chain_id".into());
     }
@@ -32,7 +48,11 @@ pub fn validate_certificate(
     if !policy::supported_version(certificate.header.proto_version) {
         return Err("header_proto_version".into());
     }
-    if !effective.is_validator(&certificate.header.creator_addr) {
+    if !effective.is_author(
+        chain_id,
+        certificate.epoch_id,
+        &certificate.header.creator_addr,
+    ) {
         return Err("header_creator".into());
     }
     if certificate.proposal_id == NIL {
@@ -49,9 +69,9 @@ pub fn validate_certificate(
     if signers.iter().collect::<BTreeSet<_>>().len() != signers.len() {
         return Err("duplicate_validator".into());
     }
-    let policy_ok = set.has_quorum_at(chain_id, certificate.epoch_id, &signers)?;
+    let policy_ok = set.has_quorum_for_policy(policy, certificate.epoch_id, &signers)?;
     let strict_ok = !strict
-        || !policy::quorum_active(chain_id, certificate.epoch_id)
+        || policy.select(certificate.epoch_id) == policy::Rule::Prior
         || effective.has_quorum(&signers);
     if !(policy_ok && strict_ok) {
         return Err("quorum".into());
@@ -90,6 +110,21 @@ pub fn validate_finalize(
     finalize: &Finalize,
     mode: FinalityMode,
 ) -> Result<(), Error> {
+    validate_finalize_for_policy(
+        policy::QuorumPolicy::for_chain(chain_id),
+        chain_id,
+        set,
+        finalize,
+        mode,
+    )
+}
+pub fn validate_finalize_for_policy(
+    policy: policy::QuorumPolicy,
+    chain_id: &[u8],
+    set: &ValidatorSet,
+    finalize: &Finalize,
+    mode: FinalityMode,
+) -> Result<(), Error> {
     let valid_version = match mode {
         FinalityMode::Live(protocol) => {
             finalize.header.proto_version == protocol.version_at(finalize.epoch_id)
@@ -104,7 +139,8 @@ pub fn validate_finalize(
     {
         return Err("parent_commit_hash".into());
     }
-    validate_certificate(
+    validate_certificate_for_policy(
+        policy,
         chain_id,
         set,
         &finalize.certificate(),
@@ -120,6 +156,17 @@ pub struct ExpectedParent {
     pub validator_set_hash: Bytes,
 }
 pub fn validate_parent(expected: &ExpectedParent, parent: &ParentCommit) -> Result<(), Error> {
+    validate_parent_for_policy(
+        QuorumPolicy::for_chain(&expected.chain_id),
+        expected,
+        parent,
+    )
+}
+pub fn validate_parent_for_policy(
+    policy: QuorumPolicy,
+    expected: &ExpectedParent,
+    parent: &ParentCommit,
+) -> Result<(), Error> {
     let certificate = &parent.certificate;
     if certificate.chain_id != expected.chain_id {
         return Err("chain_id".into());
@@ -136,7 +183,8 @@ pub fn validate_parent(expected: &ExpectedParent, parent: &ParentCommit) -> Resu
     if hash::validator_set_hash(&parent.validator_set)? != expected.validator_set_hash.as_slice() {
         return Err("validator_set".into());
     }
-    validate_certificate(
+    validate_certificate_for_policy(
+        policy,
         &expected.chain_id,
         &parent.validator_set,
         certificate,

@@ -80,10 +80,11 @@ fn validate(
         "standard"
     };
     let code = std::str::from_utf8(code).map_err(unavailable)?;
-    let input = serde_json::to_vec(&json!({"action":action,"code_b64":code,
+    let mut payload = json!({"action":action,"code_b64":code,
         "execution_profile":profile,"float_mode":rules.wasm.wasm_float,
-        "inspect_policy":rules.inspect}))
-    .map_err(unavailable)?;
+        "inspect_policy":rules.inspect,"table_limit":rules.wasm.proof_key,"stable_errors":rules.wasm.proof_key,"code_limit":rules.wasm.proof_key,"proof_key":rules.wasm.proof_key});
+    crate::circle::host_policy(&mut payload, rules.wasm.proof_key, rules.inspect);
+    let input = serde_json::to_vec(&payload).map_err(unavailable)?;
     if input.len() > MAX_INPUT_BYTES {
         return Err(unavailable(
             "Circle admission requires native large-input transport",

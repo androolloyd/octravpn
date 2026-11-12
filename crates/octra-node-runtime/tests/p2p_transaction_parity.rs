@@ -83,7 +83,22 @@ impl Host for Queue {
         Ok(h)
     }
     fn emit(&mut self, e: Effect) {
+        if let Effect::Serve(hashes) = e {
+            for hash in hashes {
+                if let Some(transaction) = self.find(&hash) {
+                    let payload = Message::Transaction {
+                        hash,
+                        json: transaction.to_json_bytes().unwrap(),
+                    }
+                    .encode()
+                    .unwrap();
+                    self.effects.push(json!(["send", b(payload)]));
+                }
+            }
+            return;
+        }
         self.effects.push(match e {
+            Effect::Serve(_) => unreachable!(),
             Effect::Send(p) => json!(["send", b(p)]),
             Effect::Broadcast(p) => json!(["broadcast", b(p)]),
             Effect::ReportBad(r) => json!(["bad", r]),
@@ -168,6 +183,8 @@ fn native_signed_gossip_receiver_normalizes_throttles_and_emits_queue_effects() 
             max_drift: v["drift"].as_str().unwrap().parse().unwrap(),
             duty: None,
             bft: false,
+            signing: octra_node_protocol::tx_signature::Mode::Historical,
+            duty_marks: false,
         };
         for (n, s) in v["steps"].as_array().unwrap().iter().enumerate() {
             host.now = s["now"].as_str().unwrap().parse().unwrap();
@@ -176,12 +193,12 @@ fn native_signed_gossip_receiver_normalizes_throttles_and_emits_queue_effects() 
             host.effects.clear();
             host.attempts.clear();
             receiver
-                .receive(b"peer", &payload(s, &txs), rules, &mut host)
+                .receive(b"peer", &payload(s, &txs), rules.clone(), &mut host)
                 .unwrap();
             let verdict = match p2p_transaction::admit(
                 &txs[s["index"].as_u64().unwrap_or(0) as usize],
                 host.now,
-                rules,
+                rules.clone(),
             )
             .unwrap()
             {

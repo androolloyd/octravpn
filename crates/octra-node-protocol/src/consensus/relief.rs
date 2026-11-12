@@ -145,6 +145,28 @@ impl Plan<'_> {
             check_set(self.current, self.target)
         }
     }
+    pub fn clock_limit(&self) -> Option<i64> {
+        (active(self.chain_id, self.height) && self.check().is_ok()).then_some(MIN_ROUND)
+    }
+    pub fn restore_with_authors(&self, mark: &Mark) -> Result<Option<ValidatorSet>, Error> {
+        let Some(target) = self.restore(mark)? else {
+            return Ok(None);
+        };
+        let mut target = target.clone();
+        if self.height == mark.height
+            && super::policy::quorum_rule(self.chain_id, self.height) == super::policy::Rule::Stake
+        {
+            target.authors = Some((
+                self.height,
+                self.current
+                    .entries()?
+                    .into_iter()
+                    .filter(|(member, _)| !target.is_validator(&member.address))
+                    .collect(),
+            ));
+        }
+        Ok(Some(target))
+    }
     pub fn decide(&self, proof: &[RoundSync]) -> Result<Decision, Error> {
         if !active(self.chain_id, self.height) || self.height >= self.activate_epoch {
             return Ok(Decision::Wait);

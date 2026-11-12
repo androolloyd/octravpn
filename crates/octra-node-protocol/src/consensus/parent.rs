@@ -51,15 +51,14 @@ pub fn participant_set(parent: &ParentCommit) -> Result<Vec<Participant>, Error>
 }
 pub fn proposer(parent: &ParentCommit) -> Result<Participant, Error> {
     let address = &parent.certificate.header.creator_addr;
-    let public = parent.validator_set.public_key(address);
-    let weight = parent
-        .validator_set
-        .weight(address)
-        .filter(|w| **w > BigInt::from(0));
-    match (public, weight) {
-        (Some(pubkey), Some(weight)) => Ok(Participant {
+    match parent.validator_set.author_entry(
+        &parent.certificate.chain_id,
+        parent.certificate.epoch_id,
+        address,
+    ) {
+        Some((member, weight)) if *weight > BigInt::from(0) => Ok(Participant {
             address: address.clone(),
-            pubkey: pubkey.to_vec(),
+            pubkey: member.pubkey.clone(),
             weight: weight.clone(),
         }),
         _ => Err("parent commit proposer is not in validator set".into()),

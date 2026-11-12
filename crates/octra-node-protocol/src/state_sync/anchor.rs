@@ -6,8 +6,9 @@ use crate::{
     consensus::{
         codec::Wire,
         hash,
+        policy::{self, QuorumPolicy, Rule},
         qc::{self, FinalityMode},
-        Finalize, Validator, ValidatorSet,
+        relief, relief_log, Finalize, Validator, ValidatorSet,
     },
     control_payload::ValidatorUpdate,
     epoch_index, irmin, native_base64,
@@ -25,10 +26,11 @@ const MAX_UPDATE: usize = 1_000_000;
 const MAX_PROOF: usize = 4_000_000;
 const MAX_ROOT: usize = 256;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Source {
     Pending,
     Active,
+    Relief(relief::Mark),
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Step {
@@ -48,10 +50,18 @@ pub struct Anchor {
 #[derive(Clone, Debug)]
 pub struct VerifiedAnchor {
     anchor: Anchor,
+    transition_epoch: i64,
+    stake: ValidatorSet,
 }
 impl VerifiedAnchor {
     pub fn anchor(&self) -> &Anchor {
         &self.anchor
+    }
+    pub fn transition_base(&self) -> (i64, &ValidatorSet) {
+        (self.transition_epoch, &self.stake)
+    }
+    pub fn relief(&self) -> Option<&relief::Mark> {
+        self.anchor.live_relief()
     }
 }
 /// Constructed only after authenticating an origin's finality and validator history.
@@ -112,10 +122,14 @@ fn failure(error: Error) -> Error {
     format!("Failure(\"{error}\")").into()
 }
 fn put_step(w: &mut Writer, step: &Step) -> Result<()> {
-    w.put_u8(match step.source {
+    w.put_u8(match &step.source {
         Source::Pending => 1,
         Source::Active => 2,
+        Source::Relief(_) => 3,
     })?;
+    if let Source::Relief(mark) = &step.source {
+        w.put_bytes(&relief_log::encode(mark)?)?;
+    }
     w.put_bytes(&step.finalize.encode()?)?;
     w.put_bytes(&step.ledger_state_root)?;
     w.put_bytes(&step.epoch_index_root)?;
@@ -126,6 +140,9 @@ fn get_step(r: &mut Reader<'_>) -> Result<Step> {
     let source = match r.get_u8()? {
         1 => Source::Pending,
         2 => Source::Active,
+        3 => Source::Relief(relief_log::decode(
+            r.get_bytes_bounded(relief_log::MAX_WIRE_BYTES as usize)?,
+        )?),
         _ => return Err("validator transition source is invalid".into()),
     };
     Ok(Step {
@@ -156,13 +173,31 @@ pub fn raw_validator_set(set: &ValidatorSet) -> Result<ValidatorSet> {
             ))
         })
         .collect::<Result<Vec<_>>>()?;
-    if set.weighted {
-        ValidatorSet::weighted(entries)
+    let mut result = if set.weighted {
+        ValidatorSet::weighted(entries)?
     } else {
-        Ok(ValidatorSet::unweighted(
-            entries.into_iter().map(|(v, _)| v).collect(),
-        ))
-    }
+        ValidatorSet::unweighted(entries.into_iter().map(|(v, _)| v).collect())
+    };
+    result.authors = set
+        .authors
+        .as_ref()
+        .map(|(height, entries)| {
+            entries
+                .iter()
+                .map(|(member, weight)| {
+                    Ok((
+                        Validator {
+                            address: member.address.clone(),
+                            pubkey: checkpoint::raw_pubkey(&member.pubkey)?,
+                        },
+                        weight.clone(),
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()
+                .map(|entries| (*height, entries))
+        })
+        .transpose()?;
+    Ok(result)
 }
 pub fn encoded_validator_set(set: &ValidatorSet) -> Result<ValidatorSet> {
     let mut result = set.clone();
@@ -177,6 +212,11 @@ pub fn encoded_validator_set(set: &ValidatorSet) -> Result<ValidatorSet> {
         )?;
         v.pubkey = STANDARD.encode(&v.pubkey).into_bytes();
     }
+    if let Some((_, entries)) = &mut result.authors {
+        for (member, _) in entries {
+            member.pubkey = STANDARD.encode(&member.pubkey).into_bytes();
+        }
+    }
     require(
         !result.validators.is_empty(),
         "finality validator set is empty",
@@ -189,7 +229,12 @@ pub fn finalize_hash(finalize: &Finalize) -> Result<Vec<u8>> {
 fn same_set(a: &ValidatorSet, b: &ValidatorSet) -> Result<bool> {
     Ok(hash::validator_set_hash(a)? == hash::validator_set_hash(b)?)
 }
-fn verify_finalize(chain: &[u8], set: &ValidatorSet, finalize: &Finalize) -> Result<()> {
+fn verify_finalize(
+    policy: QuorumPolicy,
+    chain: &[u8],
+    set: &ValidatorSet,
+    finalize: &Finalize,
+) -> Result<()> {
     require(
         finalize.chain_id == chain && finalize.header.chain_id == chain,
         "finality chain mismatch",
@@ -198,9 +243,9 @@ fn verify_finalize(chain: &[u8], set: &ValidatorSet, finalize: &Finalize) -> Res
         finalize.epoch_id == finalize.header.epoch_id,
         "finality epoch mismatch",
     )?;
-    qc::validate_finalize(chain, set, finalize, FinalityMode::StrictPersisted)
+    qc::validate_finalize_for_policy(policy, chain, set, finalize, FinalityMode::StrictPersisted)
         .map_err(|e| Error::from(format!("finality qc {e}")))?;
-    let vote_set = set.for_epoch(chain, finalize.epoch_id)?;
+    let vote_set = set.for_policy(policy, finalize.epoch_id)?;
     let signers = finalize
         .precommits
         .iter()
@@ -211,6 +256,7 @@ fn verify_finalize(chain: &[u8], set: &ValidatorSet, finalize: &Finalize) -> Res
 impl Step {
     fn verify(
         &self,
+        policy: QuorumPolicy,
         chain: &[u8],
         prior: Option<i64>,
         set: &ValidatorSet,
@@ -245,12 +291,19 @@ impl Step {
             update.source_epoch.is_some(),
             "validator transition source epoch is missing",
         )?;
-        let (path, active) = match self.source {
+        let (path, active) = match &self.source {
             Source::Pending => (PENDING_KEY, update.activate_epoch == epoch + 1),
             Source::Active => (ACTIVE_KEY, update.activate_epoch <= epoch),
+            Source::Relief(mark) => (
+                PENDING_KEY,
+                mark.height == epoch + 1
+                    && mark.activate_epoch == update.activate_epoch
+                    && mark.fingerprint == update.fingerprint.as_bytes()
+                    && policy::quorum_rule(chain, mark.height) == Rule::Stake,
+            ),
         };
         require(active, "validator transition activation epoch mismatch")?;
-        verify_finalize(chain, set, &self.finalize)?;
+        verify_finalize(policy, chain, set, &self.finalize)?;
         require(
             hex::encode(&self.finalize.header.proposed_state_root).as_bytes()
                 == fold(&self.ledger_state_root, &self.epoch_index_root)?,
@@ -261,12 +314,25 @@ impl Step {
             value.as_deref() == Some(self.update.as_slice()),
             "validator transition state proof mismatch",
         )?;
-        Ok((
-            epoch,
-            update
-                .validator_set()?
-                .for_epoch(chain, update.activate_epoch)?,
-        ))
+        let next = update.validator_set()?;
+        let next = match &self.source {
+            Source::Pending | Source::Active => next,
+            Source::Relief(mark) => {
+                let current = set.for_policy(policy, mark.height)?;
+                let target = next.for_policy(policy, update.activate_epoch)?;
+                relief::Plan {
+                    chain_id: chain,
+                    height: mark.height,
+                    current: &current,
+                    activate_epoch: update.activate_epoch,
+                    target: &target,
+                    fingerprint: update.fingerprint.as_bytes(),
+                }
+                .restore_with_authors(mark)?
+                .ok_or("validator relief step is expired")?
+            }
+        };
+        Ok((epoch, next))
     }
 }
 impl Anchor {
@@ -301,7 +367,27 @@ impl Anchor {
         require(value.raw()? == raw, "finality encoding is not exact")?;
         Ok(value)
     }
-    pub fn derive(&self, trusted: &ValidatorSet) -> Result<ValidatorSet> {
+    pub fn live_relief(&self) -> Option<&relief::Mark> {
+        self.steps.iter().rev().find_map(|step| match &step.source {
+            Source::Relief(mark) if self.finalize.epoch_id < mark.activate_epoch => Some(mark),
+            _ => None,
+        })
+    }
+    pub fn path_epoch(&self) -> i64 {
+        self.steps.last().map_or(-1, |step| step.finalize.epoch_id)
+    }
+    fn derived_set(&self, policy: QuorumPolicy, stake: &ValidatorSet) -> Result<ValidatorSet> {
+        if policy.select(self.finalize.epoch_id) == Rule::Stake {
+            stake.for_policy(policy, self.finalize.epoch_id)
+        } else if let Some(step) = self.steps.last() {
+            let update = ValidatorUpdate::parse(Some(&step.update))
+                .map_err(|e| Error::from(e.to_string()))?;
+            stake.for_policy(policy, update.activate_epoch)
+        } else {
+            Ok(stake.clone())
+        }
+    }
+    fn derive_stake(&self, policy: QuorumPolicy, trusted: &ValidatorSet) -> Result<ValidatorSet> {
         let mut set = raw_validator_set(trusted)?;
         let mut prior = None;
         for step in &self.steps {
@@ -309,17 +395,27 @@ impl Anchor {
                 step.finalize.epoch_id < self.finalize.epoch_id,
                 "validator transition is not before checkpoint",
             )?;
-            let (epoch, next) = step.verify(&self.finalize.chain_id, prior, &set)?;
+            let (epoch, next) = step.verify(policy, &self.finalize.chain_id, prior, &set)?;
             prior = Some(epoch);
             set = next;
         }
         require(
-            same_set(&set, &self.validator_set)?,
+            same_set(&self.derived_set(policy, &set)?, &self.validator_set)?,
             "finality validator transition is incomplete",
         )?;
         Ok(set)
     }
-    fn verify_checkpoint(&self, checkpoint: &checkpoint::Body) -> Result<()> {
+    pub fn derive(&self, trusted: &ValidatorSet) -> Result<ValidatorSet> {
+        self.derive_with_policy(QuorumPolicy::for_chain(&self.finalize.chain_id), trusted)
+    }
+    pub fn derive_with_policy(
+        &self,
+        policy: QuorumPolicy,
+        trusted: &ValidatorSet,
+    ) -> Result<ValidatorSet> {
+        self.derived_set(policy, &self.derive_stake(policy, trusted)?)
+    }
+    fn verify_checkpoint(&self, policy: QuorumPolicy, checkpoint: &checkpoint::Body) -> Result<()> {
         checkpoint.validate()?;
         let finalize = &self.finalize;
         let header = &finalize.header;
@@ -358,38 +454,131 @@ impl Anchor {
                 "finality certificate hash mismatch",
             )?;
         }
-        verify_finalize(&checkpoint.chain_id, &self.validator_set, finalize)
+        verify_finalize(policy, &checkpoint.chain_id, &self.validator_set, finalize)
     }
-    /// Remove redundant, already verified validator transitions while preserving
-    /// the shortest authenticated path to the same final validator set.
+    /// Minimize encoded bytes over independently authenticated paths, preserving
+    /// a live relief transition and the raw stake/effective-authority distinction.
     pub fn compact(&self, trusted: &ValidatorSet) -> Result<Self> {
-        self.derive(trusted)?;
-        let initial = hash::validator_set_hash(&raw_validator_set(trusted)?)?;
-        let mut paths = BTreeMap::from([(initial, Vec::<usize>::new())]);
-        let mut selected = Vec::new();
-        for (index, step) in self.steps.iter().enumerate() {
-            let update = ValidatorUpdate::parse(Some(&step.update))
-                .map_err(|e| Error::from(e.to_string()))?;
-            let next = update
-                .validator_set()?
-                .for_epoch(&self.finalize.chain_id, update.activate_epoch)?;
-            let next = hash::validator_set_hash(&next)?;
-            let mut extended = selected.clone();
-            extended.push(index);
+        self.compact_with_policy(QuorumPolicy::for_chain(&self.finalize.chain_id), trusted)
+    }
+    pub fn compact_with_policy(
+        &self,
+        policy: QuorumPolicy,
+        trusted: &ValidatorSet,
+    ) -> Result<Self> {
+        self.derive_stake(policy, trusted)?;
+        #[derive(Clone)]
+        struct Path {
+            bytes: usize,
+            prior: Option<i64>,
+            validators: ValidatorSet,
+            steps: Vec<Step>,
+        }
+        let key = |path: &Path| -> Result<_> {
+            let mut ending = self.clone();
+            ending.steps = path.steps.last().cloned().into_iter().collect();
+            Ok((
+                hash::validator_set_hash(&path.validators)?,
+                hash::validator_set_hash(&ending.derived_set(policy, &path.validators)?)?,
+            ))
+        };
+        let initial = raw_validator_set(trusted)?;
+        let empty = Path {
+            bytes: 0,
+            prior: None,
+            validators: initial.clone(),
+            steps: Vec::new(),
+        };
+        let mut paths = BTreeMap::from([(key(&empty)?, empty.clone())]);
+        let mut selected = empty;
+        let mut prior = None;
+        let mut current = initial;
+        for step in &self.steps {
+            let (epoch, next) = step.verify(policy, &self.finalize.chain_id, prior, &current)?;
+            let mut choices = Vec::new();
+            for path in paths.values() {
+                if !path.validators.is_author(
+                    &step.finalize.chain_id,
+                    step.finalize.epoch_id,
+                    &step.finalize.header.creator_addr,
+                ) {
+                    continue;
+                }
+                let mut link = step.clone();
+                link.finalize
+                    .precommits
+                    .retain(|vote| path.validators.public_key(&vote.validator).is_some());
+                let voters = path.validators.for_policy(policy, step.finalize.epoch_id)?;
+                if !voters.has_quorum(
+                    &link
+                        .finalize
+                        .precommits
+                        .iter()
+                        .map(|vote| vote.validator.clone())
+                        .collect::<Vec<_>>(),
+                ) {
+                    continue;
+                }
+                let mut wire = Writer::new();
+                put_step(&mut wire, &link)?;
+                choices.push((path.bytes + wire.into_bytes().len(), path, link));
+            }
+            choices.sort_by_key(|(bytes, _, _)| *bytes);
+            let mut extended = None;
+            for (bytes, path, link) in choices {
+                if let Ok((_, reached)) = link.verify(
+                    policy,
+                    &self.finalize.chain_id,
+                    path.prior,
+                    &path.validators,
+                ) {
+                    if same_set(&reached, &next)? {
+                        let mut steps = path.steps.clone();
+                        steps.push(link);
+                        extended = Some(Path {
+                            bytes,
+                            prior: Some(epoch),
+                            validators: next.clone(),
+                            steps,
+                        });
+                        break;
+                    }
+                }
+            }
+            let extended = extended.ok_or("validator path has no checked link")?;
+            if matches!(&step.source, Source::Relief(mark) if Some(mark) == self.live_relief()) {
+                paths.clear();
+            }
+            let id = key(&extended)?;
             selected = paths
-                .get(&next)
-                .filter(|p| p.len() <= extended.len())
+                .get(&id)
+                .filter(|old| old.bytes <= extended.bytes)
                 .cloned()
                 .unwrap_or(extended);
-            paths.insert(next, selected.clone());
+            paths.insert(id, selected.clone());
+            prior = Some(epoch);
+            current = next;
+        }
+        for path in paths.values() {
+            let mut short = self.clone();
+            short.steps.clone_from(&path.steps);
+            if same_set(
+                &short.derived_set(policy, &path.validators)?,
+                &self.validator_set,
+            )? && (path.bytes < selected.bytes
+                || (path.bytes == selected.bytes && path.prior < selected.prior))
+            {
+                selected = path.clone();
+            }
         }
         let mut out = self.clone();
-        out.steps = selected
-            .into_iter()
-            .map(|i| self.steps[i].clone())
-            .collect();
-        out.derive(trusted)?;
-        Ok(out)
+        out.steps = selected.steps;
+        out.derive_stake(policy, trusted)?;
+        if out.raw()?.len() < self.raw()?.len() {
+            Ok(out)
+        } else {
+            Ok(self.clone())
+        }
     }
 }
 pub fn verify(
@@ -397,15 +586,45 @@ pub fn verify(
     checkpoint: &checkpoint::Body,
     encoded: &[u8],
 ) -> Result<VerifiedAnchor> {
-    let anchor = Anchor::decode(encoded)?;
-    let derived = anchor.derive(trusted)?;
-    require(
-        same_set(&derived, &anchor.validator_set)?,
-        "finality validator transition mismatch",
-    )?;
-    anchor.verify_checkpoint(checkpoint)?;
-    Ok(VerifiedAnchor { anchor })
+    verify_with_policy(
+        QuorumPolicy::for_chain(&checkpoint.chain_id),
+        trusted,
+        checkpoint,
+        encoded,
+    )
 }
+pub fn verify_with_policy(
+    policy: QuorumPolicy,
+    trusted: &ValidatorSet,
+    checkpoint: &checkpoint::Body,
+    encoded: &[u8],
+) -> Result<VerifiedAnchor> {
+    let anchor = Anchor::decode(encoded)?;
+    let stake = anchor.derive_stake(policy, trusted)?;
+    anchor.verify_checkpoint(policy, checkpoint)?;
+    Ok(VerifiedAnchor {
+        transition_epoch: anchor.path_epoch(),
+        anchor,
+        stake,
+    })
+}
+pub fn verify_path(trusted: &ValidatorSet, encoded: &[u8]) -> Result<VerifiedAnchor> {
+    let anchor = Anchor::decode(encoded)?;
+    let policy = QuorumPolicy::for_chain(&anchor.finalize.chain_id);
+    let stake = anchor.derive_stake(policy, trusted)?;
+    verify_finalize(
+        policy,
+        &anchor.finalize.chain_id,
+        &anchor.validator_set,
+        &anchor.finalize,
+    )?;
+    Ok(VerifiedAnchor {
+        transition_epoch: anchor.path_epoch(),
+        anchor,
+        stake,
+    })
+}
+
 pub fn verify_origin(
     max_bytes: usize,
     trusted: &ValidatorSet,
@@ -446,7 +665,7 @@ pub fn verify_origin(
         hash::validator_set_hash(&validators)?.as_slice() == set_root,
         "origin validator set differs",
     )?;
-    verify_finalize(chain, &validators, finalize)?;
+    verify_finalize(QuorumPolicy::for_chain(chain), chain, &validators, finalize)?;
     Ok(Origin {
         chain_id: chain.to_vec(),
         epoch_id: epoch,

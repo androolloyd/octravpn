@@ -71,6 +71,7 @@ fn error(e: impl std::fmt::Display) -> Error {
 }
 pub(crate) fn profile() -> WasmRules {
     WasmRules {
+        proof_key: false,
         wasm_float: false,
         proof_exec: false,
         math: false,
@@ -150,8 +151,10 @@ impl Node for Host {
                 settle: RuleMode::Active,
                 proof: RuleMode::Active,
                 duty: None,
+                duty_marks: false,
                 queue_head: Some(i64::try_from(base.cursor.epoch.0).map_err(error)?),
                 stealth_minimum: 5000.into(),
+                signing: octra_node_protocol::tx_signature::Mode::Historical,
             };
             let hash = intake::submit(
                 &mut pool,
@@ -195,6 +198,7 @@ impl Node for Host {
                 storage_proof: true,
                 fhe_work: false,
                 object_cost: false,
+                program_inputs: false,
             },
             epoch,
             123.5,

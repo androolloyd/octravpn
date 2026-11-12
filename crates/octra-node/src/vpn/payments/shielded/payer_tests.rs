@@ -43,6 +43,7 @@ pub(super) async fn replay(fixture: &Fixture, operator: &Wallet, recovery: Recov
             },
             operator,
             crate::vpn::payments::shielded::wallet::rpc::Policy {
+                allowed_receipt_keys: vec![KeyPair::from_secret_bytes(&[27; 32]).public],
                 max_channels: 1,
                 max_requests: 1,
                 max_ceiling_ou: 100,
@@ -220,6 +221,7 @@ pub(super) async fn run(
         ip_tunnel: None,
     };
     let policy = crate::vpn::payments::shielded::wallet::rpc::Policy {
+        allowed_receipt_keys: vec![KeyPair::from_secret_bytes(&[27; 32]).public],
         max_channels: 16,
         max_requests: 32,
         max_ceiling_ou: 100,
@@ -227,7 +229,12 @@ pub(super) async fn run(
     };
     let service = fixture
         .node
-        .bind_shielded_purchases("127.0.0.1:0".parse().unwrap(), config(), operator, policy)
+        .bind_shielded_purchases(
+            "127.0.0.1:0".parse().unwrap(),
+            config(),
+            operator,
+            policy.clone(),
+        )
         .await
         .unwrap();
     let mut rpc = Rpc {
@@ -515,7 +522,12 @@ pub(super) async fn run(
     assert!(fixture.node.resume().await.unwrap());
     let service = fixture
         .node
-        .bind_shielded_purchases("127.0.0.1:0".parse().unwrap(), config(), operator, policy)
+        .bind_shielded_purchases(
+            "127.0.0.1:0".parse().unwrap(),
+            config(),
+            operator,
+            policy.clone(),
+        )
         .await
         .unwrap();
     rpc.origin = format!("http://{}", service.control_addr().unwrap());

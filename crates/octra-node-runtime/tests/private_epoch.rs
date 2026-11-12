@@ -84,6 +84,8 @@ fn native_epoch_admission_receipts_and_key_availability() {
             encrypted_data: Some(bytes(&input["payload"])),
         };
         let profile = Profile {
+            keyed: false,
+            registered: false,
             fields: if input["unique"] == true {
                 RuleMode::Active
             } else {

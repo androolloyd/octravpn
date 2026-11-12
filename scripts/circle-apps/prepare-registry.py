@@ -13,7 +13,7 @@ def main():
     code = args.wasm.read_bytes()
     digest = hashlib.sha256(code).hexdigest()
     evidence = json.loads(args.evidence.read_text())
-    pin = json.loads((ROOT / "docs/rust-node/upstream.json").read_text())
+    pin = json.loads((ROOT / "docs/rust-node/candidate.json").read_text())
     if not code.startswith(b"\0asm\x01\0\0\0") or len(code) > 4_194_304: raise SystemExit("invalid or oversized WASM")
     if evidence.get("passed") is not True or evidence.get("wasm_sha256") != digest or evidence.get("upstream_commit") != pin["commit"]:
         raise SystemExit("native host evidence does not match WASM and upstream pin")

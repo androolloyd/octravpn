@@ -89,6 +89,16 @@ impl Config {
         intents: Vec<Consent>,
         resume: bool,
     ) -> Result<PathBuf> {
+        self.consent_with_admission(node, intents, resume, None)
+            .await
+    }
+    pub async fn consent_with_admission<A: Host>(
+        &self,
+        node: &crate::Node<A>,
+        intents: Vec<Consent>,
+        resume: bool,
+        admission_output: Option<&Path>,
+    ) -> Result<PathBuf> {
         self.validate()?;
         ensure!(
             intents.len() == self.hops.len(),
@@ -126,10 +136,13 @@ impl Config {
                 interface_name: intent.interface_name,
             });
         }
-        if resume {
-            route::Route::resume(self.id, hops).await?;
+        let route = if resume {
+            route::Route::resume(self.id, hops).await?
         } else {
-            route::Route::create(self.id, hops).await?;
+            route::Route::create(self.id, hops).await?
+        };
+        if let Some(path) = admission_output {
+            crate::storage::publish(path, &serde_json::to_vec_pretty(&route.admission())?)?;
         }
         Ok(self.hops[0].wallet.clone())
     }

@@ -110,7 +110,12 @@ async fn range_agreement_deduplicates_and_authenticates_legacy_sources() {
     let answer = signed(query.request_id.clone(), record(), true, true);
     inject(&first, &reader, &answer, true).await;
     inject(&first, &reader, &answer, true).await;
-    peer::wait_for(|| validations.load(Ordering::SeqCst) >= 2).await;
+    peer::wait_for(|| validations.load(Ordering::SeqCst) == 1).await;
+    assert_eq!(
+        validations.load(Ordering::SeqCst),
+        1,
+        "replay reached validation"
+    );
     assert!(!pending.is_finished(), "one source counted more than once");
     let mut legacy = sign_range(answer.clone(), 3, false);
     // Unsigned legacy metadata is normalized before it can influence grouping
@@ -392,7 +397,7 @@ async fn signed_finality_windows_retry_legacy_proofs_and_stale_responses() {
         CHAIN,
         b"validator-2".to_vec(),
         key(2),
-        set(),
+        without(2),
         vec![reader.endpoint.clone()],
     )
     .await;
@@ -410,6 +415,13 @@ async fn signed_finality_windows_retry_legacy_proofs_and_stale_responses() {
         .unwrap()
         .insert(7, record.clone());
     let id = reader.finality.request(7, &roots).await.unwrap().unwrap();
+    inject(
+        &server,
+        &reader,
+        &signed(id.clone(), record.clone(), true, true),
+        true,
+    )
+    .await;
     peer::wait_for(|| reader.authority.finalities.lock().unwrap().len() == 1).await;
     assert_eq!(
         reader.authority.finalities.lock().unwrap()[0],
@@ -420,18 +432,52 @@ async fn signed_finality_windows_retry_legacy_proofs_and_stale_responses() {
 
     // A malformed signature never reaches finality admission; the observed
     // handler completion makes the negative assertion independent of sleeps.
-    let mut forged = signed(id.clone(), record.clone(), true, true);
+    let invalid = reader
+        .finality
+        .request_proof(7, &roots)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut forged = signed(invalid.clone(), record.clone(), true, true);
     forged.signature[0] ^= 1;
     inject(&server, &reader, &forged, true).await;
+    inject(
+        &server,
+        &reader,
+        &signed(invalid, record.clone(), true, true),
+        true,
+    )
+    .await;
     assert_eq!(reader.authority.finalities.lock().unwrap().len(), 1);
-    let mut wrong_epoch = signed(id.clone(), record.clone(), true, true);
+    reader.finality.clear_proofs();
+    let invalid = reader
+        .finality
+        .request_proof(7, &roots)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut wrong_epoch = signed(invalid.clone(), record.clone(), true, true);
     wrong_epoch.records[0].epoch_id = 8;
     inject(&server, &reader, &wrong_epoch, true).await;
+    inject(
+        &server,
+        &reader,
+        &signed(invalid, record.clone(), true, true),
+        true,
+    )
+    .await;
     assert_eq!(reader.authority.finalities.lock().unwrap().len(), 1);
 
     // The native legacy-complete proof can carry a certificate but must not
     // authenticate unsigned status/continuation metadata as peer state.
-    let mut legacy = signed(id.clone(), record.clone(), false, true);
+    reader.finality.clear_proofs();
+    let legacy_id = reader
+        .finality
+        .request_proof(7, &roots)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut legacy = signed(legacy_id, record.clone(), false, true);
     legacy.status = b"unsigned metadata".to_vec();
     legacy.next_epoch = Some(900);
     inject(&server, &reader, &legacy, true).await;
@@ -449,6 +495,13 @@ async fn signed_finality_windows_retry_legacy_proofs_and_stale_responses() {
     reader.clock.store(5_000_000_000, Ordering::SeqCst);
     let next = reader.finality.request(7, &roots).await.unwrap().unwrap();
     assert_ne!(next, id);
+    inject(
+        &server,
+        &reader,
+        &signed(next.clone(), record.clone(), true, true),
+        true,
+    )
+    .await;
     peer::wait_for(|| reader.authority.finalities.lock().unwrap().len() == 3).await;
     inject(
         &server,
@@ -465,6 +518,13 @@ async fn signed_finality_windows_retry_legacy_proofs_and_stale_responses() {
         .unwrap()
         .unwrap();
     assert_ne!(proof, next);
+    inject(
+        &server,
+        &reader,
+        &signed(proof.clone(), record.clone(), true, true),
+        true,
+    )
+    .await;
     peer::wait_for(|| reader.authority.finalities.lock().unwrap().len() == 4).await;
     // Proof and retry windows coexist. A proof request does not erase the
     // current retry window, and closing both prevents late deliveries.
@@ -484,7 +544,7 @@ async fn signed_finality_windows_retry_legacy_proofs_and_stale_responses() {
         true,
     )
     .await;
-    assert_eq!(reader.authority.finalities.lock().unwrap().len(), 5);
+    assert_eq!(reader.authority.finalities.lock().unwrap().len(), 4);
     reader.finality.close();
     inject(
         &server,
@@ -493,16 +553,30 @@ async fn signed_finality_windows_retry_legacy_proofs_and_stale_responses() {
         true,
     )
     .await;
-    inject(&server, &reader, &signed(next, record, true, true), true).await;
-    assert_eq!(reader.authority.finalities.lock().unwrap().len(), 5);
+    inject(
+        &server,
+        &reader,
+        &signed(next, record.clone(), true, true),
+        true,
+    )
+    .await;
+    assert_eq!(reader.authority.finalities.lock().unwrap().len(), 4);
     reader.clock.store(10_000_000_000, Ordering::SeqCst);
-    assert!(reader.finality.request(7, &roots).await.unwrap().is_some());
-    peer::wait_for(|| reader.authority.finalities.lock().unwrap().len() == 6).await;
+    let retry = reader.finality.request(7, &roots).await.unwrap().unwrap();
+    inject(
+        &server,
+        &reader,
+        &signed(retry, record.clone(), true, true),
+        true,
+    )
+    .await;
+    peer::wait_for(|| reader.authority.finalities.lock().unwrap().len() == 5).await;
     reader.clock.store(69_999_999_999, Ordering::SeqCst);
     assert!(reader.finality.request(7, &roots).await.unwrap().is_none());
     reader.clock.store(70_000_000_000, Ordering::SeqCst);
-    assert!(reader.finality.request(7, &roots).await.unwrap().is_some());
-    peer::wait_for(|| reader.authority.finalities.lock().unwrap().len() == 7).await;
+    let retry = reader.finality.request(7, &roots).await.unwrap().unwrap();
+    inject(&server, &reader, &signed(retry, record, true, true), true).await;
+    peer::wait_for(|| reader.authority.finalities.lock().unwrap().len() == 6).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -618,7 +692,9 @@ async fn awaited_proof_cancellation_preserves_driver_requests_and_drops_late_rep
     pending.abort();
     assert!(pending.await.unwrap_err().is_cancelled());
     reader.gate.send(true).unwrap();
-    peer::wait_for(|| reader.authority.finalities.lock().unwrap().len() == 4).await;
+    // The colliding request ID admits one reply from this peer. Replacing its
+    // owner preserves the driver window, without duplicating delivery.
+    peer::wait_for(|| reader.authority.finalities.lock().unwrap().len() == 3).await;
     reader.finality.close();
     assert!(reader
         .finality
@@ -708,7 +784,7 @@ async fn awaited_proof_timeout_and_queued_reader_cancellation() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn bad_certificate_does_not_mask_a_later_valid_proof() {
+async fn bad_certificate_does_not_mask_another_requested_peers_valid_proof() {
     let reader = peer::node(CHAIN, b"validator-1".to_vec(), key(1), set(), vec![]).await;
     let server = peer::node(
         CHAIN,
@@ -718,7 +794,15 @@ async fn bad_certificate_does_not_mask_a_later_valid_proof() {
         vec![reader.endpoint.clone()],
     )
     .await;
-    peer::wait_for(|| reader.swarm.peers().len() == 1).await;
+    let second = peer::node(
+        CHAIN,
+        b"validator-3".to_vec(),
+        key(3),
+        without(3),
+        vec![reader.endpoint.clone()],
+    )
+    .await;
+    peer::wait_for(|| reader.swarm.peers().len() == 2).await;
     let mut bad = record();
     bad.finality.as_mut().unwrap().finalize.precommits[0].signature[0] ^= 1;
     server.authority.ranges.lock().unwrap().insert(7, bad);
@@ -729,11 +813,18 @@ async fn bad_certificate_does_not_mask_a_later_valid_proof() {
         service
             .query_proof(
                 7,
-                &[Response {
-                    responder_addr: b"validator-2".to_vec(),
-                    responder_head_epoch: 7,
-                    state_root: None,
-                }],
+                &[
+                    Response {
+                        responder_addr: b"validator-2".to_vec(),
+                        responder_head_epoch: 7,
+                        state_root: None,
+                    },
+                    Response {
+                        responder_addr: b"validator-3".to_vec(),
+                        responder_head_epoch: 7,
+                        state_root: None,
+                    },
+                ],
                 2.,
                 |finalized| {
                     let valid = qc::validate_finalize(
@@ -764,7 +855,18 @@ async fn bad_certificate_does_not_mask_a_later_valid_proof() {
     inject(
         &server,
         &reader,
-        &signed(response.request_id, record(), true, true),
+        &signed(response.request_id.clone(), record(), true, true),
+        true,
+    )
+    .await;
+    assert!(
+        !pending.is_finished(),
+        "repeated responder escaped its consumed slot"
+    );
+    inject(
+        &second,
+        &reader,
+        &sign_range(signed(response.request_id, record(), true, true), 3, true),
         true,
     )
     .await;

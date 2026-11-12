@@ -18,6 +18,7 @@ impl Native {
         &self,
         committed: &Committed,
         address: &[u8],
+        registered: bool,
     ) -> Result<Option<Vec<u8>>, Error> {
         if !octra_node_protocol::transaction::is_valid_address(address) {
             return Err(Error("invalid public key address".into()));
@@ -28,6 +29,7 @@ impl Native {
                 .key_blob(hash)?
                 .map(Some)
                 .ok_or_else(|| Error("pvac blob unavailable".into())),
+            None if registered => Ok(None),
             None => {
                 let address = std::str::from_utf8(address)
                     .map_err(|_| Error("invalid public key address".into()))?;
@@ -63,6 +65,12 @@ impl Native {
             }
         }
     }
+    pub(crate) fn registered_pvac(&self, committed: &Committed) -> bool {
+        let epoch = i64::try_from(committed.head().cursor.epoch.0)
+            .unwrap_or(i64::MAX)
+            .saturating_add(1);
+        self.config.graph.program_inputs(epoch) == RuleMode::Active
+    }
     pub(crate) async fn private_account_rules(
         &self,
         committed: &Committed,
@@ -79,6 +87,7 @@ impl Native {
             Rule::CipherMigration,
             Rule::Standard,
             Rule::Math,
+            Rule::ProofKey,
         ] {
             if let Some(plan) = graph
                 .activation(rule)
@@ -115,6 +124,7 @@ impl Native {
             cipher: modes[1],
             proof: modes[2],
             math: modes[3] == RuleMode::Active,
+            keyed: modes[4] == RuleMode::Active,
         })
     }
     pub(crate) async fn classify_migration(
@@ -134,17 +144,19 @@ impl Native {
             .get(&[b"pvac_hashes", &address])
             .filter(|raw| *raw != b"none")
             .map(<[u8]>::to_vec);
+        let registered = self.registered_pvac(&committed);
         let native = self.clone();
         let source_address = address.clone();
         self.migration_status
             .query(
                 Query {
                     scope,
+                    registered,
                     address,
                     key_hash,
                     cipher,
                 },
-                Box::new(move || native.public_pvac(&committed, &source_address)),
+                Box::new(move || native.public_pvac(&committed, &source_address, registered)),
             )
             .await
             .map_err(|error| match error {

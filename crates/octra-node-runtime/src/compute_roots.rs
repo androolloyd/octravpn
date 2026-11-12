@@ -150,3 +150,27 @@ pub fn recent(state: &StateBatch, epoch: i64, root: &[u8]) -> Result<Root, Error
         .filter(|r| r.epoch == epoch && r.state == root)
         .ok_or_else(|| error("compute input origin not retained"))
 }
+
+/// Read only the retained authenticated metadata. Duty evidence must not depend
+/// on reconstructing unrelated Circle input trees.
+pub fn retained_set(
+    state: &StateBatch,
+    epoch: i64,
+) -> Result<Option<octra_node_protocol::validator::set_fold::MarkSet>, Error> {
+    let slot = slot(epoch);
+    let Some(raw) = state.get(&[b"compute", b"roots", &slot, b"meta"]) else {
+        return Ok(None);
+    };
+    let mut reader = Reader::new(raw);
+    let chain = reader.get_bytes_bounded(128).map_err(error)?.to_vec();
+    let saved = reader.get_u64().map_err(error)? as i64;
+    reader.get_hash32().map_err(error)?;
+    let validators =
+        ValidatorSet::decode(reader.get_bytes_bounded(1_000_000).map_err(error)?).map_err(error)?;
+    reader.get_bytes_bounded(128).map_err(error)?;
+    reader.finish().map_err(error)?;
+    if chain.is_empty() || saved < 0 || validators.n == 0 {
+        return Err(error("compute input state corrupt"));
+    }
+    Ok((saved == epoch).then_some((saved, chain, validators)))
+}

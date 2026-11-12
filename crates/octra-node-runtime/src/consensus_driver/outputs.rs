@@ -96,6 +96,88 @@ impl<H: Host, C: Publication> Driver<H, C> {
         }
         Ok(())
     }
+    pub(super) fn keep_recovery(&mut self) -> Result<(), Error> {
+        let height = self.engine.state().height;
+        let policy = self.engine.quorum_policy();
+        if policy.select(height) != policy::Rule::Stake
+            || !self.readiness().role_can_vote
+            || !self.engine.validators().is_validator(&self.address)
+        {
+            return Ok(());
+        }
+        let set = self.engine.validators();
+        for round in [
+            self.engine.state().locked_round,
+            self.engine.state().valid_round,
+        ] {
+            let votes = self.engine.polc_votes(round);
+            if !octra_node_protocol::consensus::vote_log::proof_ready(
+                policy,
+                &self.chain,
+                height,
+                set,
+                &votes,
+            ) {
+                continue;
+            }
+            if !self
+                .saved_proofs
+                .get(&round)
+                .is_some_and(|saved| &saved.0 == set && saved.1 == votes)
+            {
+                self.journal.save_proof(
+                    policy,
+                    &self.chain,
+                    height,
+                    set,
+                    self.votes.proof_round(height),
+                    &[],
+                    &votes,
+                )?;
+                self.saved_proofs
+                    .insert(round, (set.clone(), votes.clone()));
+            }
+            if round == self.engine.state().valid_round {
+                if let Some(proposal) = votes
+                    .first()
+                    .and_then(|v| self.engine.find_proposal(&v.proposal_id, round))
+                {
+                    if !self
+                        .saved_value
+                        .as_ref()
+                        .is_some_and(|(saved_set, saved)| saved_set == set && saved == proposal)
+                    {
+                        let record = octra_node_protocol::consensus::value_log::Record {
+                            proposal: proposal.clone(),
+                            votes,
+                        };
+                        match self.journal.save_value(
+                            &record,
+                            policy,
+                            self.engine.protocol(),
+                            &self.chain,
+                            height,
+                            set,
+                        ) {
+                            Ok(()) => self.saved_value = Some((set.clone(), proposal.clone())),
+                            Err(reason) => self
+                                .host
+                                .warning(&format!("proposal_record_failed: {reason}")),
+                        }
+                    }
+                }
+            }
+        }
+        self.saved_proofs.retain(|round, (_, votes)| {
+            [
+                self.engine.state().locked_round,
+                self.engine.state().valid_round,
+            ]
+            .contains(round)
+                && votes.first().is_some_and(|v| v.epoch_id == height)
+        });
+        Ok(())
+    }
     pub(super) async fn drain(&mut self) -> Result<(), Error> {
         if self
             .active_work
@@ -110,8 +192,14 @@ impl<H: Host, C: Publication> Driver<H, C> {
         if self.publish_retry.is_some() {
             return Ok(());
         }
+        self.maybe_activate_relief().await?;
         self.engine.on_ready(&mut |bytes| self.host.sign(bytes))?;
         self.replay_votes().await?;
+        if let Err(reason) = self.keep_recovery() {
+            self.votes.hold_journal(reason);
+            self.refresh();
+        }
+        self.search_proof().await?;
         let height = self.engine.state().height;
         let round = self.engine.state().round;
         self.verified
@@ -282,6 +370,10 @@ impl<H: Host, C: Publication> Driver<H, C> {
                     self.engine.replace_validator_set(validators);
                     self.notify_duty(next, duty);
                     self.engine.start_height(next);
+                    self.value_restore = None;
+                    self.proof_search = None;
+                    self.saved_proofs.clear();
+                    self.saved_value = None;
                     self.work.abort_all();
                     self.active_work = None;
                     self.build_retry = None;

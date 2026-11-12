@@ -121,6 +121,8 @@ fn fixture(withdraw: bool) -> &'static Fixture {
             encrypted_data: Some(bytes("payload")),
         };
         let profile = Profile {
+            keyed: false,
+            registered: false,
             fields: RuleMode::Active,
             strict: true,
             math: ScalarRule::Wide,

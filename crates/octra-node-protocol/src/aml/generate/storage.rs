@@ -5,10 +5,10 @@ use super::{storage_path_name, Arc, ExprId, Generator, Name, Result, Syntax, Typ
 use crate::octb::Instruction as I;
 impl Generator<'_> {
     pub(super) fn field_type(&self, name: &[u8]) -> Result<TypeId> {
-        self.contract
+        self.symbols
             .state
-            .iter()
-            .find(|field| field.name == name)
+            .get(name)
+            .map(|&index| &self.contract.state[index])
             .map(|field| field.typ)
             .ok_or_else(|| {
                 self.code

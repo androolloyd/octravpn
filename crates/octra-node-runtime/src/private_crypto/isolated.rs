@@ -96,6 +96,7 @@ pub(crate) fn verify_cell(
     amount: &[u8],
     strict: bool,
     rule: ScalarRule,
+    keyed: bool,
 ) -> Result<(), Error> {
     use crate::circle_cell_crypto::Kind;
     let kind = match kind {
@@ -113,12 +114,14 @@ pub(crate) fn verify_cell(
         amount: amount.to_vec(),
         strict,
         math: math(rule),
+        keyed,
     })?)
 }
-fn key(raw: &[u8], proof: bool) -> Result<PublicKey, Error> {
+fn key(raw: &[u8], proof: bool, keyed: bool) -> Result<PublicKey, Error> {
     match call(Request::Key {
         raw: raw.to_vec(),
         proof,
+        keyed,
     })? {
         Response::Key(key) => Ok(PublicKey(key)),
         _ => Err(Error::Unavailable(
@@ -127,10 +130,13 @@ fn key(raw: &[u8], proof: bool) -> Result<PublicKey, Error> {
     }
 }
 pub fn load_pubkey(raw: &[u8]) -> Result<PublicKey, Error> {
-    key(raw, false)
+    key(raw, false, false)
+}
+pub fn proof_pubkey_keyed(raw: &[u8], keyed: bool) -> Result<PublicKey, Error> {
+    key(raw, true, keyed)
 }
 pub fn proof_pubkey(raw: &[u8]) -> Result<PublicKey, Error> {
-    key(raw, true)
+    key(raw, true, false)
 }
 pub fn decode_cipher(raw: &[u8], strict: bool, cap: bool) -> Result<Cipher, Error> {
     match call(Request::Cipher {
@@ -198,7 +204,20 @@ pub fn verify_amount(
     strict: bool,
     rule: ScalarRule,
 ) -> Result<(), Error> {
+    verify_amount_keyed(public, amount, payload, strict, rule, false)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_amount_keyed(
+    public: &PublicKey,
+    amount: &BigInt,
+    payload: &AmountProof<'_>,
+    strict: bool,
+    rule: ScalarRule,
+    keyed: bool,
+) -> Result<(), Error> {
     unit(&call(Request::Amount {
+        keyed,
         public: public.0.clone(),
         amount: amount.to_string(),
         cipher: payload.cipher.to_vec(),
@@ -230,7 +249,20 @@ pub fn verify_claim(
     strict: bool,
     rule: ScalarRule,
 ) -> Result<(), Error> {
-    verify_claim_profile(
+    verify_claim_keyed(public, cipher, proof, commitment, strict, rule, false)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_claim_keyed(
+    public: &PublicKey,
+    cipher: &[u8],
+    proof: &[u8],
+    commitment: &[u8],
+    strict: bool,
+    rule: ScalarRule,
+    keyed: bool,
+) -> Result<(), Error> {
+    verify_claim_profile_keyed(
         public,
         cipher,
         proof,
@@ -238,9 +270,12 @@ pub fn verify_claim(
         strict,
         rule,
         BoundProfile::Standard,
+        keyed,
     )
 }
-pub(crate) fn verify_claim_profile(
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn verify_claim_profile_keyed(
     public: &PublicKey,
     cipher: &[u8],
     proof: &[u8],
@@ -248,6 +283,7 @@ pub(crate) fn verify_claim_profile(
     strict: bool,
     rule: ScalarRule,
     profile: BoundProfile,
+    keyed: bool,
 ) -> Result<(), Error> {
     let profile = match profile {
         BoundProfile::Standard => 0,
@@ -258,6 +294,7 @@ pub(crate) fn verify_claim_profile(
         }
     };
     unit(&call(Request::Claim {
+        keyed,
         public: public.0.clone(),
         cipher: cipher.to_vec(),
         proof: proof.to_vec(),
@@ -267,7 +304,9 @@ pub(crate) fn verify_claim_profile(
         profile,
     })?)
 }
-pub(crate) fn verify_range_bound(
+/// Only authenticated migration of the existing stored key skips cyclic-power admission.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn verify_stored_claim(
     public: &PublicKey,
     cipher: &[u8],
     proof: &[u8],
@@ -275,7 +314,30 @@ pub(crate) fn verify_range_bound(
     strict: bool,
     rule: ScalarRule,
 ) -> Result<(), Error> {
+    unit(&call(Request::Claim {
+        keyed: true,
+        public: public.0.clone(),
+        cipher: cipher.to_vec(),
+        proof: proof.to_vec(),
+        commitment: commitment.to_vec(),
+        strict,
+        math: math(rule),
+        profile: 3,
+    })?)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn verify_range_bound_keyed(
+    public: &PublicKey,
+    cipher: &[u8],
+    proof: &[u8],
+    commitment: &[u8],
+    strict: bool,
+    rule: ScalarRule,
+    keyed: bool,
+) -> Result<(), Error> {
     unit(&call(Request::RangeBound {
+        keyed,
         public: public.0.clone(),
         cipher: cipher.to_vec(),
         proof: proof.to_vec(),
@@ -291,7 +353,20 @@ pub fn verify_range(
     strict: bool,
     rule: ScalarRule,
 ) -> Result<bool, Error> {
+    verify_range_keyed(public, cipher, proof, strict, rule, false)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_range_keyed(
+    public: &PublicKey,
+    cipher: &[u8],
+    proof: &[u8],
+    strict: bool,
+    rule: ScalarRule,
+    keyed: bool,
+) -> Result<bool, Error> {
     boolean(&call(Request::Range {
+        keyed,
         public: public.0.clone(),
         cipher: cipher.to_vec(),
         proof: proof.to_vec(),

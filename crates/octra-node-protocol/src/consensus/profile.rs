@@ -282,13 +282,41 @@ impl Settings {
         ))
     }
     pub fn hash(&self, chain: &[u8], epoch: i64, crypto_engine: &[u8]) -> Result<[u8; 32]> {
+        self.hash_for_policy(
+            policy::QuorumPolicy::for_chain(chain),
+            chain,
+            epoch,
+            crypto_engine,
+        )
+    }
+    pub fn hash_for_policy(
+        &self,
+        policy: policy::QuorumPolicy,
+        chain: &[u8],
+        epoch: i64,
+        crypto_engine: &[u8],
+    ) -> Result<[u8; 32]> {
         if rules::at(chain, Rule::Standard, epoch) == RuleMode::Prior {
             return self.compatibility_hash(crypto_engine);
         }
-        self.standard_hash(chain, epoch, crypto_engine)
+        self.standard_hash_for_policy(policy, chain, epoch, crypto_engine)
     }
     pub fn standard_hash(
         &self,
+        chain: &[u8],
+        epoch: i64,
+        crypto_engine: &[u8],
+    ) -> Result<[u8; 32]> {
+        self.standard_hash_for_policy(
+            policy::QuorumPolicy::for_chain(chain),
+            chain,
+            epoch,
+            crypto_engine,
+        )
+    }
+    pub fn standard_hash_for_policy(
+        &self,
+        policy: policy::QuorumPolicy,
         chain: &[u8],
         epoch: i64,
         crypto_engine: &[u8],
@@ -303,11 +331,7 @@ impl Settings {
             "activation_graph",
             &rules::consensus_id(chain, epoch),
         )?;
-        component(
-            &mut w,
-            "quorum",
-            policy::quorum_consensus_id(chain).as_bytes(),
-        )?;
+        component(&mut w, "quorum", policy.id_at(chain, epoch).as_bytes())?;
         component(
             &mut w,
             "set_fold_bootstrap",
@@ -332,6 +356,9 @@ impl Settings {
         for (name, value) in STANDARD_COMPONENTS {
             component(&mut w, name, value)?;
         }
+        if policy::quorum_rule(chain, epoch) == policy::Rule::Stake {
+            component(&mut w, "relief_authors", b"source_roles_state_proof")?;
+        }
         component(
             &mut w,
             "proposal_protocol",
@@ -341,6 +368,39 @@ impl Settings {
             if rules::at(chain, *rule, epoch) == RuleMode::Active {
                 component(&mut w, name, value)?;
             }
+        }
+        if rules::at(chain, Rule::ProgramRecords, epoch) == RuleMode::Active {
+            let id = if policy.round_wait(epoch) {
+                crate::program_record::consensus_id()
+            } else {
+                crate::program_record::released_id()
+            };
+            component(&mut w, "program_records", &id)?;
+        }
+        if rules::at(chain, Rule::ProofKey, epoch) == RuleMode::Active {
+            for (name,value) in [
+                ("proof_key",b"pvac.proof.public_key.fields".as_slice()),("key_powers",b"cyclic"),("key_owner",b"zero_proof_stored_amount"),
+                ("wasm_table",b"elements_65536:tables_1"),("wasm_shape",b"source:functions_10000:globals_1000:segments_1000:types_10000:imports_256:exports_256:arity_32:locals_4096:memories_1:tables_1"),("wasm_errors",b"input_fields")
+            ] {component(&mut w,name,value)?;}
+        }
+        if rules::at(chain, Rule::DutyMarks, epoch) == RuleMode::Active {
+            component(&mut w, "duty_marks", set_fold::MARKS_ID)?;
+        }
+        if rules::at(chain, Rule::CipherMigration, epoch) == RuleMode::Active {
+            component(&mut w,"cipher_migration",b"ledger_source:historical_strict:current_range64:shared_commitment:source_sha256:record_recovery:zero_record")?;
+        }
+        if rules::at(chain, Rule::TxNetwork, epoch) == RuleMode::Active {
+            component(
+                &mut w,
+                "tx_network",
+                b"ed25519:oce1:transaction_network:chain_id:signing_json",
+            )?;
+        }
+        if rules::program_inputs_at(chain, epoch) == RuleMode::Active {
+            component(&mut w, "program_inputs", rules::PROGRAM_INPUTS_ID)?;
+        }
+        if policy.round_wait(epoch) {
+            component(&mut w, "round_wait", policy::ROUND_WAIT_ID.as_bytes())?;
         }
         Ok(network::domain_hash(
             b"octra:consensus_standard",
@@ -411,5 +471,22 @@ const ACTIVATED_COMPONENTS:&[(Rule,&str,&[u8])]=&[
     (Rule::ProofExecution,"wasm_limits",b"full_request_v2:receipt_9233:direct_16777216:session_67108864:response_2097152:reply_67108864:guest_refusal:error_utf8_256_v1:hfhe_pairs_v2"),
     (Rule::VmBytes,"vm_bytes",b"bytes_v2:key_16777216:value_4194304:copy_16777216:write_4194304:alloc_134217728:unit_32:receipt_4194304:event_count_256:returns:shared_gross:inspect_isolated"),
     (Rule::VmBytes,"compute_transfers",COMPUTE_BILL),(Rule::Settle,"compute_settle",COMPUTE_BILL),
-    (Rule::CipherMigration,"cipher_migration",b"ledger_source:historical_strict:current_range64:shared_commitment:source_sha256:record_recovery:zero_record"),
 ];
+
+pub fn epochs(chain: &[u8]) -> Vec<i64> {
+    epochs_for_policy(policy::QuorumPolicy::for_chain(chain), chain)
+}
+pub fn epochs_for_policy(policy: policy::QuorumPolicy, chain: &[u8]) -> Vec<i64> {
+    let mut epochs = rules::profile_epochs(chain);
+    epochs.extend(policy.epochs());
+    epochs.sort_unstable();
+    epochs.dedup();
+    epochs
+}
+pub fn switch_after(chain: &[u8], applied_epoch: i64) -> bool {
+    switch_for(policy::QuorumPolicy::for_chain(chain), chain, applied_epoch)
+}
+pub fn switch_for(policy: policy::QuorumPolicy, chain: &[u8], applied_epoch: i64) -> bool {
+    applied_epoch < ((1i64 << 62) - 1)
+        && epochs_for_policy(policy, chain).contains(&(applied_epoch + 1))
+}

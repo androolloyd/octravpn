@@ -464,7 +464,11 @@ mod tests {
             input["fuel_limit"] = json!(10_000_000);
             input["hfhe_active_key"] = json!({"key_id": "test", "pubkey_b64": "", "seckey_b64": ""});
             let port = Port(Mutex::new(Phase::New));
-            assert_eq!(next(&port, input).unwrap_err(), (2, "hfhe backend failed".to_owned()));
+            #[cfg(feature = "rust-host")]
+            let reason = "Rust HFHE backend not installed";
+            #[cfg(not(feature = "rust-host"))]
+            let reason = "hfhe backend failed";
+            assert_eq!(next(&port, input).unwrap_err(), (2, reason.to_owned()));
         }
     }
 

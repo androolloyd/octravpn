@@ -67,7 +67,7 @@ fn snapshot(engine: &mut Engine, result: &Value) -> Value {
     json!({"result":result,"height":s.height.to_string(),"round":s.round,"step":s.step as u8,"locked_round":s.locked_round,"locked":s.locked_value.as_ref().map(|h|hex::encode(h.encode().unwrap())),"valid_round":s.valid_round,"valid":s.valid_value.as_ref().map(|h|hex::encode(h.encode().unwrap())),"generation":engine.generation(),"finalized_height":engine.finalized_height().to_string(),"pending":engine.pending_finalized().map(|f|hex::encode(f.encode().unwrap())),"outputs":outputs,"pristine":engine.is_pristine()})
 }
 #[test]
-fn native_signed_consensus_state_transition_traces() {
+fn current_native_original_signed_consensus_state_transition_traces() {
     let fixture: Value =
         serde_json::from_str(include_str!("fixtures/consensus-engine.json")).unwrap();
     let manifest: Value =
@@ -76,7 +76,48 @@ fn native_signed_consensus_state_transition_traces() {
     for (path, hash) in fixture["source_sha256"].as_object().unwrap() {
         assert_eq!(*hash, manifest["files"][path]);
     }
-    for (case_index, case) in fixture["cases"].as_array().unwrap().iter().enumerate() {
+    // All original event programs run again against current native source.
+    // c49 deliberately learns a POLC before its proposal arrives; historical
+    // snapshots of valid_value are therefore no longer current expectations.
+    let current = current_fixture();
+    let n = current["historical_case_count"].as_u64().unwrap() as usize;
+    assert_eq!(n, fixture["cases"].as_array().unwrap().len());
+    run_cases(&current["cases"].as_array().unwrap()[..n]);
+}
+fn current_fixture() -> Value {
+    use sha2::{Digest, Sha256};
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/consensus-engine-c49.json")).unwrap();
+    assert_eq!(
+        fixture["upstream_commit"],
+        "c49de45cf49ebbc2e5c0697eb956cbcada5845e7"
+    );
+    let manifest: Value = serde_json::from_str(include_str!(
+        "../../../docs/rust-node/source-map-candidate.json"
+    ))
+    .unwrap();
+    assert_eq!(fixture["upstream_commit"], manifest["upstream_commit"]);
+    for (path, hash) in fixture["source_sha256"].as_object().unwrap() {
+        assert_eq!(*hash, manifest["files"][path], "candidate source {path}");
+    }
+    assert_eq!(
+        fixture["oracle_sha256"],
+        hex::encode(Sha256::digest(include_bytes!(
+            "../../../scripts/node-port/consensus-engine-oracle.ml"
+        )))
+    );
+    fixture
+}
+#[test]
+fn candidate_native_staged_consensus_state_transition_traces() {
+    let fixture = current_fixture();
+    let n = fixture["historical_case_count"].as_u64().unwrap() as usize;
+    let cases = &fixture["cases"].as_array().unwrap()[n..];
+    assert_eq!(cases.len(), 80);
+    run_cases(cases);
+}
+fn run_cases(cases: &[Value]) {
+    for (case_index, case) in cases.iter().enumerate() {
         let config = &case["input"];
         let me = int(config, "me", 1);
         let key = SigningKey::from_bytes(&[me as u8; 32]);

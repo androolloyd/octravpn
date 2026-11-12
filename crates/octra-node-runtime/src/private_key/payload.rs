@@ -43,6 +43,8 @@ impl Migration {
 pub(super) struct Payload {
     pub new_key: Vec<u8>,
     pub kat: Vec<u8>,
+    pub owner_cipher: Option<Vec<u8>>,
+    pub owner_proof: Option<Vec<u8>>,
     pub migration: Migration,
     pub old_key: Option<Vec<u8>>,
     pub old_cipher: Option<Vec<u8>>,
@@ -116,7 +118,10 @@ fn migration(doc: &Document, mode: RuleMode) -> Result<Migration> {
 }
 impl Payload {
     pub(super) fn parse(tx: &Transaction, mode: RuleMode) -> Result<Self> {
-        Self::parse_inner(tx, mode).map_err(|mut error| {
+        Self::parse_keyed(tx, mode, false)
+    }
+    pub(super) fn parse_keyed(tx: &Transaction, mode: RuleMode, keyed: bool) -> Result<Self> {
+        Self::parse_inner(tx, mode, keyed).map_err(|mut error| {
             if let Error::Rejected(failure) = &mut error {
                 failure.user_reason =
                     b"encrypted_data must be JSON with new_pubkey and aes_kat".to_vec();
@@ -124,14 +129,26 @@ impl Payload {
             error
         })
     }
-    fn parse_inner(tx: &Transaction, mode: RuleMode) -> Result<Self> {
+    fn parse_inner(tx: &Transaction, mode: RuleMode, keyed: bool) -> Result<Self> {
         let doc = document(tx)?;
         let new_key = text(&doc, b"new_pubkey", mode, true)?.expect("required field");
         let kat = text(&doc, b"aes_kat", mode, true)?.expect("required field");
+        let owner_cipher = if keyed {
+            text(&doc, b"owner_cipher", mode, false)?
+        } else {
+            None
+        };
+        let owner_proof = if keyed {
+            text(&doc, b"owner_proof", mode, false)?
+        } else {
+            None
+        };
         let migration = migration(&doc, mode)?;
         Ok(Self {
             new_key,
             kat,
+            owner_cipher,
+            owner_proof,
             migration,
             old_key: text(&doc, b"old_bound_pubkey", mode, false)?,
             old_cipher: text(&doc, b"old_bound_cipher", mode, false)?,

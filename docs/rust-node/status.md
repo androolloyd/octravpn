@@ -1,6 +1,27 @@
 # Rust node qualification status
 
-The [current audit-cache candidate](checkpoints/2026-10-21/audit-record-cache.json)
+## November 12 upstream adoption candidate
+
+The current implementation targets lite_node
+`c49de45cf49ebbc2e5c0697eb956cbcada5845e7`. Its independent source inventory and
+qualification scope are recorded in [candidate.json](candidate.json).
+The older adopted pin and native fixtures retain their original provenance;
+they do not certify the new build. [Local qualification](checkpoints/2026-11-12/upstream-adoption.md)
+passes 1,219 tests across the protocol, runtime, node, cryptography and Circle
+host suites, including the executable network's transfer/browsing/recovery
+scenario. Strict default and private-feature Clippy checks pass; 13 ignored
+test entries are recorded separately. Sustained public devnet sync, funded private multi-hop service,
+and mainnet remain separate, unqualified gates for this candidate. No running
+observer or deployed service was replaced during this adoption.
+
+The implementation includes the upstream staged consensus rules, durable vote
+and relief recovery, bounded peer/query work, registered-key private reads,
+key-bound proofs, compiler publication rules and Circle execution updates.
+Their staged activation follows the upstream chain configuration.
+
+## October 21 qualification (historical build)
+
+The [audit-cache candidate](checkpoints/2026-10-21/audit-record-cache.json)
 passes both funded two-hop matrices, all 257 ordinary Linux node tests, 17
 signed-finality/cache regressions and strict runtime/default/private lint. Each
 matrix verifies actual private funding, nested traffic, restart, provider outage,

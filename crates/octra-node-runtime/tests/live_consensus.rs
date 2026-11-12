@@ -67,6 +67,7 @@ fn rules() -> consensus_bundle::Rules {
             compute: RuleMode::Prior,
             settle: RuleMode::Prior,
         },
+        signing: octra_node_protocol::tx_signature::Mode::Historical,
     }
 }
 fn header(epoch: i64, creator: Bytes) -> EpochHeader {

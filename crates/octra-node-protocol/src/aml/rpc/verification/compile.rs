@@ -4,7 +4,7 @@ use super::{
     compiler, package, source, AbiMode, BTreeMap, Error, Material, Output, Result, SourceMode,
     Version,
 };
-use crate::aml::compiler::protocol;
+use crate::aml::compiler::{prior, protocol};
 // Native bounded task/snapshot records remain inline without extra allocations.
 #[allow(clippy::large_enum_variant)]
 enum Attempt {
@@ -38,7 +38,7 @@ fn packaged(
             body: body.to_vec(),
         })
         .collect();
-    match package::compile_at(&material.main, sources, mode, points, loops) {
+    match package::compile_at_metered(&material.main, sources, mode, points, loops, points) {
         Ok(built) => Ok(Attempt::Compiled(built.result)),
         Err(package::Error::Rejected(reason)) => Ok(Attempt::Rejected(reason)),
         Err(package::Error::Unavailable(reason)) => Err(Error::Unavailable(reason)),
@@ -47,11 +47,13 @@ fn packaged(
 fn surface(material: &Material, syntax: source::Syntax, loops: bool) -> Result<Attempt> {
     let compiled = if material.files.is_some() {
         let sources = sources(material);
-        source::compile_multi(
+        source::compile_multi_metered(
             |path| sources.get(path).map(|raw| raw.to_vec()),
             &material.main,
             syntax,
             loops,
+            true,
+            false,
         )
         .map(|compiled| {
             (
@@ -61,7 +63,7 @@ fn surface(material: &Material, syntax: source::Syntax, loops: bool) -> Result<A
             )
         })
     } else {
-        source::compile(&material.source, syntax, loops)
+        source::compile_metered(&material.source, syntax, loops, true)
             .map(|compiled| (compiled, SourceMode::Single, material.source.clone()))
     };
     match compiled {
@@ -80,17 +82,36 @@ fn surface(material: &Material, syntax: source::Syntax, loops: bool) -> Result<A
         Err(error) => Ok(Attempt::Rejected(error.text())),
     }
 }
-fn historical(material: &Material) -> Result<Attempt> {
+fn protocol_result(material: &Material, historical: bool) -> Result<Attempt> {
     let result = if material.files.is_some() {
         let sources = sources(material);
-        protocol::compile_multi(
-            |path| sources.get(path).map(|raw| raw.to_vec()),
-            &material.main,
-            protocol::Options::default(),
-            false,
-        )
+        if historical {
+            prior::compile_multi(
+                |path| sources.get(path).map(|raw| raw.to_vec()),
+                &material.main,
+                prior::Interfaces::Strict,
+            )
+        } else {
+            protocol::compile_multi(
+                |path| sources.get(path).map(|raw| raw.to_vec()),
+                &material.main,
+                protocol::Options {
+                    metered: true,
+                    ..Default::default()
+                },
+                false,
+            )
+        }
+    } else if historical {
+        prior::compile(&material.source)
     } else {
-        protocol::compile(&material.source, protocol::Options::default())
+        protocol::compile(
+            &material.source,
+            protocol::Options {
+                metered: true,
+                ..Default::default()
+            },
+        )
     };
     match result {
         Ok(mut result) => match result.error.take() {
@@ -101,10 +122,12 @@ fn historical(material: &Material) -> Result<Attempt> {
         Err(error) => Ok(Attempt::Rejected(error.text())),
     }
 }
-pub(super) fn candidates(material: &Material, source_entry: bool) -> Result<Vec<Output>> {
+pub(super) struct Candidate {
+    pub code: Vec<u8>,
+    pub result: Output,
+}
+pub(super) fn candidates(material: &Material, source_entry: bool) -> Result<Vec<Candidate>> {
     let attempts = if source_entry {
-        // Preserve native evaluation order before applying its distinct result
-        // order. All dialect attempts execute, even when an earlier one matches.
         let current = packaged(material, package::CompilerMode::Protocol, true, false)?;
         let source = packaged(material, package::CompilerMode::Source, true, false)?;
         let preview = packaged(material, package::CompilerMode::Preview, true, false)?;
@@ -122,39 +145,76 @@ pub(super) fn candidates(material: &Material, source_entry: bool) -> Result<Vec<
             scoped_preview,
         ]
     } else {
-        let current = surface(material, source::Syntax::Source, false)?;
-        let forms = surface(material, source::Syntax::Forms, false)?;
-        let scoped = surface(material, source::Syntax::Source, true)?;
-        let scoped_forms = surface(material, source::Syntax::Forms, true)?;
-        let prior = historical(material)?;
-        let mut attempts = vec![current, forms, scoped, scoped_forms];
-        match &prior {
-            Attempt::Compiled(result)
-                if attempts.iter().any(
-                    |attempt| matches!(attempt, Attempt::Compiled(other) if executable(other) == executable(result)),
-                ) =>
-            {
-            }
-            _ => attempts.push(prior),
-        }
-        attempts
+        vec![
+            surface(material, source::Syntax::Source, false)?,
+            surface(material, source::Syntax::Forms, false)?,
+            surface(material, source::Syntax::Source, true)?,
+            surface(material, source::Syntax::Forms, true)?,
+            protocol_result(material, false)?,
+            protocol_result(material, true)?,
+        ]
     };
     let first_error = attempts.first().and_then(|attempt| match attempt {
         Attempt::Rejected(reason) => Some(reason.clone()),
         Attempt::Compiled(_) => None,
     });
-    let results: Vec<_> = attempts
-        .into_iter()
-        .filter_map(|attempt| match attempt {
-            Attempt::Compiled(result) => Some(result),
+    let historical = (!source_entry)
+        .then(|| attempts.last())
+        .flatten()
+        .and_then(|attempt| match attempt {
+            Attempt::Compiled(result) => Some(result.clone()),
             Attempt::Rejected(_) => None,
-        })
-        .collect();
-    if results.is_empty() {
+        });
+    let mut results = Vec::<Candidate>::new();
+    for (index, attempt) in attempts.into_iter().enumerate() {
+        if let Attempt::Compiled(result) = attempt {
+            let code = if source_entry {
+                executable(&result)
+            } else {
+                &result.bytecode
+            };
+            if source_entry || index < 4 || !results.iter().any(|row| row.code == *code) {
+                results.push(Candidate {
+                    code: code.to_vec(),
+                    result,
+                });
+            }
+        }
+    }
+    if !source_entry {
+        let mut envelopes = Vec::new();
+        for row in &results {
+            let result = compiler::emit_program(row.result.clone())?;
+            if let Some(code) = &result.program_envelope {
+                envelopes.push(Candidate {
+                    code: code.clone(),
+                    result,
+                });
+            }
+        }
+        if let Some(historical) = historical {
+            let result = compiler::emit_prior(historical)?;
+            if let Some(code) = &result.program_envelope {
+                envelopes.push(Candidate {
+                    code: code.clone(),
+                    result,
+                });
+            }
+        }
+        results.extend(envelopes);
+    }
+    let files = material.sources()?;
+    let scope = crate::program_record::source::scope_check(&material.main, &files, true)
+        .map_err(super::record_error)?;
+    let checked = results
+        .into_iter()
+        .filter(|row| scope.matches(&row.result.bytecode))
+        .collect::<Vec<_>>();
+    if checked.is_empty() {
         Err(Error::compile(
             first_error.unwrap_or_else(|| b"compiler result is absent".to_vec()),
         ))
     } else {
-        Ok(results)
+        Ok(checked)
     }
 }

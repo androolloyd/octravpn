@@ -176,6 +176,17 @@ pub(crate) async fn qualification<A: crate::Host>(
     let payer = Payer::resume(path, key, sources[0].clone()).await.unwrap();
     let route = Route::resume([241; 32], inputs(&payer, 230)).await.unwrap();
     assert_eq!(route.hop_count(), 2);
+    let admitted = route.admission();
+    assert_eq!(admitted.len(), 2);
+    for (position, entry) in admitted.iter().enumerate() {
+        assert!(entry.target == templates[position].0.target);
+        assert_eq!(
+            entry.receipt_key,
+            route.purchases[position].receipt_identity().unwrap().public
+        );
+        let exported = serde_json::to_value(entry).unwrap();
+        assert_eq!(exported.as_object().unwrap().len(), 2);
+    }
     route.check().await.unwrap();
     let books = || {
         inputs(&payer, 230)
@@ -185,6 +196,10 @@ pub(crate) async fn qualification<A: crate::Host>(
     };
     let restored = Route::resume_stored([241; 32], books()).await.unwrap();
     assert_eq!(restored.hop_count(), 2);
+    assert_eq!(
+        serde_json::to_value(restored.admission()).unwrap(),
+        serde_json::to_value(&admitted).unwrap()
+    );
     assert!(restored.profiles()[1].target == templates[1].0.target);
     restored.check().await.unwrap();
     drop(restored);

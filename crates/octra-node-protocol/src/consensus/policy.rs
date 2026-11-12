@@ -4,13 +4,99 @@
 use super::{Error, CURRENT_VERSION, LEGACY_VERSION};
 pub const DEVNET: &[u8] = b"octra-devnet-9871-cluster";
 pub const QUORUM_ACTIVATION: i64 = 1_306_547;
-pub fn quorum_active(chain_id: &[u8], epoch_id: i64) -> bool {
-    epoch_id
-        >= if chain_id == DEVNET {
-            QUORUM_ACTIVATION
-        } else {
-            0
+pub const STAKE_ACTIVATION: i64 = 1_737_333;
+pub const ROUND_ACTIVATION: i64 = 1_740_000;
+pub const ROUND_WAIT_ID: &str = "quorum_timers:stored_vote_resume:durable_past_votes:checked_relief_limit:quorum_phase:signed_progress_retry:stalled_signed_step:past_precommits";
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rule {
+    Prior,
+    Capped,
+    Stake,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QuorumPolicy {
+    pub count_epoch: i64,
+    pub stake_epoch: Option<i64>,
+    pub round_epoch: Option<i64>,
+}
+impl QuorumPolicy {
+    pub fn new(
+        count_epoch: i64,
+        stake_epoch: Option<i64>,
+        round_epoch: Option<i64>,
+    ) -> Result<Self, Error> {
+        if count_epoch < 0 || stake_epoch.is_some_and(|epoch| epoch <= count_epoch) {
+            return Err("quorum activation order".into());
         }
+        if round_epoch.is_some_and(|round| stake_epoch.is_none_or(|stake| round < stake)) {
+            return Err("round activation order".into());
+        }
+        Ok(Self {
+            count_epoch,
+            stake_epoch,
+            round_epoch,
+        })
+    }
+    pub fn with_round_epoch(self, round_epoch: Option<i64>) -> Result<Self, Error> {
+        Self::new(self.count_epoch, self.stake_epoch, round_epoch)
+    }
+    pub fn id_at(self, chain: &[u8], epoch: i64) -> String {
+        let prior = quorum_consensus_id(chain);
+        match self.stake_epoch {
+            Some(first) if self.select(epoch) == Rule::Stake => format!("{prior}:stake:{first}"),
+            _ => prior.to_owned(),
+        }
+    }
+    pub fn for_chain(chain: &[u8]) -> Self {
+        Self {
+            count_epoch: if chain == DEVNET {
+                QUORUM_ACTIVATION
+            } else {
+                0
+            },
+            stake_epoch: stake_epoch(chain),
+            round_epoch: round_epoch(chain),
+        }
+    }
+    pub fn select(self, epoch: i64) -> Rule {
+        if epoch < self.count_epoch {
+            Rule::Prior
+        } else if self.stake_epoch.is_some_and(|first| epoch >= first) {
+            Rule::Stake
+        } else {
+            Rule::Capped
+        }
+    }
+    pub fn round_wait(self, epoch: i64) -> bool {
+        self.round_epoch.is_some_and(|first| epoch >= first)
+    }
+    pub fn rewind_allowed(self, from: i64, to: i64) -> bool {
+        ![Some(self.count_epoch), self.stake_epoch, self.round_epoch]
+            .into_iter()
+            .flatten()
+            .any(|first| from >= first && to < first)
+    }
+    pub fn epochs(self) -> Vec<i64> {
+        let mut epochs: Vec<_> = [self.stake_epoch, self.round_epoch]
+            .into_iter()
+            .flatten()
+            .collect();
+        epochs.sort_unstable();
+        epochs.dedup();
+        epochs
+    }
+}
+pub fn stake_epoch(chain: &[u8]) -> Option<i64> {
+    (chain == DEVNET).then_some(STAKE_ACTIVATION)
+}
+pub fn round_epoch(chain: &[u8]) -> Option<i64> {
+    (chain == DEVNET).then_some(ROUND_ACTIVATION)
+}
+pub fn quorum_rule(chain: &[u8], epoch: i64) -> Rule {
+    QuorumPolicy::for_chain(chain).select(epoch)
+}
+pub fn quorum_active(chain_id: &[u8], epoch_id: i64) -> bool {
+    quorum_rule(chain_id, epoch_id) != Rule::Prior
 }
 pub fn quorum_consensus_id(chain_id: &[u8]) -> &'static str {
     if chain_id == DEVNET {
@@ -19,13 +105,11 @@ pub fn quorum_consensus_id(chain_id: &[u8]) -> &'static str {
         "resilient:genesis"
     }
 }
+pub fn quorum_consensus_id_at(chain_id: &[u8], epoch: i64) -> String {
+    QuorumPolicy::for_chain(chain_id).id_at(chain_id, epoch)
+}
 pub fn rewind_allowed(chain_id: &[u8], from_epoch: i64, to_epoch: i64) -> bool {
-    let activation = if chain_id == DEVNET {
-        QUORUM_ACTIVATION
-    } else {
-        0
-    };
-    !(from_epoch >= activation && to_epoch < activation)
+    QuorumPolicy::for_chain(chain_id).rewind_allowed(from_epoch, to_epoch)
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Protocol {

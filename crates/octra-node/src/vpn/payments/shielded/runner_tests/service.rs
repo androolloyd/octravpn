@@ -88,6 +88,7 @@ pub(in super::super) async fn run(
             },
             &income_wallet,
             shielded::wallet::rpc::Policy {
+                allowed_receipt_keys: vec![purchase.receipt_identity().unwrap().public],
                 max_channels: 16,
                 max_requests: 128,
                 max_ceiling_ou: 100,

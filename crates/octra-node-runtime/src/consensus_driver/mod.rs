@@ -7,6 +7,7 @@ mod grace;
 mod inbound;
 mod liveness;
 mod outputs;
+mod relief;
 mod round_recovery;
 mod work;
 pub use diagnostics::Diagnostics;
@@ -41,6 +42,12 @@ pub struct ProposalPlan {
     pub tx_hashes: Vec<Bytes>,
     pub parent_commit: Option<ParentCommit>,
 }
+/// A schedule read from authenticated canonical metadata by the host.
+pub struct ReliefPlan {
+    pub activate_epoch: i64,
+    pub target: ValidatorSet,
+    pub fingerprint: Bytes,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verdict {
     Accept,
@@ -66,6 +73,18 @@ pub trait Host: Send + Sync + 'static {
     /// Activate authenticated local configuration at the next epoch, including
     /// the native weight cap. Resource-committee effects belong to this hook.
     async fn activate(&self, epoch: i64) -> Result<ValidatorSet, Error>;
+    async fn relief_plan(
+        &self,
+        _epoch: i64,
+        _current: &ValidatorSet,
+    ) -> Result<Option<ReliefPlan>, Error> {
+        Ok(None)
+    }
+    /// Rebind host execution and peer membership after the authenticated relief
+    /// mark has been durably journaled. No peer can invoke this directly.
+    async fn install_relief(&self, _epoch: i64, _target: &ValidatorSet) -> Result<(), Error> {
+        Err("validator relief is unavailable".into())
+    }
     fn warning(&self, reason: &str);
     async fn validators(&self, epoch: i64) -> Result<ValidatorSet, Error>;
     async fn evidence(&self, conflict: VoteConflict) -> Result<(), Error>;
@@ -149,6 +168,11 @@ impl Handle {
     }
 }
 enum Work {
+    Restore {
+        generation: i64,
+        proposal: Proposal,
+        result: Result<Verdict, Error>,
+    },
     Build {
         generation: i64,
         height: i64,
@@ -203,10 +227,16 @@ pub struct Driver<H: Host, C: Publication> {
     timers: JoinSet<Timeout>,
     round_pool: RoundPool,
     past_round: Option<driver_policy::PastRound>,
+    proof_search: Option<octra_node_protocol::consensus::proof_search::Search>,
+    value_restore: Option<Proposal>,
+    value_retry: Instant,
+    saved_proofs: BTreeMap<i64, (ValidatorSet, Vec<Vote>)>,
+    saved_value: Option<(ValidatorSet, Proposal)>,
     sync_retry: Option<round_recovery::ReplayRetry>,
     pending_votes: BTreeMap<Bytes, Vote>,
     started: Instant,
     epoch_started: i64,
+    progress_step_at: i64,
     pace: Option<Pace>,
     build_retry: Option<Instant>,
     duty: Option<DutyHandler>,
@@ -255,6 +285,30 @@ impl<H: Host, C: Publication> Driver<H, C> {
         let address = engine.address().to_vec();
         let mut votes = VoteGuard::new(chain.clone(), address.clone(), journal.clone());
         votes.prepare(false, &mut engine, recovery_votes)?;
+        let policy = engine.quorum_policy();
+        let value_restore = if policy.select(engine.state().height)
+            == octra_node_protocol::consensus::policy::Rule::Stake
+        {
+            match journal.load_value(
+                policy,
+                engine.protocol(),
+                &chain,
+                engine.state().height,
+                engine.validators(),
+            ) {
+                Ok(Some(record)) => {
+                    engine.restore_proofs(&record.votes)?;
+                    Some(record.proposal)
+                }
+                Ok(None) => None,
+                Err(reason) => {
+                    host.warning(&format!("ignore_proposal_record: {reason}"));
+                    None
+                }
+            }
+        } else {
+            None
+        };
         let (input, receiver) = mpsc::channel(64);
         let (diagnostic_view, diagnostic_receiver) = watch::channel(Ok(None));
         let (status, view) = watch::channel(Status {
@@ -313,10 +367,16 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 timers: JoinSet::new(),
                 round_pool: RoundPool::default(),
                 past_round: None,
+                proof_search: None,
+                value_restore,
+                value_retry: Instant::now(),
+                saved_proofs: BTreeMap::new(),
+                saved_value: None,
                 sync_retry: None,
                 pending_votes: BTreeMap::new(),
                 started: Instant::now(),
                 epoch_started: 0,
+                progress_step_at: 0,
                 pace: None,
                 build_retry: None,
                 duty: None,

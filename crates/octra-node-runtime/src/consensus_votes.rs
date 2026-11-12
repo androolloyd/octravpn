@@ -25,7 +25,7 @@ pub struct Readiness {
 pub struct Fault {
     pub epoch_id: i64,
     pub round: i64,
-    pub reason: &'static str,
+    pub reason: String,
 }
 /// Recovery data that the host must durably store before a non-nil precommit.
 /// This is speculative recovery data, not a canonical commit or ExEx event.
@@ -46,6 +46,7 @@ pub struct VoteGuard {
     issue: Option<Error>,
     fault: Option<Fault>,
     durable: BTreeMap<Bytes, Vote>,
+    proof_lock: Option<(i64, i64)>,
 }
 impl VoteGuard {
     pub fn new(chain: Bytes, address: Bytes, journal: JournalOwner) -> Self {
@@ -56,7 +57,13 @@ impl VoteGuard {
             issue: None,
             fault: None,
             durable: BTreeMap::new(),
+            proof_lock: None,
         }
+    }
+    pub(crate) fn proof_round(&self, height: i64) -> i64 {
+        self.proof_lock
+            .filter(|(epoch, _)| *epoch == height)
+            .map_or(-1, |(_, round)| round)
     }
     pub fn issue(&self) -> Option<&Error> {
         self.issue.as_ref()
@@ -75,7 +82,7 @@ impl VoteGuard {
     pub fn allowed(&self, readiness: Readiness) -> bool {
         self.issue.is_none() && readiness.can_vote && !readiness.finality_proof_needed
     }
-    pub fn state(&self, engine: &Engine, readiness: Readiness) -> (bool, Option<&'static str>) {
+    pub fn state(&self, engine: &Engine, readiness: Readiness) -> (bool, Option<&str>) {
         let reason = if let Some(issue) = &self.issue {
             Some(issue_label(issue))
         } else if let Some(fault) = self
@@ -83,7 +90,7 @@ impl VoteGuard {
             .as_ref()
             .filter(|f| f.epoch_id == engine.state().height && f.round >= engine.state().round)
         {
-            Some(fault.reason)
+            Some(fault.reason.as_str())
         } else if !readiness.role_can_vote {
             Some("role")
         } else if readiness.finality_proof_needed {
@@ -134,9 +141,24 @@ impl VoteGuard {
             return Err("consensus driver is already running".into());
         }
         self.issue = None;
+        if engine.state().locked_round >= 0 && engine.state().locked_value.is_some() {
+            self.proof_lock = Some((engine.state().height, engine.state().locked_round));
+        }
         let restored = (|| {
             for wire in wires? {
                 self.restore_vote(engine, &wire)?;
+            }
+            let policy = engine.quorum_policy();
+            if policy.select(engine.state().height)
+                == octra_node_protocol::consensus::policy::Rule::Stake
+            {
+                let proofs = self.journal.load_proofs(
+                    policy,
+                    &self.chain,
+                    engine.state().height,
+                    engine.validators(),
+                )?;
+                engine.restore_proofs(&proofs)?;
             }
             if let Some(round) =
                 self.journal
@@ -145,8 +167,22 @@ impl VoteGuard {
                 if round >= codec::MAX_ROUND {
                     return Err("vote log reached round limit".into());
                 }
-                if round + 1 > engine.state().round {
-                    engine.realign_round(round + 1)?;
+                let votes = if engine.round_wait() {
+                    self.journal.round_votes(
+                        &self.chain,
+                        &self.address,
+                        engine.state().height,
+                        round,
+                    )?
+                } else {
+                    Vec::new()
+                };
+                let target = if votes.is_empty() { round + 1 } else { round };
+                if target > engine.state().round {
+                    engine.realign_round(target)?;
+                }
+                if target == round && target == engine.state().round {
+                    engine.restore_local_votes(&votes)?;
                 }
             }
             let height = engine.state().height;
@@ -167,12 +203,20 @@ impl VoteGuard {
         }
         restored
     }
-    fn hold(&mut self, vote: &Vote, reason: &'static str) {
-        self.fault = Some(Fault {
-            epoch_id: vote.epoch_id,
-            round: vote.round,
-            reason,
-        });
+    fn hold(&mut self, engine: &Engine, vote: &Vote, reason: impl Into<String>) {
+        if vote.epoch_id == engine.state().height
+            && vote.round >= engine.state().round
+            && !self
+                .fault
+                .as_ref()
+                .is_some_and(|fault| fault.epoch_id == vote.epoch_id && fault.round > vote.round)
+        {
+            self.fault = Some(Fault {
+                epoch_id: vote.epoch_id,
+                round: vote.round,
+                reason: reason.into(),
+            });
+        }
     }
     pub async fn save<F: FnOnce(Precommit) -> R, R: Future<Output = bool>>(
         &mut self,
@@ -192,18 +236,38 @@ impl VoteGuard {
             self.issue = Some(reason);
             return Ok(None);
         }
+        if vote.epoch_id != engine.state().height {
+            return Ok(None);
+        }
         if vote.vote_type == VoteType::Precommit && vote.proposal_id != NIL {
             let key = driver_policy::vote_key(vote);
             if !self.durable.contains_key(&key) {
                 let Some(proposal) =
                     proposal.or_else(|| engine.find_proposal(&vote.proposal_id, vote.round))
                 else {
-                    self.hold(vote, "precommit_proposal_missing");
+                    self.hold(engine, vote, "precommit_proposal_missing");
                     return Ok(None);
                 };
                 if !driver_policy::proposal_binds_vote(vote, proposal)? {
-                    self.hold(vote, "precommit_proposal_mismatch");
+                    self.hold(engine, vote, "precommit_proposal_mismatch");
                     return Ok(None);
+                }
+                let policy = engine.quorum_policy();
+                if policy.select(vote.epoch_id)
+                    == octra_node_protocol::consensus::policy::Rule::Stake
+                {
+                    if let Err(reason) = self.journal.save_proof(
+                        policy,
+                        &self.chain,
+                        vote.epoch_id,
+                        engine.validators(),
+                        self.proof_round(vote.epoch_id),
+                        &[],
+                        &engine.polc_votes(vote.round),
+                    ) {
+                        self.hold(engine, vote, reason.to_string());
+                        return Ok(None);
+                    }
                 }
                 let durable = before_precommit(Precommit {
                     epoch_id: vote.epoch_id,
@@ -216,12 +280,22 @@ impl VoteGuard {
                 })
                 .await;
                 if !durable {
-                    self.hold(vote, "precommit_not_durable");
+                    self.hold(engine, vote, "precommit_not_durable");
                     return Ok(None);
                 }
                 self.durable.insert(key, vote.clone());
+                self.proof_lock = Some((
+                    vote.epoch_id,
+                    self.proof_round(vote.epoch_id).max(vote.round),
+                ));
             }
-            self.fault = None;
+            if self
+                .fault
+                .as_ref()
+                .is_some_and(|fault| fault.epoch_id == vote.epoch_id && fault.round == vote.round)
+            {
+                self.fault = None;
+            }
         }
         match self.journal.keep_vote(vote.clone()) {
             Ok(stored) => Ok(Some(stored)),
@@ -234,6 +308,9 @@ impl VoteGuard {
     /// Called after canonical finalization has durably advanced the vote floor.
     pub fn prune_durable(&mut self, finalized: i64) {
         self.durable.retain(|_, v| v.epoch_id > finalized);
+        if self.proof_lock.is_some_and(|(epoch, _)| epoch <= finalized) {
+            self.proof_lock = None;
+        }
     }
 
     /// Canonical publication has succeeded. Retain storage failures as a voting

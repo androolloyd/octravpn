@@ -69,6 +69,8 @@ fn fixture() -> (
         state,
         tx,
         private_balance::Profile {
+            keyed: false,
+            registered: false,
             fields: RuleMode::Active,
             strict: true,
             math: ScalarRule::Wide,
@@ -97,6 +99,8 @@ fn actual_range_cache_binds_every_profile_field_key_transaction_and_source() {
     assert_eq!(binding.results(&tx, profile, current, &other_key), None);
     for changed in [
         private_balance::Profile {
+            keyed: false,
+            registered: false,
             fields: RuleMode::Prior,
             ..profile
         },

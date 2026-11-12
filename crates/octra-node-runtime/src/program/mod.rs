@@ -58,3 +58,18 @@ impl From<octra_node_protocol::aml::compiler::package::Error> for Error {
     }
 }
 pub type Result<T> = std::result::Result<T, Error>;
+
+impl From<octra_node_protocol::program_record::source::Error> for Error {
+    fn from(error: octra_node_protocol::program_record::source::Error) -> Self {
+        match error {
+            octra_node_protocol::program_record::source::Error::Invalid(reason) => {
+                Self::Rejected(reason)
+            }
+            octra_node_protocol::program_record::source::Error::Unavailable(reason) => {
+                Self::Unavailable(String::from_utf8_lossy(&reason).into_owned())
+            }
+        }
+    }
+}
+
+pub mod source_read;

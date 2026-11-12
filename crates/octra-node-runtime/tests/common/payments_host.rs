@@ -223,6 +223,7 @@ impl Chain {
             &self.runtime,
             Rules {
                 wasm: WasmRules {
+                    proof_key: false,
                     wasm_float: true,
                     proof_exec: true,
                     math: true,
@@ -233,12 +234,15 @@ impl Chain {
                 storage_proof: true,
                 fhe_work: true,
                 object_cost: true,
+                program_inputs: false,
             },
             SourceRules {
                 compiler: CompilerMode::Source,
                 overlap: false,
                 point_ops: true,
                 loops: true,
+                metered: false,
+                records: false,
             },
             100,
             seconds,

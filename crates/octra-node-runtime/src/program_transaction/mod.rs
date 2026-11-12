@@ -17,6 +17,7 @@ use num_traits::{Signed, Zero};
 use octra_node_protocol::{
     contract,
     native_json::{Document, ReadMode, Value},
+    program_record::source as source_record,
     program_upgrade, resource_lanes,
     state::Ledger,
     transaction::{decode_base64, OpType, Transaction},
@@ -111,7 +112,8 @@ impl<'a> Calls<'a> {
             epoch: self.epoch,
             epoch_time_ms: octra_node_protocol::consensus::policy::time_of_seconds(self.time)
                 .unwrap_or(0),
-            tree_hash: self.parent_root.clone(),
+            tree_hash: octra_node_protocol::contract::tree_hash(&self.parent_root)
+                .map_err(operational)?,
             node_id: tx.to.clone(),
             depth: 0,
             limit: resource_lanes::vm_limit(&tx.ou),
@@ -124,6 +126,7 @@ impl<'a> Calls<'a> {
             storage_proof: self.rules.storage_proof,
             fhe_work: self.rules.fhe_work,
             object_cost: self.rules.object_cost,
+            program_inputs: self.source.metered,
         })
     }
     fn save(&mut self, tx: &Transaction, raw: Vec<u8>) -> Result<(), Error> {
@@ -229,12 +232,29 @@ impl<'a> Calls<'a> {
                 )
             });
         }
+        if let Some(record) = artifact.record() {
+            if let Err(error) = source_record::check(record) {
+                return Ok(charged("program_source_rejected", error.to_string()));
+            }
+            if tx.ou < source_record::fee(record) {
+                return Ok(charged(
+                    "program_source_rejected",
+                    "program source fee below byte cost",
+                ));
+            }
+        }
         let params = plan::params(tx.message.as_deref(), true)?
             .map_err(|_| operational("forgiving deploy parser returned a diagnostic"))?;
         let context = self.context(tx)?;
         let saved = state.save().map_err(operational)?;
         let mut journal = Journal::new(self.runtime, ledger, state);
         journal.fhe_memory = self.rules.fhe_work.then(Default::default);
+        if let Some(record) = artifact.record() {
+            journal
+                .programs
+                .add_record(&tx.to, record.clone())
+                .map_err(operational)?;
+        }
         let deployed = journal
             .deploy_program(
                 &artifact,
@@ -361,6 +381,9 @@ impl<'a> Calls<'a> {
         if let Some(result) = debit(tx, ledger) {
             return Ok(result);
         }
+        if self.source.records && program_upgrade::is_source(tx) {
+            return self.publish_source(tx, state);
+        }
         let payload = match program_upgrade::parse(tx) {
             Ok(payload) => payload,
             Err(program_upgrade::Error::Rejected(reason)) => {
@@ -384,6 +407,72 @@ impl<'a> Calls<'a> {
             }
             Err(error) => return Err(operational(error)),
         }
+        journal.stage(state).map_err(operational)?;
+        Ok(Completion::Confirmed {
+            created_account: None,
+        })
+    }
+    fn publish_source(
+        &self,
+        tx: &Transaction,
+        state: &mut StateBatch,
+    ) -> Result<Completion, Error> {
+        let rejected = |reason: Vec<u8>| charged("program_source_rejected", reason);
+        if !tx.amount.is_zero() {
+            return Ok(rejected(b"program source value must be zero".to_vec()));
+        }
+        let (Some(message), Some(encoded)) = (&tx.message, &tx.encrypted_data) else {
+            return Ok(rejected(b"program source payload missing".to_vec()));
+        };
+        let expected = program_upgrade::parse_message_for(source_record::SCHEMA, message)
+            .map_err(operational)?;
+        let sources = match source_record::Sources::decode(encoded) {
+            Ok(sources) => sources,
+            Err(source_record::Error::Invalid(reason)) => return Ok(rejected(reason)),
+            Err(error) => return Err(operational(error)),
+        };
+        if tx.ou < sources.fee() {
+            return Ok(rejected(b"program source fee below byte cost".to_vec()));
+        }
+        let snapshot = state.snapshot();
+        let Some(meta) = program::store::meta(&snapshot, &tx.to).map_err(operational)? else {
+            return Ok(rejected(b"program not found".to_vec()));
+        };
+        if meta.owner != tx.from {
+            return Ok(rejected(
+                b"only the program owner can publish source".to_vec(),
+            ));
+        }
+        if meta.code_hash != expected {
+            return Ok(rejected(b"program source code hash mismatch".to_vec()));
+        }
+        let encoded = program::store::bytecode(&snapshot, &tx.to)
+            .ok_or_else(|| operational("stored program bytecode unavailable"))?;
+        let stored = decode_base64(encoded).map_err(operational)?;
+        use base64::Engine;
+        use sha2::{Digest, Sha256};
+        if base64::engine::general_purpose::STANDARD
+            .encode(&stored)
+            .as_bytes()
+            != encoded
+            || hex::encode(Sha256::digest(&stored)).as_bytes() != meta.code_hash
+        {
+            return Err(operational("stored program bytecode identity differs"));
+        }
+        let record = match sources.verify(self.source.metered, meta.admission == b"source", &stored)
+        {
+            Ok(record) => record,
+            Err(source_record::Error::Invalid(reason)) => return Ok(rejected(reason)),
+            Err(error) => return Err(operational(error)),
+        };
+        if let Err(error) = source_record::check(&record) {
+            return Ok(rejected(error.to_string().into_bytes()));
+        }
+        if tx.ou < source_record::fee(&record) {
+            return Ok(rejected(b"program source fee below byte cost".to_vec()));
+        }
+        let mut journal = program::Journal::default();
+        journal.add_record(&tx.to, record).map_err(operational)?;
         journal.stage(state).map_err(operational)?;
         Ok(Completion::Confirmed {
             created_account: None,

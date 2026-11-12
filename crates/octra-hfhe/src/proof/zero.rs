@@ -228,6 +228,7 @@ pub(crate) fn append_context(
     cipher: &Cipher,
     kind: &[u8],
     amount: Option<&Point>,
+    keyed: bool,
 ) -> Result<(), Error> {
     let profile = profile(public)?;
     transcript.append_message(
@@ -239,6 +240,9 @@ pub(crate) fn append_context(
         transcript.append_u64(b"circuit_prf_profile", u64::from(public.circuit_profile));
     }
     transcript.append_point(b"registered_key_commitment", &public.circuit_commit);
+    if keyed {
+        transcript.append_message(b"public_key", &super::key::digest(public));
+    }
     transcript.append_message(b"commit_ct", &cipher.commitment(public));
     if let Some(amount) = amount {
         transcript.append_point(b"amount_commitment", amount);
@@ -635,7 +639,8 @@ pub(crate) fn build_key_bound_circuit(
     final_constraints(prover, cipher, coefficients, &wiring, amount, true)
 }
 
-fn transcript(
+#[allow(clippy::too_many_arguments)]
+fn transcript_keyed(
     domain: &[u8],
     public: &PublicKey,
     cipher: &Cipher,
@@ -643,12 +648,13 @@ fn transcript(
     rule: ScalarRule,
     kind: &[u8],
     amount: Option<&Point>,
+    keyed: bool,
 ) -> Result<Transcript, Error> {
     let mut transcript = Transcript::new(domain, rule);
     transcript.append_u64(b"nL", cipher.layers.len() as u64);
     transcript.append_u64(b"S", cipher.slots as u64);
     transcript.append_u64(b"nB", bases.len() as u64);
-    append_context(&mut transcript, public, cipher, kind, amount)?;
+    append_context(&mut transcript, public, cipher, kind, amount, keyed)?;
     Ok(transcript)
 }
 
@@ -686,6 +692,18 @@ pub fn make_zero<R: RngCore + CryptoRng>(
     rule: ScalarRule,
     rng: &mut R,
 ) -> Result<ZeroProof, Error> {
+    make_zero_keyed(public, secret, cipher, rule, false, rng)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn make_zero_keyed<R: RngCore + CryptoRng>(
+    public: &PublicKey,
+    secret: &SecretKey,
+    cipher: &Cipher,
+    rule: ScalarRule,
+    keyed: bool,
+    rng: &mut R,
+) -> Result<ZeroProof, Error> {
     if !shape_ok(cipher, base_layer_limit(public, false)) {
         return Err(Error("pvac: key-bound proof shape rejected"));
     }
@@ -710,7 +728,7 @@ pub fn make_zero<R: RngCore + CryptoRng>(
         false,
         true,
     )?;
-    let mut transcript = transcript(
+    let mut transcript = transcript_keyed(
         b"pvac.verify_zero.key_bound",
         public,
         cipher,
@@ -718,6 +736,7 @@ pub fn make_zero<R: RngCore + CryptoRng>(
         rule,
         b"zero",
         None,
+        keyed,
     )?;
     Ok(ZeroProof {
         proof: prover.prove(&mut transcript, rng, LimitProfile::Default)?,
@@ -734,6 +753,23 @@ pub fn make_bound<R: RngCore + CryptoRng>(
     blinding: Scalar,
     profile: BoundProfile,
     rule: ScalarRule,
+    rng: &mut R,
+) -> Result<ZeroProof, Error> {
+    make_bound_keyed(
+        public, secret, cipher, amount, blinding, profile, rule, false, rng,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn make_bound_keyed<R: RngCore + CryptoRng>(
+    public: &PublicKey,
+    secret: &SecretKey,
+    cipher: &Cipher,
+    amount: u64,
+    blinding: Scalar,
+    profile: BoundProfile,
+    rule: ScalarRule,
+    keyed: bool,
     rng: &mut R,
 ) -> Result<ZeroProof, Error> {
     if profile == BoundProfile::HistoricalMigration && public.circuit_profile != 1 {
@@ -778,7 +814,7 @@ pub fn make_bound<R: RngCore + CryptoRng>(
         true,
     )?;
     let commitment = generators::pedersen_commit(&Scalar::from_u64(amount), &binding.blinding);
-    let mut transcript = transcript(
+    let mut transcript = transcript_keyed(
         profile.domain(),
         public,
         cipher,
@@ -786,6 +822,7 @@ pub fn make_bound<R: RngCore + CryptoRng>(
         rule,
         profile.kind(),
         Some(&commitment),
+        keyed,
     )?;
     Ok(ZeroProof {
         proof: prover.prove(&mut transcript, rng, profile.limit_profile())?,
@@ -829,6 +866,17 @@ pub fn verify_zero(
     proof: &ZeroProof,
     rule: ScalarRule,
 ) -> Result<bool, Error> {
+    verify_zero_keyed(public, cipher, proof, rule, false)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_zero_keyed(
+    public: &PublicKey,
+    cipher: &Cipher,
+    proof: &ZeroProof,
+    rule: ScalarRule,
+    keyed: bool,
+) -> Result<bool, Error> {
     if !cipher.compatible_with(public)
         || !shape_ok(cipher, base_layer_limit(public, false))
         || public.circuit_commit == [0; 32]
@@ -852,7 +900,7 @@ pub fn verify_zero(
         false,
         true,
     )?;
-    let mut transcript = transcript(
+    let mut transcript = transcript_keyed(
         b"pvac.verify_zero.key_bound",
         public,
         cipher,
@@ -860,6 +908,7 @@ pub fn verify_zero(
         rule,
         b"zero",
         None,
+        keyed,
     )?;
     r1cs::verify(
         &mut transcript,
@@ -879,6 +928,29 @@ pub fn verify_bound(
     profile: BoundProfile,
     strict_amount: bool,
     rule: ScalarRule,
+) -> Result<bool, Error> {
+    verify_bound_keyed(
+        public,
+        cipher,
+        proof,
+        amount,
+        profile,
+        strict_amount,
+        rule,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_bound_keyed(
+    public: &PublicKey,
+    cipher: &Cipher,
+    proof: &ZeroProof,
+    amount: &Point,
+    profile: BoundProfile,
+    strict_amount: bool,
+    rule: ScalarRule,
+    keyed: bool,
 ) -> Result<bool, Error> {
     if profile == BoundProfile::HistoricalMigration && public.circuit_profile != 1 {
         return Ok(false);
@@ -918,7 +990,7 @@ pub fn verify_bound(
         profile == BoundProfile::HistoricalMigration,
         strict_amount,
     )?;
-    let mut transcript = transcript(
+    let mut transcript = transcript_keyed(
         profile.domain(),
         public,
         cipher,
@@ -926,6 +998,7 @@ pub fn verify_bound(
         rule,
         profile.kind(),
         Some(amount),
+        keyed,
     )?;
     r1cs::verify(
         &mut transcript,
@@ -942,6 +1015,18 @@ pub fn verify_embedded_range(
     strict_amount: bool,
     rule: ScalarRule,
 ) -> Result<bool, Error> {
+    verify_embedded_range_keyed(public, cipher, proof, strict_amount, rule, false)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_embedded_range_keyed(
+    public: &PublicKey,
+    cipher: &Cipher,
+    proof: &ZeroProof,
+    strict_amount: bool,
+    rule: ScalarRule,
+    keyed: bool,
+) -> Result<bool, Error> {
     if !cipher.compatible_with(public) || !shape_ok(cipher, base_layer_limit(public, false)) {
         return Ok(false);
     }
@@ -950,7 +1035,7 @@ pub fn verify_embedded_range(
     if proof.proof.commitments.len() != index + 1 {
         return Ok(false);
     }
-    verify_bound(
+    verify_bound_keyed(
         public,
         cipher,
         proof,
@@ -958,6 +1043,7 @@ pub fn verify_embedded_range(
         BoundProfile::Range,
         strict_amount,
         rule,
+        keyed,
     )
 }
 

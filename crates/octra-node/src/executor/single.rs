@@ -176,6 +176,9 @@ impl Native {
         let epoch = i64::try_from(parent.cursor.epoch.0)?
             .checked_add(1)
             .ok_or_else(|| anyhow::anyhow!("Single epoch exhausted"))?;
+        octra_node_protocol::tx_signature::at(self.config.graph.chain_id(), epoch)
+            .check_active(transactions)
+            .map_err(anyhow::Error::msg)?;
         let mut state = StateBatch::from_snapshot(state);
         ensure!(
             hex::encode(state.published_root()?) == parent.ledger_root,
@@ -423,12 +426,15 @@ impl Native {
         envelope: transaction_outcome::Rules,
     ) -> octra_node_runtime::staging::intake::Rules {
         octra_node_runtime::staging::intake::Rules {
+            signing: octra_node_protocol::tx_signature::at(self.config.graph.chain_id(), epoch),
             bft: false,
             profile: self.config.profile.clone(),
             compute: envelope.compute,
             settle: envelope.settle,
             proof: context.fold.context().standard_mode,
             duty: Some((epoch - 1, context.fold.context().ready_exec_mode)),
+            duty_marks: context.fold.context().duty_marks
+                == octra_node_protocol::transaction::RuleMode::Active,
             queue_head: Some(epoch - 1),
             stealth_minimum: 5000.into(),
         }

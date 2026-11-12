@@ -73,12 +73,13 @@ pub fn epoch(raw: Option<&[u8]>, kind: ReadKind) -> Result<i64, Error> {
     Ok(captured + 1)
 }
 
-const ORDER: [Rule; 6] = [
+const ORDER: [Rule; 7] = [
     Rule::Standard,
     Rule::Math,
     Rule::ObjectCost,
     Rule::FheWork,
     Rule::ProofExecution,
+    Rule::ProofKey,
     Rule::WasmFloat,
 ];
 
@@ -92,6 +93,8 @@ pub struct Profile {
     pub int_work: bool,
     pub fhe_work: RuleMode,
     pub proof_exec: RuleMode,
+    pub proof_key: RuleMode,
+    pub program_inputs: RuleMode,
     pub wasm_float: RuleMode,
 }
 impl Profile {
@@ -104,6 +107,8 @@ impl Profile {
             int_work: false,
             fhe_work: RuleMode::Prior,
             proof_exec: RuleMode::Prior,
+            proof_key: RuleMode::Prior,
+            program_inputs: RuleMode::Prior,
             wasm_float: RuleMode::Prior,
         }
     }
@@ -118,6 +123,7 @@ impl Profile {
         let object_cost = mode(Rule::ObjectCost)?;
         let fhe_work = mode(Rule::FheWork)?;
         let proof_exec = mode(Rule::ProofExecution)?;
+        let proof_key = mode(Rule::ProofKey)?;
         let wasm_float = mode(Rule::WasmFloat)?;
         Ok(Self {
             epoch,
@@ -127,11 +133,14 @@ impl Profile {
             int_work: standard == RuleMode::Active,
             fhe_work,
             proof_exec,
+            proof_key,
+            program_inputs: graph.program_inputs(epoch),
             wasm_float,
         })
     }
     pub fn wasm(&self) -> WasmRules {
         WasmRules {
+            proof_key: self.proof_key == RuleMode::Active,
             math: self.math,
             proof_exec: self.proof_exec == RuleMode::Active,
             wasm_float: self.wasm_float == RuleMode::Active,

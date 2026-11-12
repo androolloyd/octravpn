@@ -42,9 +42,17 @@ fn verify_vote(
     Ok(())
 }
 pub fn read_parent(chain: &[u8], commit: &ParentCommit) -> Result<ParentEvidence, Error> {
+    read_parent_with_marks(chain, commit, false)
+}
+pub fn read_parent_with_marks(
+    chain: &[u8],
+    commit: &ParentCommit,
+    marks: bool,
+) -> Result<ParentEvidence, Error> {
     verify_commit(chain, commit)?;
     let finality = Final {
         epoch: commit.certificate.epoch_id,
+        round: marks.then_some(commit.certificate.commit_round),
         proposal_id: commit.certificate.proposal_id.clone(),
         set_hash: hash::validator_set_hash(&commit.validator_set)
             .map_err(|e| Error(e.to_string()))?

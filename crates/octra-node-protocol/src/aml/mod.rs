@@ -22,3 +22,5 @@ pub mod scope;
 pub mod source;
 pub mod types;
 pub mod verify;
+
+pub(crate) mod symbols;

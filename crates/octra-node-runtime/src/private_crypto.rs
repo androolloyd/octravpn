@@ -68,11 +68,17 @@ pub fn load_pubkey(raw: &[u8]) -> Result<PublicKey, Error> {
     native(PublicKey::from_bytes(raw)).map_err(|e| e.prefix(b"load_pubkey failed: "))
 }
 pub fn proof_pubkey(raw: &[u8]) -> Result<PublicKey, Error> {
+    proof_pubkey_keyed(raw, false)
+}
+pub fn proof_pubkey_keyed(raw: &[u8], keyed: bool) -> Result<PublicKey, Error> {
     let public = load_pubkey(raw)?;
     if !public.supports_alias_rejection() {
         return Err(Error::rejected(
             "pvac pubkey proof circuit lacks alias rejection",
         ));
+    }
+    if keyed && !public.powers_ok() {
+        return Err(Error::rejected("pvac public key powers are not cyclic"));
     }
     Ok(public)
 }
@@ -186,6 +192,18 @@ pub fn verify_amount(
     strict: bool,
     math: ScalarRule,
 ) -> Result<(), Error> {
+    verify_amount_keyed(public, amount, payload, strict, math, false)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_amount_keyed(
+    public: &PublicKey,
+    amount: &BigInt,
+    payload: &AmountProof<'_>,
+    strict: bool,
+    math: ScalarRule,
+    keyed: bool,
+) -> Result<(), Error> {
     let amount = amount
         .to_i64()
         .filter(|value| *value >= 0)
@@ -209,7 +227,7 @@ pub fn verify_amount(
     if !cipher.is_wrapped_scalar() {
         return Err(Error::rejected("amount cipher must be a wrapped scalar"));
     }
-    if !verified(zero::verify_bound(
+    if !verified(zero::verify_bound_keyed(
         public,
         &cipher,
         &proof,
@@ -217,6 +235,7 @@ pub fn verify_amount(
         BoundProfile::Standard,
         strict,
         math,
+        keyed,
     ))? {
         return Err(Error::rejected("bound zero proof verification failed"));
     }
@@ -260,7 +279,20 @@ pub fn verify_claim(
     strict: bool,
     math: ScalarRule,
 ) -> Result<(), Error> {
-    verify_claim_profile(
+    verify_claim_keyed(public, encoded, proof, commitment, strict, math, false)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_claim_keyed(
+    public: &PublicKey,
+    encoded: &[u8],
+    proof: &[u8],
+    commitment: &[u8],
+    strict: bool,
+    math: ScalarRule,
+    keyed: bool,
+) -> Result<(), Error> {
+    verify_claim_profile_keyed(
         public,
         encoded,
         proof,
@@ -268,9 +300,12 @@ pub fn verify_claim(
         strict,
         math,
         BoundProfile::Standard,
+        keyed,
     )
 }
-pub(crate) fn verify_claim_profile(
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn verify_claim_profile_keyed(
     public: &PublicKey,
     encoded: &[u8],
     proof: &[u8],
@@ -278,6 +313,7 @@ pub(crate) fn verify_claim_profile(
     strict: bool,
     math: ScalarRule,
     profile: BoundProfile,
+    keyed: bool,
 ) -> Result<(), Error> {
     if profile == BoundProfile::HistoricalMigration && public.supports_alias_rejection() {
         return Err(Error::rejected(
@@ -309,7 +345,7 @@ pub(crate) fn verify_claim_profile(
         let commitment: [u8; 32] = commitment
             .try_into()
             .map_err(|_| Error::rejected("commitment must be 32 bytes"))?;
-        return if verified(zero::verify_bound(
+        return if verified(zero::verify_bound_keyed(
             public,
             &cipher,
             &proof,
@@ -317,6 +353,7 @@ pub(crate) fn verify_claim_profile(
             profile,
             strict,
             math,
+            keyed,
         ))? {
             Ok(())
         } else {
@@ -333,7 +370,7 @@ pub(crate) fn verify_claim_profile(
             _ => error,
         },
     )?;
-    if !verified(zero::verify_bound(
+    if !verified(zero::verify_bound_keyed(
         public,
         &cipher,
         &proof,
@@ -341,18 +378,22 @@ pub(crate) fn verify_claim_profile(
         profile,
         strict,
         math,
+        keyed,
     ))? {
         return Err(Error::rejected("bound zero proof verification failed"));
     }
     Ok(())
 }
-pub(crate) fn verify_range_bound(
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn verify_range_bound_keyed(
     public: &PublicKey,
     encoded: &[u8],
     proof: &[u8],
     commitment: &[u8],
     strict: bool,
     math: ScalarRule,
+    keyed: bool,
 ) -> Result<(), Error> {
     if !public.supports_alias_rejection() {
         return Err(Error::rejected(
@@ -375,7 +416,7 @@ pub(crate) fn verify_range_bound(
         Err(error) if error.is_operational() => return Err(Error::Unavailable(error)),
         Err(_) => return Err(Error::rejected("bound range proof verification failed")),
     };
-    if !verified(zero::verify_bound(
+    if !verified(zero::verify_bound_keyed(
         public,
         &cipher,
         &proof,
@@ -383,6 +424,7 @@ pub(crate) fn verify_range_bound(
         BoundProfile::Range,
         strict,
         math,
+        keyed,
     ))? {
         return Err(Error::rejected("bound range proof verification failed"));
     }
@@ -405,6 +447,18 @@ pub fn verify_range(
     strict: bool,
     math: ScalarRule,
 ) -> Result<bool, Error> {
+    verify_range_keyed(public, cipher, proof, strict, math, false)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_range_keyed(
+    public: &PublicKey,
+    cipher: &[u8],
+    proof: &[u8],
+    strict: bool,
+    math: ScalarRule,
+    keyed: bool,
+) -> Result<bool, Error> {
     let run = || {
         let raw = proof
             .strip_prefix(b"rp_v1|")
@@ -415,8 +469,8 @@ pub fn verify_range(
         // The private verifier accepts only bound proofs. Do not parse legacy
         // range payloads that the native FFI rejects before allocation.
         let proof = native(ZeroProof::from_bound_range_bytes(&raw))?;
-        verified(zero::verify_embedded_range(
-            public, &cipher, &proof, strict, math,
+        verified(zero::verify_embedded_range_keyed(
+            public, &cipher, &proof, strict, math, keyed,
         ))
     };
     match run() {

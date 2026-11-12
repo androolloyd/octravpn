@@ -107,6 +107,7 @@ fn speculative_scope_inherits_nested_deadline_cancellation_and_restores_required
 
 fn amount() -> Request {
     Request::Private(private::Request::Amount {
+        keyed: false,
         public: private::Key {
             raw: vec![],
             alias: false,

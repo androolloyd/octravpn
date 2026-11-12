@@ -47,7 +47,30 @@ impl WasmProfile {
 pub struct WasmRules {
     pub wasm_float: bool,
     pub proof_exec: bool,
+    pub proof_key: bool,
     pub math: bool,
+}
+
+/// Native host omits inactive opt-in policy fields (input-size limits include JSON).
+pub(crate) fn host_policy(input: &mut serde_json::Value, keyed: bool, inspect: bool) {
+    let fields = input.as_object_mut().expect("host input object");
+    for name in ["table_limit", "stable_errors", "code_limit"] {
+        if keyed {
+            fields.insert(name.into(), true.into());
+        } else {
+            fields.remove(name);
+        }
+    }
+    if keyed && fields.get("action").and_then(serde_json::Value::as_str) == Some("execute") {
+        fields.insert("proof_key".into(), true.into());
+    } else {
+        fields.remove("proof_key");
+    }
+    if inspect {
+        fields.insert("inspect_policy".into(), true.into());
+    } else {
+        fields.remove("inspect_policy");
+    }
 }
 
 #[derive(Clone)]
@@ -118,6 +141,14 @@ impl CircleRuntime {
         address: &[u8],
     ) -> Result<Option<Arc<[u8]>>, crate::execution::Error> {
         crate::pvac::bound(self.public_keys.as_ref(), state, address)
+    }
+    pub(crate) fn live_public_key(
+        &self,
+        state: &crate::state_batch::Snapshot,
+        address: &[u8],
+        registered: bool,
+    ) -> Result<Option<Arc<[u8]>>, crate::execution::Error> {
+        crate::pvac::live(self.public_keys.as_ref(), state, address, registered)
     }
     pub fn admit_program(
         &self,

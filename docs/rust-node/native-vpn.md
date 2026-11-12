@@ -303,8 +303,41 @@ The object supplies the following fields:
 | `pool` | Accepted shielded Circle/factory, custody ceiling, canonical verification key and its SHA-256 pin. |
 | `wallet` | Path to the encrypted operator wallet directory. |
 | `master_key` | Separate private 32-byte regular key file, outside wallet and transport recovery data. |
-| `purchases` | Explicit `max_channels`, `max_requests`, `max_ceiling_ou` and `max_invoice_lifetime_ms` limits. |
+| `purchases` | Explicit `allowed_receipt_keys`, per-payer `max_channels`/`max_requests`, `max_ceiling_ou` and `max_invoice_lifetime_ms` limits. |
 | `ip_tunnel` | Optional existing IP tunnel configuration; `null` leaves kernel forwarding disabled. |
+
+`purchases.allowed_receipt_keys` is an operator-managed list of pseudonymous
+Ed25519 receipt public keys, each encoded as a 32-byte JSON array. Obtain the
+receipt key from the payer's prepared purchase; it is separate from their wallet
+and relayer keys. Omitted or empty lists admit no clients. Add a key only through
+trusted operator onboarding and restart the service to apply the policy. Keep
+this configuration private; admission identities are never published on chain.
+Signatures authenticate a client and do not grant admission by themselves.
+
+For a prepared private route, export its admission keys explicitly while sealing
+consent (or use `--resume` with the exact original consent after interruption):
+
+```sh
+target/release/octra-node private-route-consent --config /private/path/node.json \
+  --requests /private/path/route-consent.json \
+  --admission-output /private/path/operator-admission.json
+```
+
+The output contains one `{target, receipt_key}` entry per hop. Share each entry
+only with its corresponding operator; keep the complete list private. It contains
+no signing keys and authorizes no traffic or payment. The operator copies that
+receipt key into `purchases.allowed_receipt_keys`; the payer can then start its
+node. The isolated Docker fixture performs this admission through trusted local
+orchestration before starting paid route jobs.
+
+Channel and live request limits apply independently to each admitted key. Their
+aggregate must fit 4,096 channels and 65,536 live requests. Expired request cache
+entries are reclaimed using authenticated canonical time; funded channels,
+credits, monotonic key slots and unexpired replay records are retained. Legacy
+request records without expiry remain recoverable and consume aggregate capacity.
+Keep funded payers admitted while they reconcile receipts. Channel limits are
+lifetime allocation limits; exhausting one payer's limit requires an explicit
+operator capacity decision and cannot consume another payer's allowance.
 
 Paths resolve against the configuration directory. The private transport journal
 uses `data/private-payments-transport`. Select this mode without legacy/public

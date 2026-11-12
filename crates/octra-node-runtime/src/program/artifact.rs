@@ -19,6 +19,8 @@ pub struct SourceRules {
     pub overlap: bool,
     pub point_ops: bool,
     pub loops: bool,
+    pub metered: bool,
+    pub records: bool,
 }
 impl SourceRules {
     pub fn captured(fold: &Fold) -> Self {
@@ -28,6 +30,8 @@ impl SourceRules {
             overlap: fold.program_overlap,
             point_ops: fold.standard_mode == RuleMode::Active,
             loops: fold.proof_exec == RuleMode::Active,
+            metered: fold.program_inputs == RuleMode::Active,
+            records: fold.program_records == RuleMode::Active,
         }
     }
 }
@@ -41,6 +45,7 @@ pub struct Artifact {
     raw: Vec<u8>,
     admitted: Admitted,
     mode: Mode,
+    record: Option<octra_node_protocol::program_record::Record>,
 }
 impl Artifact {
     pub fn binary(raw: &[u8], point_ops: bool, trusted: &Keys) -> Result<Self> {
@@ -48,20 +53,59 @@ impl Artifact {
             raw: raw.to_vec(),
             admitted: program::decode_deploy(raw, point_ops, trusted)?,
             mode: Mode::Binary,
+            record: None,
         })
     }
     pub fn source(encoded: &[u8], rules: SourceRules) -> Result<Self> {
         let checked = if rules.overlap && rules.compiler == CompilerMode::Source {
-            package::admit_transition(encoded, rules.point_ops, rules.loops)
+            package::admit_transition_rules(
+                encoded,
+                rules.point_ops,
+                rules.loops,
+                rules.metered,
+                rules.records,
+            )
         } else {
-            package::admit_with(encoded, rules.compiler, rules.point_ops, rules.loops)
+            package::admit_with_rules(
+                encoded,
+                rules.compiler,
+                rules.point_ops,
+                rules.loops,
+                rules.metered,
+                rules.records,
+            )
         }?;
+        if rules.records
+            && !rules.loops
+            && !octra_node_protocol::program_record::source::scope_matches(
+                &checked.main,
+                &checked.sources,
+                rules.metered,
+                &checked.result.bytecode,
+            )?
+        {
+            return Err(Error::rejected("program source scope differs"));
+        }
+        let record = rules.records.then(|| {
+            octra_node_protocol::program_record::source::make(
+                &octra_node_protocol::program_record::source::source_text(
+                    &checked.main,
+                    &checked.sources,
+                ),
+                checked.envelope(),
+                &checked.result,
+            )
+        });
         let (raw, admitted) = checked.into_parts();
         Ok(Self {
             raw,
             admitted,
             mode: Mode::Source,
+            record,
         })
+    }
+    pub fn record(&self) -> Option<&octra_node_protocol::program_record::Record> {
+        self.record.as_ref()
     }
     pub fn raw(&self) -> &[u8] {
         &self.raw
@@ -108,6 +152,7 @@ impl Artifact {
                 raw,
                 admitted,
                 mode,
+                record: None,
             })),
             Err(error) if error.is_operational() => Err(Error::from(error)),
             Err(_) => Ok(None),

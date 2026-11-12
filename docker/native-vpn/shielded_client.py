@@ -74,9 +74,12 @@ class Client(multi_client.Client):
         write(self.config_path, self.config)
         intents = g.ROOT / 'route-consent.json'
         write(intents, [self.intent(index, now) for index in range(2)])
-        g.command(['octra-node', 'private-route-consent', '--config', self.config_path, '--requests', intents])
+        admission = g.ROOT / 'route-admission.json'
+        g.command(['octra-node', 'private-route-consent', '--config', self.config_path, '--requests', intents,
+                   '--admission-output', admission])
         atomic(g.EVIDENCE / 'shielded-client-ready.json', {'retained_client_node': True,
-               'deposit_reconciled': True, 'route_sealed': True, 'shielded_payments': True})
+               'deposit_reconciled': True, 'route_sealed': True, 'shielded_payments': True,
+               'admission': json.loads(admission.read_text())})
 
     def payer(self, index):
         endpoint = self.endpoints[index]

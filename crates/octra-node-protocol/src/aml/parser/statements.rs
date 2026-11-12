@@ -4,6 +4,7 @@
 use super::{BinOp, Expr, Parser, Result, Stmt, StmtId, S, T, W};
 impl Parser<'_> {
     pub(super) fn block(&mut self) -> Result<Vec<StmtId>> {
+        let _recursion = super::Recursion::enter()?;
         self.expect(T::Symbol(S::LBrace))?;
         let mut statements = vec![];
         loop {

@@ -41,8 +41,8 @@ jobs:
         working-directory: octra
         run: |
           python3 scripts/node-port/inventory.py --upstream ../lite-node --check
-          python3 scripts/node-port/check-native-sources.py --upstream ../lite-node
-          python3 scripts/circle-apps/test-registry-native.py --upstream ../lite-node --out out/registry-native.json
+          python3 scripts/node-port/check-native-sources.py --upstream ../lite-node-candidate
+          python3 scripts/circle-apps/test-registry-native.py --upstream ../lite-node-candidate --commit "$OCTRA_CIRCLE_UPSTREAM_COMMIT" --out out/registry-native.json
           python3 scripts/circle-apps/prepare-registry.py --evidence out/registry-native.json --out out/registry-package
       - uses: actions/upload-artifact@v4
         if: always()

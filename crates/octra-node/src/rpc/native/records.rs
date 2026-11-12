@@ -4,7 +4,12 @@
 //! Immutable hash-keyed records cannot become metadata for an upgraded program.
 use super::{compile, Arc, Context, Document, Fault, Value};
 use octra_node_protocol::{aml::rpc::verification, program_record::Record, rpc::require_address};
-use octra_node_runtime::{canonical::RecordError, program::store};
+use octra_node_runtime::{
+    canonical::RecordError,
+    program::{source_read, store},
+};
+use std::sync::OnceLock;
+static SOURCE_READER: OnceLock<source_read::Reader> = OnceLock::new();
 
 fn projected(error: compile::Error) -> Fault {
     match error {
@@ -66,55 +71,74 @@ pub(super) async fn verify(
         if meta.code_hash != verified.record().code_hash {
             return Err(Fault::new(-32000, b"program changed during verification"));
         }
-        if !verified.publishable() {
-            return verified.response(false).map_err(projected);
-        }
-        if !source_entry(Some(&meta)) {
-            return Err(Fault::new(-32000, b"program changed during verification"));
-        }
-        host.node
-            .program_records()
-            .save(&verified)
-            .await
-            .map_err(record_error)?;
-        verified.response(true).map_err(projected)
+        let saved = committed_record(current.state(), &address, &meta.code_hash)?;
+        let committed = saved
+            .as_ref()
+            .is_some_and(|record| record.matches_verification(verified.record()));
+        let published = if committed {
+            true
+        } else if saved.is_some() || !source_entry(Some(&meta)) {
+            false
+        } else {
+            host.node
+                .program_records()
+                .save(&verified)
+                .await
+                .map_err(record_error)?;
+            true
+        };
+        let epoch = i64::try_from(current.head().cursor.epoch.0)
+            .unwrap_or((1_i64 << 62) - 1)
+            .saturating_add(1)
+            .min((1_i64 << 62) - 1);
+        let metered = octra_node_protocol::rules::program_inputs_at(
+            host.node.chain().chain_id.as_bytes(),
+            epoch,
+        ) == octra_node_protocol::transaction::RuleMode::Active;
+        verified
+            .response_with(published, committed, metered)
+            .map_err(projected)
     })
     .await
     .unwrap_or_else(|_| Err(Fault::new(110, b"service unavailable")))
 }
+fn committed_record(
+    state: &octra_node_runtime::state_batch::Snapshot,
+    address: &[u8],
+    hash: &[u8],
+) -> std::result::Result<Option<Record>, Fault> {
+    let Some(raw) = state.get(&[b"contracts", address, b"record"]) else {
+        return Ok(None);
+    };
+    if raw.len() > octra_node_protocol::program_record::source::MAX_BYTES {
+        return Err(Fault::new(-32000, b"program record too large"));
+    }
+    let record = Record::decode(raw).map_err(|error| Fault::new(-32000, error.to_string()))?;
+    Ok((record.code_hash == hash).then_some(record))
+}
 async fn current(
     host: &Context,
     address: &[u8],
-) -> std::result::Result<(crate::Committed, Option<Record>), Fault> {
-    let first = host
+) -> std::result::Result<(crate::Committed, Option<Record>, bool), Fault> {
+    let view = host
         .node
         .snapshot()
         .map_err(|_| Fault::new(110, b"service unavailable"))?;
-    let meta =
-        store::meta(first.state(), address).map_err(|_| Fault::new(110, b"service unavailable"))?;
-    let Some(meta) = meta.filter(|meta| source_entry(Some(meta))) else {
-        return Ok((first, None));
+    let Some(meta) =
+        store::meta(view.state(), address).map_err(|_| Fault::new(110, b"service unavailable"))?
+    else {
+        return Ok((view, None, false));
     };
+    if let Some(record) = committed_record(view.state(), address, &meta.code_hash)? {
+        return Ok((view, Some(record), true));
+    }
     let record = host
         .node
         .program_records()
         .get(address, &meta.code_hash)
         .await
         .map_err(record_error)?;
-    let next = host
-        .node
-        .snapshot()
-        .map_err(|_| Fault::new(110, b"service unavailable"))?;
-    match store::meta(next.state(), address).map_err(|_| Fault::new(110, b"service unavailable"))? {
-        Some(current) if current.code_hash == meta.code_hash && source_entry(Some(&current)) => {
-            Ok((next, record))
-        }
-        Some(_) => Err(Fault::new(-32000, b"program changed during metadata read")),
-        None => Err(Fault::new(
-            -32000,
-            b"program disappeared during metadata read",
-        )),
-    }
+    Ok((view, record, false))
 }
 pub(super) async fn source(
     host: &Context,
@@ -122,8 +146,46 @@ pub(super) async fn source(
     params: &Value,
 ) -> std::result::Result<Vec<u8>, Fault> {
     let address = require_address(doc, params, 0, "address")?;
-    let (_, record) = current(host, address).await?;
-    verification::source_response(record.as_ref()).map_err(projected)
+    let (view, record, committed) = current(host, address).await?;
+    let Some(mut record) = record else {
+        return verification::source_response(None).map_err(projected);
+    };
+    let stored = view
+        .state()
+        .get(&[b"contracts", address, b"bytecode"])
+        .map(<[u8]>::to_vec);
+    let checked = SOURCE_READER
+        .get_or_init(source_read::Reader::default)
+        .query(stored, record.clone())
+        .await;
+    let mut extra = Vec::new();
+    match checked {
+        source_read::Outcome::Failed => {
+            return Err(Fault::new(-32000, b"program source check unavailable"))
+        }
+        source_read::Outcome::Pending | source_read::Outcome::Different => {
+            record.report = None;
+            record.certificate = None;
+            extra.extend_from_slice(b",\"verified\":false,\"verification_status\":");
+            octra_node_protocol::transaction::json_string(
+                &mut extra,
+                if checked == source_read::Outcome::Pending {
+                    b"pending"
+                } else {
+                    b"scope_unproven"
+                },
+            );
+            extra.extend_from_slice(b",\"code_hash\":");
+            octra_node_protocol::transaction::json_string(&mut extra, &record.code_hash);
+        }
+        source_read::Outcome::Checked => (),
+    }
+    let response = verification::source_response(Some(&record)).map_err(projected)?;
+    let mut out = format!("{{\"committed\":{committed},").into_bytes();
+    out.extend_from_slice(&response[1..response.len() - 1]);
+    out.extend_from_slice(&extra);
+    out.push(b'}');
+    Ok(out)
 }
 pub(super) async fn abi(
     host: &Context,
@@ -131,7 +193,7 @@ pub(super) async fn abi(
     params: &Value,
 ) -> std::result::Result<Vec<u8>, Fault> {
     let address = require_address(doc, params, 0, "address")?;
-    let (view, record) = current(host, address).await?;
+    let (view, record, _) = current(host, address).await?;
     if let Some(raw) = verification::abi_response(address, record.as_ref()).map_err(projected)? {
         return Ok(raw);
     }

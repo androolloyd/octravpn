@@ -18,6 +18,8 @@ impl PartialEq for Source {
             && self.policy.balance.fields == other.policy.balance.fields
             && self.policy.balance.strict == other.policy.balance.strict
             && self.policy.balance.math == other.policy.balance.math
+            && self.policy.balance.keyed == other.policy.balance.keyed
+            && self.policy.balance.registered == other.policy.balance.registered
             && self.policy.cipher == other.policy.cipher
     }
 }

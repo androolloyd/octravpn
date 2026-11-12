@@ -224,8 +224,9 @@ impl Dependencies for Native {
     ) -> Result<Observation> {
         self.accelerator()?;
         let runtime = self.runtime.clone();
+        let chain = self.history.chain().chain_id.as_bytes().to_vec();
         self.run(move || {
-            crate::compute_replay::execute_single(&runtime, &model, &program, &request)
+            crate::compute_replay::execute_single(&runtime, &chain, &model, &program, &request)
         })
         .await
     }

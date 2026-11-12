@@ -351,6 +351,27 @@ impl PublicKey {
     pub fn h_digest(&self) -> [u8; 32] {
         self.h_digest
     }
+    /// Native keyed-proof registration requires a nontrivial cyclic power table.
+    pub fn powers_ok(&self) -> bool {
+        if self.params.basis < 3
+            || self.powers.len() != self.params.basis as usize
+            || self.powers.first() != Some(&Fp::ONE)
+        {
+            return false;
+        }
+        let ratio = self.powers[1];
+        if ratio == Fp::ZERO || ratio == Fp::ONE {
+            return false;
+        }
+        let mut expected = ratio;
+        for value in &self.powers[2..] {
+            expected = expected * ratio;
+            if *value != expected {
+                return false;
+            }
+        }
+        expected * ratio == Fp::ONE
+    }
     pub fn circuit_commitment(&self) -> [u8; 32] {
         self.circuit_commit
     }

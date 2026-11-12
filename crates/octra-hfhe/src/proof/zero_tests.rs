@@ -173,9 +173,20 @@ fn native_zero_constraint_proof_transcript_and_entropy_parity() {
     );
     let cases = fixture["cases"].as_array().unwrap();
     assert_eq!(cases.len(), 46);
+    check_cases(cases, false);
+}
+
+fn check_cases(cases: &[Value], keyed: bool) {
     for (index, case) in cases.iter().enumerate() {
         eprintln!("native zero case {index}");
         let (public, secret, cipher) = setup(case);
+        if keyed {
+            assert_eq!(
+                hex::encode(super::super::key::digest(&public)),
+                case["expected"]["key_digest"]
+            );
+            assert!(public.powers_ok());
+        }
         let rule = if case["rule"] == 0 {
             ScalarRule::Prior
         } else {
@@ -312,7 +323,7 @@ fn native_zero_constraint_proof_transcript_and_entropy_parity() {
                 t.append_u64(b"nB", bases.len() as u64);
                 t
             } else {
-                transcript(
+                transcript_keyed(
                     domain,
                     &public,
                     &cipher,
@@ -324,6 +335,7 @@ fn native_zero_constraint_proof_transcript_and_entropy_parity() {
                         profile.kind()
                     },
                     if bound { Some(&commitment) } else { None },
+                    keyed,
                 )
                 .unwrap()
             }
@@ -382,9 +394,18 @@ fn native_zero_constraint_proof_transcript_and_entropy_parity() {
                     is_bound: bound,
                 };
                 let wrapped = if operation == "zero" {
-                    verify_zero(&public, &cipher, &zero, rule)
+                    verify_zero_keyed(&public, &cipher, &zero, rule, keyed)
                 } else {
-                    verify_bound(&public, &cipher, &zero, &commitment, profile, true, rule)
+                    verify_bound_keyed(
+                        &public,
+                        &cipher,
+                        &zero,
+                        &commitment,
+                        profile,
+                        true,
+                        rule,
+                        keyed,
+                    )
                 }
                 .unwrap();
                 assert_eq!(
@@ -392,7 +413,68 @@ fn native_zero_constraint_proof_transcript_and_entropy_parity() {
                     expected["wrapped_accepted"].as_bool().unwrap(),
                     "wrapped verify {index}"
                 );
+                if keyed && wrapped {
+                    let wrong_mode = if operation == "zero" {
+                        verify_zero(&public, &cipher, &zero, rule)
+                    } else {
+                        verify_bound(&public, &cipher, &zero, &commitment, profile, true, rule)
+                    };
+                    assert!(
+                        !wrong_mode.unwrap(),
+                        "key-bound proof accepted historical transcript"
+                    );
+                    let mut changed = PublicKey::from_bytes(&public.to_raw_bytes()).unwrap();
+                    changed.params.depth_slope_bits += 1.0;
+                    assert_ne!(
+                        super::super::key::digest(&public),
+                        super::super::key::digest(&changed)
+                    );
+                    let tampered = if operation == "zero" {
+                        verify_zero_keyed(&changed, &cipher, &zero, rule, true)
+                    } else {
+                        verify_bound_keyed(
+                            &changed,
+                            &cipher,
+                            &zero,
+                            &commitment,
+                            profile,
+                            true,
+                            rule,
+                            true,
+                        )
+                    };
+                    assert!(!tampered.unwrap(), "proof accepted changed public key");
+                    changed.powers[1] = Fp::ONE;
+                    assert!(!changed.powers_ok());
+                }
             }
         }
     }
+}
+
+#[test]
+fn native_key_bound_proof_transcript_and_key_parity() {
+    let fixture: Value =
+        serde_json::from_str(include_str!("../../tests/fixtures/key-binding.json")).unwrap();
+    let sources: Value = serde_json::from_str(include_str!(
+        "../../../../docs/rust-node/source-map-candidate.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        fixture["upstream_commit"],
+        "c49de45cf49ebbc2e5c0697eb956cbcada5845e7"
+    );
+    assert_eq!(fixture["upstream_commit"], sources["upstream_commit"]);
+    for (path, hash) in sources["files"].as_object().unwrap() {
+        if path.starts_with("pvac/") || path.starts_with("pvac_ffi/") {
+            assert_eq!(fixture["source_sha256"][path], *hash, "{path}");
+        }
+    }
+    assert_eq!(
+        fixture["oracle_sha256"],
+        hex::encode(Sha256::digest(include_bytes!(
+            "../../../../scripts/node-port/hfhe-key-binding-oracle.cpp"
+        )))
+    );
+    check_cases(fixture["cases"].as_array().unwrap(), true);
 }

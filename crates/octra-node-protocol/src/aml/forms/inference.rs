@@ -23,40 +23,52 @@ impl Elaborator<'_> {
     fn host_type(&mut self, root: syn::TypeId) -> Option<ast::TypeId> {
         enum Task {
             Visit(syn::TypeId),
-            Pair,
+            Pair(syn::TypeId),
         }
         let mut tasks = vec![Task::Visit(root)];
         let mut values = vec![];
         while let Some(task) = tasks.pop() {
-            let typ = match task {
-                Task::Visit(id) => match self.syntax.typ(id) {
-                    syn::Type::Int => ast::Type::Int,
-                    syn::Type::Bool => ast::Type::Bool,
-                    syn::Type::Bytes(size) if size == &BigInt::from(32) => ast::Type::Bytes32,
-                    syn::Type::Num(ct::Sign::Unsigned, bits) if bits == &BigInt::from(64) => {
-                        ast::Type::U64
-                    }
-                    syn::Type::Num(ct::Sign::Unsigned, bits) if bits == &BigInt::from(128) => {
-                        ast::Type::U128
-                    }
-                    syn::Type::Num(ct::Sign::Unsigned, bits) if bits == &BigInt::from(256) => {
-                        ast::Type::U256
-                    }
-                    syn::Type::Pair(left, right) => {
-                        tasks.push(Task::Pair);
-                        tasks.push(Task::Visit(*right));
-                        tasks.push(Task::Visit(*left));
+            let (id, typ) = match task {
+                Task::Visit(id) => {
+                    if let Some(value) = self.core_to_host.get(&id) {
+                        values.push((*value)?);
                         continue;
                     }
-                    _ => return None,
-                },
-                Task::Pair => {
+                    let typ = match self.syntax.typ(id) {
+                        syn::Type::Int => ast::Type::Int,
+                        syn::Type::Bool => ast::Type::Bool,
+                        syn::Type::Bytes(size) if size == &BigInt::from(32) => ast::Type::Bytes32,
+                        syn::Type::Num(ct::Sign::Unsigned, bits) if bits == &BigInt::from(64) => {
+                            ast::Type::U64
+                        }
+                        syn::Type::Num(ct::Sign::Unsigned, bits) if bits == &BigInt::from(128) => {
+                            ast::Type::U128
+                        }
+                        syn::Type::Num(ct::Sign::Unsigned, bits) if bits == &BigInt::from(256) => {
+                            ast::Type::U256
+                        }
+                        syn::Type::Pair(left, right) => {
+                            tasks.push(Task::Pair(id));
+                            tasks.push(Task::Visit(*right));
+                            tasks.push(Task::Visit(*left));
+                            continue;
+                        }
+                        _ => {
+                            self.core_to_host.insert(id, None);
+                            return None;
+                        }
+                    };
+                    (id, typ)
+                }
+                Task::Pair(id) => {
                     let right = values.pop().expect("host right type");
                     let left = values.pop().expect("host left type");
-                    ast::Type::Tuple(vec![left, right])
+                    (id, ast::Type::Tuple(vec![left, right]))
                 }
             };
-            values.push(self.host.intern(typ));
+            let value = self.host.intern(typ);
+            self.core_to_host.insert(id, Some(value));
+            values.push(value);
         }
         values.pop()
     }
@@ -67,8 +79,22 @@ impl Elaborator<'_> {
         env: &[(ast::Name, ast::TypeId)],
         root: ast::ExprId,
     ) -> Option<ast::TypeId> {
-        match self.strict(line, column, env, root) {
-            Ok((_, value)) => self.host_type(value.typ),
+        if env.iter().any(|(name, typ)| {
+            self.typ(line, column, *typ).is_ok() && syn::Name::new(name).is_none()
+        }) {
+            return self.host_infer(env, root);
+        }
+        let names = super::super::scope::references(&self.ast.nodes, [root], |_| true);
+        let used: Vec<_> = names
+            .iter()
+            .filter_map(|name| env.iter().find(|(found, _)| found == name).cloned())
+            .collect();
+        match self.strict(line, column, &used, root) {
+            Ok((_, value)) => {
+                let host = self.host_type(value.typ)?;
+                self.host_to_core.insert(host, value.typ);
+                Some(host)
+            }
             Err(_) => self.host_infer(env, root),
         }
     }
@@ -293,5 +319,40 @@ impl Elaborator<'_> {
             values.push(value);
         }
         values.pop().expect("host inferred root")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_type_graph_converts_once_per_node() {
+        let mut ast = crate::aml::parser::parse(b"contract Graph {}").unwrap();
+        let mut host = ast.nodes.intern(ast::Type::Int);
+        for _ in 0..64 {
+            host = ast.nodes.intern(ast::Type::Tuple(vec![host, host]));
+        }
+        let mut elaborator = Elaborator::new(&ast);
+        let core = elaborator.typ(0, 1, host).unwrap();
+        assert_eq!(elaborator.host_to_core.len(), 65);
+        assert_eq!(elaborator.host_type(core), Some(host));
+        assert_eq!(elaborator.core_to_host.len(), 65);
+        assert_eq!(elaborator.typ(0, 1, host).unwrap(), core);
+    }
+
+    #[test]
+    fn inference_selects_first_used_binding_and_ignores_unused_locals() {
+        let mut ast = crate::aml::parser::parse(b"contract Locals {}").unwrap();
+        let int = ast.nodes.intern(ast::Type::Int);
+        let boolean = ast.nodes.intern(ast::Type::Bool);
+        let value = ast.nodes.expr(ast::Expr::Var(b"value".to_vec()));
+        let env = vec![
+            (b"value".to_vec(), int),
+            (b"unused".to_vec(), boolean),
+            (b"value".to_vec(), boolean),
+        ];
+        let mut elaborator = Elaborator::new(&ast);
+        assert_eq!(elaborator.infer(0, 1, &env, value), Some(int));
     }
 }

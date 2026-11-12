@@ -82,6 +82,8 @@ struct State {
     scope: scope::Scope,
     scope_revision: u64,
     connections: diagnostics::Counters,
+    accepting: super::accept::Slots,
+    resolved: Vec<(Vec<u8>, Vec<Vec<u8>>, f64)>,
 }
 struct Inner {
     config: Config,
@@ -93,6 +95,7 @@ struct Inner {
     scope: watch::Sender<scope::Request>,
     scope_applied: watch::Sender<u64>,
     scope_transition: tokio::sync::Mutex<()>,
+    eviction_key: [u8; 32],
 }
 #[derive(Clone)]
 pub struct Swarm(Arc<Inner>);
@@ -132,6 +135,8 @@ impl Swarm {
             scope: scope::Scope::Public,
             scope_revision: 0,
             connections: diagnostics::Counters::default(),
+            accepting: super::accept::Slots::default(),
+            resolved: Vec::new(),
         };
         Ok(Self(Arc::new(Inner {
             node_id: handshake::node_id(&key.verifying_key().to_bytes()),
@@ -147,6 +152,7 @@ impl Swarm {
             .0,
             scope_applied: watch::channel(0).0,
             scope_transition: tokio::sync::Mutex::new(()),
+            eviction_key: rand::random(),
         })))
     }
     fn state(&self) -> MutexGuard<'_, State> {
@@ -221,6 +227,48 @@ impl Swarm {
             &self.0.key.verifying_key().to_bytes(),
         )
     }
+    fn record_keys<'a>(&'a self, state: &'a State) -> &'a [Vec<u8>] {
+        state
+            .validators
+            .as_deref()
+            .unwrap_or(&self.0.config.allowed_public_keys)
+    }
+    fn handshake_keys(&self, state: &State) -> Vec<Vec<u8>> {
+        if self.accepts_observers(state) && Self::counts(state).1 < 8 {
+            Vec::new()
+        } else {
+            self.record_keys(state).to_vec()
+        }
+    }
+    fn dial_keys(&self, state: &State) -> Vec<Vec<u8>> {
+        if !self.accepts_observers(state) {
+            return self.record_keys(state).to_vec();
+        }
+        if self.0.config.allowed_public_keys.is_empty() {
+            return Vec::new();
+        }
+        let mut keys = self.0.config.allowed_public_keys.clone();
+        keys.extend_from_slice(self.record_keys(state));
+        keys.sort();
+        keys.dedup();
+        keys
+    }
+    fn host_grant(&self, state: &State, host: &[u8], now: f64) -> Option<Vec<u8>> {
+        if let Some(id) = state.registry.host_key(now, host, self.record_keys(state)) {
+            return Some([b"peer:".as_slice(), &id].concat());
+        }
+        self.0
+            .config
+            .bootstrap
+            .iter()
+            .find(|endpoint| {
+                endpoint.host == host
+                    || state.resolved.iter().any(|(name, ips, until)| {
+                        *until > now && *name == endpoint.host && ips.iter().any(|ip| ip == host)
+                    })
+            })
+            .map(|endpoint| [b"boot:".as_slice(), &endpoint.host].concat())
+    }
     fn counts(s: &State) -> (i64, i64) {
         s.peers
             .iter()
@@ -280,8 +328,8 @@ impl Swarm {
     pub fn scores(&self) -> Vec<(Vec<u8>, guard::Score)> {
         self.state()
             .guard
-            .snapshot()
-            .map(|(k, v)| (k.to_vec(), v.clone()))
+            .snapshot_at(guard::Config::default(), now())
+            .map(|(k, v)| (k.to_vec(), v))
             .collect()
     }
     pub fn diagnostics(&self) -> super::peer_diag::Diagnostics {
@@ -295,8 +343,8 @@ impl Swarm {
         let records = s.registry.values(now()).cloned().collect::<Vec<_>>();
         let scores = s
             .guard
-            .snapshot()
-            .map(|(key, score)| (key.to_vec(), score.clone()))
+            .snapshot_at(guard::Config::default(), now())
+            .map(|(key, score)| (key.to_vec(), score))
             .collect();
         super::peer_diag::Diagnostics::make(&connected, &records, scores, s.relayed.clone(), 2)
     }
@@ -307,20 +355,10 @@ impl Swarm {
             return Ok(());
         }
         s.validators = Some(keys);
-        let accepts_observers = self.accepts_observers(&s);
         let validators = s.validators.clone();
-        let mut observers = 0;
         s.peers.retain(|id, slot| {
             let role = policy::role(validators.as_deref(), id);
-            let keep = slot.peer.is_connected()
-                && match role {
-                    PeerClass::Validator => true,
-                    PeerClass::Observer if accepts_observers && observers < 8 => {
-                        observers += 1;
-                        true
-                    }
-                    PeerClass::Observer => false,
-                };
+            let keep = slot.peer.is_connected();
             if keep {
                 slot.peer.set_peer_class(role);
             } else {
@@ -426,6 +464,7 @@ impl Swarm {
             .peers()
             .into_iter()
             .filter(|p| Some(p.hello().node_id.as_slice()) != except)
+            .filter(|p| frame.message != 0x40 || p.peer_class() == PeerClass::Observer)
         {
             let frame = frame.clone();
             sends.spawn(async move { peer.enqueue(frame, SEND_DEADLINE).await });
@@ -470,6 +509,37 @@ impl Swarm {
         }
         let role = policy::role(s.validators.as_deref(), id);
         let existing_connected = s.peers.get(id).is_some_and(|p| p.peer.is_connected());
+        let (validators, observers) = Self::counts(&s);
+        let full = validators + observers >= self.0.config.maximum_validators.saturating_add(8);
+        let replaced = if !existing_connected && full && role == PeerClass::Validator {
+            use sha2::{Digest, Sha256};
+            s.peers
+                .iter()
+                .filter(|(id, slot)| {
+                    slot.peer.is_connected()
+                        && policy::role(s.validators.as_deref(), id) == PeerClass::Observer
+                })
+                .map(|(id, _)| {
+                    let mut hash = Sha256::new();
+                    hash.update(self.0.eviction_key);
+                    hash.update(id);
+                    (<[u8; 32]>::from(hash.finalize()), id.clone())
+                })
+                .min()
+                .map(|(_, id)| id)
+        } else {
+            None
+        };
+        if role == PeerClass::Observer && !self.accepts_observers(&s) {
+            s.connections
+                .record(direction, Phase::Admission, Outcome::Observer);
+            return Ok(None);
+        }
+        if !existing_connected && (!self.capacity(&s, role) || (full && replaced.is_none())) {
+            s.connections
+                .record(direction, Phase::Admission, Outcome::Capacity);
+            return Ok(None);
+        }
         if let Some(existing) = s.peers.get(id) {
             if !policy::replace_existing(
                 self.node_id(),
@@ -486,17 +556,14 @@ impl Swarm {
                 existing.peer.close();
             }
         }
-        if !existing_connected && role == PeerClass::Observer && !self.accepts_observers(&s) {
-            s.connections
-                .record(direction, Phase::Admission, Outcome::Observer);
-            return Ok(None);
+        if let Some(replaced) = replaced {
+            if let Some(prior) = s.peers.remove(&replaced) {
+                prior.peer.close();
+            }
         }
-        if !existing_connected && !self.capacity(&s, role) {
-            s.connections
-                .record(direction, Phase::Admission, Outcome::Capacity);
-            return Ok(None);
-        }
+        let remote_addr = connection.remote_addr();
         let (peer, driver) = connection.into_driver()?;
+        peer.set_remote_addr(remote_addr);
         peer.set_peer_class(role);
         s.connections
             .record(direction, Phase::Admission, Outcome::Accepted);

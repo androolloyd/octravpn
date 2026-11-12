@@ -28,6 +28,8 @@ impl AccountView for Ledger {
 pub struct Profile {
     pub fields: RuleMode,
     pub strict: bool,
+    pub keyed: bool,
+    pub registered: bool,
     pub math: ScalarRule,
     pub result: ResultPolicy,
 }
@@ -298,7 +300,7 @@ pub(crate) fn resolve<B: AsRef<[u8]>>(
     let proof_prefix = format!("{op}: bound zero proof failed: ");
     let public = check(
         if verify {
-            crypto::proof_pubkey(blob.as_ref())
+            crypto::proof_pubkey_keyed(blob.as_ref(), profile.keyed)
         } else {
             crypto::load_pubkey(blob.as_ref())
         },
@@ -308,7 +310,7 @@ pub(crate) fn resolve<B: AsRef<[u8]>>(
     )?;
     if verify {
         check(
-            crypto::verify_amount(
+            crypto::verify_amount_keyed(
                 &public,
                 &tx.amount,
                 &AmountProof {
@@ -319,6 +321,7 @@ pub(crate) fn resolve<B: AsRef<[u8]>>(
                 },
                 profile.strict,
                 profile.math,
+                profile.keyed,
             ),
             "bad_zero_proof",
             prefix.as_bytes(),
@@ -356,7 +359,14 @@ pub(crate) fn resolve<B: AsRef<[u8]>>(
     )?;
     if let Some(range) = payload.range.filter(|_| verify) {
         let accepted = check(
-            crypto::verify_range(&public, &next, &range, profile.strict, profile.math),
+            crypto::verify_range_keyed(
+                &public,
+                &next,
+                &range,
+                profile.strict,
+                profile.math,
+                profile.keyed,
+            ),
             "bad_range_proof_balance",
             b"decrypt range: ",
             Some(b"decrypt range: "),

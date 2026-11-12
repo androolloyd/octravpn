@@ -29,6 +29,24 @@ impl Material {
     pub fn address(&self) -> &[u8] {
         &self.address
     }
+    pub(super) fn sources(&self) -> Result<Vec<crate::program_wire::Source>> {
+        let files = std::iter::once(crate::program_wire::Source {
+            path: self.main.clone(),
+            body: self.source.clone(),
+        })
+        .chain(
+            self.files
+                .iter()
+                .flatten()
+                .map(|file| crate::program_wire::Source {
+                    path: file.path.clone(),
+                    body: file.source.clone(),
+                }),
+        )
+        .collect();
+        crate::program_wire::normalize(&self.main, files)
+            .map_err(|error| Error::compile(error.to_string()))
+    }
 }
 fn shape(doc: &Document, params: &Value) -> Result<Input> {
     match param(doc, params, 1) {

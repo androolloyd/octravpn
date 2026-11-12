@@ -560,10 +560,23 @@ impl Pool {
         mode: RuleMode,
         clock: &dyn Fn() -> f64,
     ) -> Vec<DropRecord> {
+        self.expire_duty_with_marks(sender, head, mode, false, clock)
+    }
+    pub fn expire_duty_with_marks(
+        &mut self,
+        sender: Option<&[u8]>,
+        head: Option<i64>,
+        mode: RuleMode,
+        marks: bool,
+        clock: &dyn Fn() -> f64,
+    ) -> Vec<DropRecord> {
         let expired: Vec<_> = self
             .view
             .values()
-            .filter(|e| sender.is_none_or(|s| e.tx.from == s) && duty::expired(&e.tx, head, mode))
+            .filter(|e| {
+                sender.is_none_or(|s| e.tx.from == s)
+                    && duty::expired_with_marks(&e.tx, head, mode, marks)
+            })
             .cloned()
             .collect();
         let drops = expired

@@ -36,11 +36,15 @@ pub(crate) enum Request {
         amount: Vec<u8>,
         strict: bool,
         math: bool,
+        #[serde(default)]
+        keyed: bool,
     },
     Key {
         #[serde(with = "super::tasks::bytes")]
         raw: Vec<u8>,
         proof: bool,
+        #[serde(default)]
+        keyed: bool,
     },
     Cipher {
         #[serde(with = "super::tasks::bytes")]
@@ -69,6 +73,8 @@ pub(crate) enum Request {
         recoverable: bool,
     },
     Amount {
+        #[serde(default)]
+        keyed: bool,
         public: Key,
         amount: String,
         #[serde(with = "super::tasks::bytes")]
@@ -91,6 +97,8 @@ pub(crate) enum Request {
         cap: bool,
     },
     Claim {
+        #[serde(default)]
+        keyed: bool,
         public: Key,
         #[serde(with = "super::tasks::bytes")]
         cipher: Vec<u8>,
@@ -103,6 +111,8 @@ pub(crate) enum Request {
         profile: u8,
     },
     RangeBound {
+        #[serde(default)]
+        keyed: bool,
         public: Key,
         #[serde(with = "super::tasks::bytes")]
         cipher: Vec<u8>,
@@ -114,6 +124,8 @@ pub(crate) enum Request {
         math: bool,
     },
     Range {
+        #[serde(default)]
+        keyed: bool,
         public: Key,
         #[serde(with = "super::tasks::bytes")]
         cipher: Vec<u8>,
@@ -175,6 +187,7 @@ fn execute_local(request: Request) -> Result<Response, local::Error> {
             amount,
             strict,
             math,
+            keyed,
         } => {
             use crate::circle_cell_crypto::{self, Kind};
             let kind = match kind {
@@ -193,12 +206,13 @@ fn execute_local(request: Request) -> Result<Response, local::Error> {
                 &amount,
                 strict,
                 rule(math),
+                keyed,
             )?;
             Ok(Response::Unit)
         }
-        Request::Key { raw, proof } => {
+        Request::Key { raw, proof, keyed } => {
             let key = if proof {
-                local::proof_pubkey(&raw)
+                local::proof_pubkey_keyed(&raw, keyed)
             } else {
                 local::load_pubkey(&raw)
             }?;
@@ -249,6 +263,7 @@ fn execute_local(request: Request) -> Result<Response, local::Error> {
             .map(Response::Bytes)
         }
         Request::Amount {
+            keyed,
             public,
             amount,
             cipher,
@@ -258,11 +273,11 @@ fn execute_local(request: Request) -> Result<Response, local::Error> {
             strict,
             math,
         } => {
-            let public = key(&public)?;
+            let public = local::proof_pubkey_keyed(&public.raw, keyed)?;
             let amount = amount
                 .parse()
                 .map_err(|_| local::Error::rejected("worker amount encoding differs"))?;
-            local::verify_amount(
+            local::verify_amount_keyed(
                 &public,
                 &amount,
                 &local::AmountProof {
@@ -273,6 +288,7 @@ fn execute_local(request: Request) -> Result<Response, local::Error> {
                 },
                 strict,
                 rule(math),
+                keyed,
             )?;
             Ok(Response::Unit)
         }
@@ -283,6 +299,7 @@ fn execute_local(request: Request) -> Result<Response, local::Error> {
             cap,
         } => local::verify_commitment(&key(&public)?, &cipher, &expected, cap).map(Response::Bool),
         Request::Claim {
+            keyed,
             public,
             cipher,
             proof,
@@ -291,24 +308,38 @@ fn execute_local(request: Request) -> Result<Response, local::Error> {
             math,
             profile,
         } => {
+            let public = if profile == 2 {
+                key(&public)?
+            } else if profile == 3 {
+                if !keyed || !strict {
+                    return Err(local::Error::rejected(
+                        "stored key claim requires full key proof",
+                    ));
+                }
+                local::proof_pubkey_keyed(&public.raw, false)?
+            } else {
+                local::proof_pubkey_keyed(&public.raw, keyed)?
+            };
             let profile = match profile {
                 0 => BoundProfile::Standard,
-                1 => BoundProfile::KeySwitchRefresh,
+                1 | 3 => BoundProfile::KeySwitchRefresh,
                 2 => BoundProfile::HistoricalMigration,
                 _ => return Err(local::Error::rejected("worker claim profile differs")),
             };
-            local::verify_claim_profile(
-                &key(&public)?,
+            local::verify_claim_profile_keyed(
+                &public,
                 &cipher,
                 &proof,
                 &commitment,
                 strict,
                 rule(math),
                 profile,
+                keyed,
             )?;
             Ok(Response::Unit)
         }
         Request::RangeBound {
+            keyed,
             public,
             cipher,
             proof,
@@ -316,24 +347,33 @@ fn execute_local(request: Request) -> Result<Response, local::Error> {
             strict,
             math,
         } => {
-            local::verify_range_bound(
-                &key(&public)?,
+            local::verify_range_bound_keyed(
+                &local::proof_pubkey_keyed(&public.raw, keyed)?,
                 &cipher,
                 &proof,
                 &commitment,
                 strict,
                 rule(math),
+                keyed,
             )?;
             Ok(Response::Unit)
         }
         Request::Range {
+            keyed,
             public,
             cipher,
             proof,
             strict,
             math,
-        } => local::verify_range(&key(&public)?, &cipher, &proof, strict, rule(math))
-            .map(Response::Bool),
+        } => local::verify_range_keyed(
+            &local::proof_pubkey_keyed(&public.raw, keyed)?,
+            &cipher,
+            &proof,
+            strict,
+            rule(math),
+            keyed,
+        )
+        .map(Response::Bool),
     }
 }
 pub(crate) fn execute(request: Request) -> Outcome {

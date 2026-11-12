@@ -61,6 +61,7 @@ async fn host(store: &CanonicalStore, profile: WasmRules) -> CanonicalApplicatio
 }
 fn profile() -> WasmRules {
     WasmRules {
+        proof_key: false,
         wasm_float: false,
         proof_exec: false,
         math: false,
@@ -142,6 +143,7 @@ async fn real_wasm_views_match_complete_native_host_outcomes() {
         let host = host(
             &store,
             WasmRules {
+                proof_key: false,
                 wasm_float: input["float"].as_bool().unwrap(),
                 proof_exec: input["proof"].as_bool().unwrap(),
                 math: input["math"].as_bool().unwrap(),
@@ -291,6 +293,7 @@ async fn signed_counter(octb: bool) {
         profile: &release,
         duty: None,
         limits: Limits::default(),
+        duty_marks: false,
     };
     let post = Postcheck {
         preverify_has_capacity: true,
@@ -343,6 +346,7 @@ async fn signed_counter(octb: bool) {
             storage_proof: true,
             fhe_work: false,
             object_cost: false,
+            program_inputs: false,
         },
         1,
         123.5,

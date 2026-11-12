@@ -34,6 +34,7 @@ pub struct Precheck<'a> {
     pub bft: bool,
     pub profile: &'a Profile,
     pub duty: Option<(i64, RuleMode)>,
+    pub duty_marks: bool,
     pub limits: Limits,
 }
 #[derive(Clone, Copy, Debug)]
@@ -96,6 +97,17 @@ pub fn self_route(tx: &Transaction) -> Result<(), EnvelopeError> {
     error.map_or(Ok(()), |(tag, reason)| Err(refusal(tag, reason)))
 }
 pub fn signature(tx: &Transaction, account_public_key: Option<&[u8]>) -> Result<(), EnvelopeError> {
+    signature_at(
+        &octra_node_protocol::tx_signature::Mode::Historical,
+        tx,
+        account_public_key,
+    )
+}
+pub fn signature_at(
+    mode: &octra_node_protocol::tx_signature::Mode,
+    tx: &Transaction,
+    account_public_key: Option<&[u8]>,
+) -> Result<(), EnvelopeError> {
     let public_key = account_public_key
         .or(tx.public_key.as_deref())
         .ok_or_else(|| refusal("invalid_signature", "no public key available"))?;
@@ -104,7 +116,7 @@ pub fn signature(tx: &Transaction, account_public_key: Option<&[u8]>) -> Result<
             "invalid_address",
             "address does not match public key",
         ))
-    } else if !tx.verify(public_key) {
+    } else if !mode.verify(tx, public_key) {
         Err(refusal(
             "invalid_signature",
             "signature verification failed",
@@ -185,13 +197,20 @@ pub fn payload(tx: &Transaction, limits: Limits) -> Result<(), Error> {
     Ok(())
 }
 pub fn duty_retry(tx: &Transaction, context: &Precheck<'_>) -> bool {
-    duty_retry_at(tx, context.now, context.duty, context.bft)
+    duty_retry_with_marks(
+        tx,
+        context.now,
+        context.duty,
+        context.bft,
+        context.duty_marks,
+    )
 }
-pub(crate) fn duty_retry_at(
+pub(crate) fn duty_retry_with_marks(
     tx: &Transaction,
     now: f64,
     duty: Option<(i64, RuleMode)>,
     bft: bool,
+    marks: bool,
 ) -> bool {
     let Some((head, RuleMode::Active)) = duty else {
         return false;
@@ -200,7 +219,7 @@ pub(crate) fn duty_retry_at(
         && tx.timestamp.is_finite()
         && tx.timestamp <= now
         && tx.op_type == OpType::ValidatorReady
-        && !duty::expired(tx, Some(head), RuleMode::Active)
+        && !duty::expired_with_marks(tx, Some(head), RuleMode::Active, marks)
         && BondedReady::parse(tx.message.as_deref()).is_ok_and(|ready| ready.head_epoch <= head)
 }
 #[allow(clippy::cast_possible_truncation)] // Native Printf converts the configured floating limit with int_of_float.

@@ -94,6 +94,7 @@ pub struct ValidatorSet {
     pub total_weight: BigInt,
     pub quorum_weight: BigInt,
     pub weighted: bool,
+    pub authors: Option<(i64, Vec<(Validator, BigInt)>)>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RewardMember {

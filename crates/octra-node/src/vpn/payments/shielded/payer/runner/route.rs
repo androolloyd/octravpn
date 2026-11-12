@@ -81,7 +81,24 @@ pub struct Route {
     digest: [u8; 32],
     purchases: Vec<Purchase>,
 }
+/// Explicitly exported admission identity, containing no wallet key, route ID,
+/// purchase amount or other hop's identity. Share only with its target operator.
+#[derive(Serialize)]
+pub struct Admission {
+    pub target: octravpn_core::payments::PrivateTarget,
+    pub receipt_key: octravpn_core::PublicKey,
+}
 impl Route {
+    pub fn admission(&self) -> Vec<Admission> {
+        self.consent
+            .hops
+            .iter()
+            .map(|hop| Admission {
+                target: hop.terms.target.clone(),
+                receipt_key: octravpn_core::PublicKey(hop.receipt_key),
+            })
+            .collect()
+    }
     pub async fn create(id: [u8; 32], hops: Vec<Hop>) -> Result<Self> {
         Self::open(id, hops, false).await
     }

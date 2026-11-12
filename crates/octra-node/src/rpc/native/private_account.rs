@@ -79,13 +79,16 @@ pub(super) async fn read(
         wire::encrypted_auth(&doc, &params, &address)?;
     }
     let view = host.node.snapshot().map_err(unavailable)?;
+    let registered = host.executor.registered_pvac(&view);
     let native = host.executor.clone();
     let method = method.to_vec();
     let node = host.node.clone();
     host.executor
         .read(move || match method.as_slice() {
             b"octra_pvacPubkey" | b"octra_pvacStatus" => {
-                let public = native.public_pvac(&view, &address).map_err(unavailable)?;
+                let public = native
+                    .public_pvac(&view, &address, registered)
+                    .map_err(unavailable)?;
                 if method == b"octra_pvacPubkey" {
                     let mut fields = vec![
                         ("address", string(&address)),
@@ -159,7 +162,9 @@ pub(super) async fn read(
                         account.encrypted_balance.as_deref().unwrap_or(b"0"),
                     );
                 }
-                let public = native.public_pvac(&view, &address).map_err(unavailable)?;
+                let public = native
+                    .public_pvac(&view, &address, registered)
+                    .map_err(unavailable)?;
                 let cipher = account
                     .as_ref()
                     .and_then(|account| account.encrypted_balance.as_deref())

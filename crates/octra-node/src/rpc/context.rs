@@ -160,6 +160,7 @@ pub(crate) struct Context {
     pub(crate) status: Option<Arc<octra_node_runtime::status_read::Service>>,
     pub(crate) tokens: Option<octra_node_runtime::token_rpc::Actor>,
     pub(crate) history_epoch_limit: i64,
+    pub(crate) public_history: super::public_history::Service,
     pub(crate) fees: octra_node_protocol::submit_rpc::Fees,
     pub(crate) http: Arc<http::Service>,
 }
@@ -217,6 +218,7 @@ impl<A: Host> Submission<A> {
             status: self.status.clone(),
             tokens: self.tokens.clone(),
             history_epoch_limit: self.history_epoch_limit,
+            public_history: super::public_history::Service::default(),
             fees: self.fees.clone(),
             http: self.http.clone(),
         })

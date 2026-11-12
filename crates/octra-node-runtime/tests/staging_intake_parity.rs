@@ -111,25 +111,51 @@ fn num(v: &Value) -> Nonce {
     Nonce::new(v.as_i64().unwrap()).unwrap()
 }
 #[test]
-fn native_rpc_and_peer_intake_match_normalization_replacement_and_worker_refusal() {
+fn current_native_rpc_and_peer_intake_match_normalization_replacement_and_worker_refusal() {
     let fixture: Value =
-        serde_json::from_str(include_str!("fixtures/staging-intake.json")).unwrap();
-    let source: Value =
-        serde_json::from_str(include_str!("../../../docs/rust-node/source-map.json")).unwrap();
+        serde_json::from_str(include_str!("fixtures/staging-intake-c49.json")).unwrap();
+    let source: Value = serde_json::from_str(include_str!(
+        "../../../docs/rust-node/source-map-candidate.json"
+    ))
+    .unwrap();
     assert_eq!(fixture["upstream_commit"], source["upstream_commit"]);
-    assert_eq!(fixture["source_sha256"], source["files"]);
+    for (path, hash) in fixture["source_sha256"].as_object().unwrap() {
+        assert_eq!(&source["files"][path], hash, "candidate source {path}");
+    }
     assert_eq!(
         fixture["oracle_sha256"],
         hex::encode(Sha256::digest(include_bytes!(
             "../../../scripts/node-port/staging-intake-oracle.ml"
         )))
     );
-    assert_eq!(fixture["instrumentation"].as_object().unwrap().len(), 2);
-    for (path, v) in fixture["instrumentation"].as_object().unwrap() {
-        assert_eq!(v["original_sha256"], source["files"][path]);
+    assert_eq!(
+        fixture["runner_sha256"],
+        hex::encode(Sha256::digest(include_bytes!(
+            "../../../scripts/node-port/candidate-staging-intake-oracle.py"
+        )))
+    );
+    let historical_bytes = include_bytes!("fixtures/staging-intake.json");
+    assert_eq!(
+        fixture["historical_fixture_sha256"],
+        hex::encode(Sha256::digest(historical_bytes))
+    );
+    let historical: Value = serde_json::from_slice(historical_bytes).unwrap();
+    assert_eq!(
+        fixture["historical_instrumentation"],
+        historical["instrumentation"]
+    );
+    assert_eq!(fixture["cases"].as_array().unwrap().len(), 178);
+    for (old, current) in historical["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(fixture["cases"].as_array().unwrap())
+    {
+        assert_eq!(old["input"], current["input"], "historical intake control");
+        assert_eq!(old["base"], current["base"], "historical intake head");
         assert_eq!(
-            v["prefix_sha256"],
-            hex::encode(Sha256::digest(v["prefix"].as_str().unwrap().as_bytes()))
+            old["expected"]["prepared"], current["expected"]["prepared"],
+            "unchanged signed fixture transactions"
         );
     }
     let mut worker_refusals = 0;
@@ -189,8 +215,10 @@ fn native_rpc_and_peer_intake_match_normalization_replacement_and_worker_refusal
                 settle: mode(&s["settle"]),
                 proof: mode(&s["proof"]),
                 duty,
+                duty_marks: false,
                 queue_head: Some(head),
                 stealth_minimum: s["minimum"].as_str().unwrap().parse::<BigInt>().unwrap(),
+                signing: octra_node_protocol::tx_signature::Mode::Historical,
             };
             let tx = &txs[s["index"].as_u64().unwrap() as usize];
             let h = hash(tx);
@@ -298,8 +326,10 @@ fn worker_panic_refunds_new_reservation_without_restoring_replaced_transaction()
         settle: RuleMode::Prior,
         proof: RuleMode::Active,
         duty: None,
+        duty_marks: false,
         queue_head: Some(1),
         stealth_minimum: 5000.into(),
+        signing: octra_node_protocol::tx_signature::Mode::Historical,
     };
     let mut host = Effects {
         events: vec![],
@@ -378,8 +408,10 @@ fn canonical_account_changes_rebase_pending_reservations_before_intake() {
         settle: RuleMode::Prior,
         proof: RuleMode::Active,
         duty: None,
+        duty_marks: false,
         queue_head: Some(1),
         stealth_minimum: 5000.into(),
+        signing: octra_node_protocol::tx_signature::Mode::Historical,
     };
     let mut pool = Pool::default();
     let mut host = Effects {

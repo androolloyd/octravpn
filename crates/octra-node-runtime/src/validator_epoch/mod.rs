@@ -59,6 +59,11 @@ impl BoundFold {
             .map_err(|e| Error(e.to_string()))?;
         ctx.fhe_work = mode(Rule::FheWork)?;
         ctx.proof_exec = mode(Rule::ProofExecution)?;
+        ctx.proof_key = mode(Rule::ProofKey)?;
+        ctx.program_records = mode(Rule::ProgramRecords)?;
+        ctx.program_inputs = graph.program_inputs(epoch);
+        ctx.duty_marks = mode(Rule::DutyMarks)?;
+        ctx.tx_network = mode(Rule::TxNetwork)?;
         ctx.vm_bytes = mode(Rule::VmBytes)?;
         ctx.wasm_float = mode(Rule::WasmFloat)?;
         ctx.math = mode(Rule::Math)? == RuleMode::Active;

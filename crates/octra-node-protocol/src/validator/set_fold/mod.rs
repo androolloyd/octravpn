@@ -2,14 +2,18 @@
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 //! Finalized validator duty, participation and readiness state. Sparse marks
 //! preserve native bitset semantics without allocating across empty epoch spans.
+mod claims;
 mod json;
 mod proof;
 use super::{admission::Candidate, Error};
 use crate::consensus::ParentCommit;
 pub use crate::duty::Proof;
-pub use proof::read_parent;
+pub use claims::{decode_marks, encode_marks, evidence_of_message, Evidence, MarkClaim, MarkSet};
+pub use proof::{read_parent, read_parent_with_marks};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub const MARKS_ID: &[u8] =
+    b"duty_marks:final_round:historic_set:precommit:ordered:atomic:age_2_16:wire_72";
 pub const META_KEY: &[u8] = b"bft.validator_duty";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Minimum {
@@ -268,6 +272,7 @@ pub struct Final {
     pub epoch: i64,
     pub proposal_id: Vec<u8>,
     pub set_hash: Vec<u8>,
+    pub round: Option<i64>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParentEvidence {
@@ -587,6 +592,19 @@ impl State {
         at: i64,
         parent: Option<&ParentCommit>,
     ) -> Result<(Self, Option<String>, bool), Error> {
+        self.advance_with_marks(cfg, cap, chain, start, at, parent, false)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn advance_with_marks(
+        &self,
+        cfg: &Config,
+        cap: CapMode,
+        chain: &[u8],
+        start: i64,
+        at: i64,
+        parent: Option<&ParentCommit>,
+        marks: bool,
+    ) -> Result<(Self, Option<String>, bool), Error> {
         if self.applied == Some(at) {
             return Ok((self.clone(), None, false));
         }
@@ -598,7 +616,11 @@ impl State {
             finality,
             signers,
             active,
-        } = proof::read_parent(chain, parent.ok_or("validator duty parent commit missing")?)?;
+        } = proof::read_parent_with_marks(
+            chain,
+            parent.ok_or("validator duty parent commit missing")?,
+            marks,
+        )?;
         let (mut state, mut reason) =
             match self.note_final_step(cfg, cap, at, &active, &finality, &signers) {
                 FinalStep::Applied(s) => (s, None),

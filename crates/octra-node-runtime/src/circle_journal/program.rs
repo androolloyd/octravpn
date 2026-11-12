@@ -39,6 +39,7 @@ fn options(
         fhe_work: ctx.fhe_work,
         object_cost: ctx.object_cost,
         proof_exec: ctx.profile.proof_exec,
+        proof_key: ctx.profile.proof_key,
         math: ctx.profile.math,
         point_ops: ctx.storage_proof,
         async_exec: true,
@@ -94,7 +95,11 @@ impl vm::Host for Host<'_, '_> {
     fn fhe_key(&mut self, address: &[u8]) -> Result<Option<vm::FheKeySource>, vm::Unavailable> {
         self.journal
             .runtime
-            .public_key(&self.journal.snapshot(), address)
+            .live_public_key(
+                &self.journal.snapshot(),
+                address,
+                self.context.program_inputs,
+            )
             .map(|key| key.map(vm::FheKeySource::Bytes))
             .map_err(|error| vm::Unavailable(error.to_string()))
     }

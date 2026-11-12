@@ -72,6 +72,7 @@ impl Bound {
         Ok(Self {
             circle: circle_transaction::Rules {
                 wasm: WasmRules {
+                    proof_key: ctx.proof_key == RuleMode::Active,
                     math: ctx.math,
                     proof_exec: ctx.proof_exec == RuleMode::Active,
                     wasm_float: ctx.wasm_float == RuleMode::Active,
@@ -86,6 +87,7 @@ impl Bound {
                 storage_proof: ctx.standard_mode == RuleMode::Active,
                 fhe_work: ctx.fhe_work == RuleMode::Active,
                 object_cost,
+                program_inputs: ctx.program_inputs == RuleMode::Active,
             },
             object_cost,
             owner_migration,

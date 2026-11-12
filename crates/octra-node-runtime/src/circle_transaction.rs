@@ -29,6 +29,7 @@ pub struct Rules {
     pub storage_proof: bool,
     pub fhe_work: bool,
     pub object_cost: bool,
+    pub program_inputs: bool,
 }
 
 pub struct Batch {
@@ -300,6 +301,7 @@ impl OperationHost for Calls<'_> {
                 } else {
                     octra_hfhe::scalar::ScalarRule::Prior
                 },
+                self.rules.wasm.proof_key,
             );
         }
         if route != Route::VirtualMachine || tx.op_type != OpType::CircleCall {
@@ -364,7 +366,8 @@ impl OperationHost for Calls<'_> {
                 self.receipt_time,
             )
             .unwrap_or(0),
-            tree_hash: self.parent_root.clone(),
+            tree_hash: octra_node_protocol::contract::tree_hash(&self.parent_root)
+                .map_err(operational)?,
             node_id: tx.to.clone(),
             depth: 0,
             limit: limit(&tx.ou),
@@ -377,6 +380,7 @@ impl OperationHost for Calls<'_> {
             storage_proof: self.rules.storage_proof,
             fhe_work: self.rules.fhe_work,
             object_cost: self.rules.object_cost,
+            program_inputs: self.rules.program_inputs,
         };
         let expected = match self.verification {
             Verification::Consume { root, gate } => {

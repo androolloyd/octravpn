@@ -190,7 +190,7 @@ pub fn emit_program(result: Output) -> Result<Output> {
     };
     emit_program_with_facts(result, &facts)
 }
-fn emit_prior(result: Output) -> Result<Output> {
+pub(crate) fn emit_prior(result: Output) -> Result<Output> {
     // Prior_compile checks for facts before consulting result.error. Its
     // historical "Program facts missing" projection is intentionally retained.
     let Some(facts) = result.program_facts.clone() else {
@@ -241,13 +241,22 @@ pub fn attest_program(
     Ok(result)
 }
 pub fn compile_source(
-    mut resolver: impl FnMut(&[u8]) -> Option<Vec<u8>>,
+    resolver: impl FnMut(&[u8]) -> Option<Vec<u8>>,
     main: &[u8],
     loops: bool,
     version: Version,
 ) -> Result<Output> {
+    compile_source_metered(resolver, main, loops, version, false)
+}
+pub fn compile_source_metered(
+    mut resolver: impl FnMut(&[u8]) -> Option<Vec<u8>>,
+    main: &[u8],
+    loops: bool,
+    version: Version,
+    metered: bool,
+) -> Result<Output> {
     let mut sources = BTreeMap::new();
-    let compiled = source::compile_multi(
+    let compiled = source::compile_multi_metered(
         |path| {
             let body = resolver(path)?;
             sources.insert(path.to_vec(), body.clone());
@@ -256,6 +265,8 @@ pub fn compile_source(
         main,
         Syntax::Source,
         loops,
+        metered,
+        metered,
     );
     let compiled = match compiled {
         Ok(compiled) => compiled,

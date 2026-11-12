@@ -145,6 +145,7 @@ pub struct MigrationRules {
     pub cipher: RuleMode,
     pub proof: RuleMode,
     pub math: bool,
+    pub keyed: bool,
 }
 /// A classification produced only by the bounded native migration actor.
 pub struct Classified(pub(crate) classify::Status);
@@ -284,6 +285,7 @@ pub fn migration_status(
                 b"prior"
             }),
         ),
+        ("proof_key", boolean(rules.keyed)),
         ("cipher_format", string(format)),
         ("history_recovery", boolean(history)),
         ("cipher_class", string(cipher_class)),

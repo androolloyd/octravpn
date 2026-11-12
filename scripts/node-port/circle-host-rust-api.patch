@@ -37,12 +37,10 @@
          let mut phase = self.0.try_lock().map_err(|_| (2, "circle session busy".to_owned()))?;
          let previous = std::mem::replace(&mut *phase, Phase::Closed);
          let (mut session, output) = match previous {
-@@ -410,6 +414,38 @@
-     fn reply(query: &JsonValue) -> JsonValue {
-         json!({"id": query["id"], "response_b64": encode_b64(&frame_int(42)),
+@@ -412,6 +416,38 @@
              "effort": 10, "storage_pairs": []})
-+    }
-+
+     }
+ 
 +    #[cfg(feature = "rust-host")]
 +    #[test]
 +    fn rust_api_session_resumes_native_requests_and_closes_once() {
@@ -73,10 +71,25 @@
 +        let mut invalid = CallSession::new(Arc::new(NoHfhe));
 +        assert!(matches!(invalid.step(b"{"), Err(Error::Rejected(_))));
 +        assert!(matches!(invalid.step(&input), Err(Error::Unavailable(reason)) if reason == "circle session closed"));
++    }
++
+     #[test]
+     fn allocator_fault() {
+         let method = "fhe_encrypt_zero";
+@@ -428,7 +464,11 @@
+             input["fuel_limit"] = json!(10_000_000);
+             input["hfhe_active_key"] = json!({"key_id": "test", "pubkey_b64": "", "seckey_b64": ""});
+             let port = Port(Mutex::new(Phase::New));
+-            assert_eq!(next(&port, input).unwrap_err(), (2, "hfhe backend failed".to_owned()));
++            #[cfg(feature = "rust-host")]
++            let reason = "Rust HFHE backend not installed";
++            #[cfg(not(feature = "rust-host"))]
++            let reason = "hfhe backend failed";
++            assert_eq!(next(&port, input).unwrap_err(), (2, reason.to_owned()));
+         }
      }
  
-     #[test]
-@@ -558,4 +594,4 @@
+@@ -558,4 +598,4 @@
          input["update_policy"] = json!(false);
          assert_eq!(next(&port, input).unwrap_err().0, 1);
      }
@@ -95,7 +108,7 @@
  
  mod deterministic_tensor;
  mod float_ops;
-@@ -345,11 +348,47 @@
+@@ -528,11 +531,47 @@
      pubkey_b64: String,
  }
  
@@ -145,7 +158,39 @@
  }
  
  #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-@@ -1508,7 +1547,7 @@
+@@ -606,6 +645,9 @@
+     metadata_mode: Option<String>,
+     ciphertext_b64: String,
+ }
++
++// A local resource ceiling, not a new deterministic VM rejection rule.
++const LOCAL_MAX_TABLE_ELEMENTS: u32 = 65_536;
+ 
+ #[derive(Debug)]
+ struct HostState {
+@@ -648,6 +690,8 @@
+     call_request: Option<call_step::Request>,
+     hfhe_invoke_cache: Option<(Vec<u8>, Arc<Vec<u8>>)>,
+     unavailable: Option<String>,
++    local_table_limit: bool,
++    local_table_cap: bool,
+     inspect_error: Option<String>,
+     query_output: bool,
+     local_storage: bool,
+@@ -694,6 +738,12 @@
+     fn table_growing(&mut self, current: u32, desired: u32, maximum: Option<u32>)
+         -> Result<bool, TableError>
+     {
++        if self.local_table_cap && desired > LOCAL_MAX_TABLE_ELEMENTS
++            && maximum.map_or(true, |maximum| desired <= maximum)
++        {
++            self.local_table_limit = true;
++            self.unavailable = Some("local WASM table resource limit exceeded".to_owned());
++        }
+         self.limits.table_growing(current, desired, maximum)
+     }
+ 
+@@ -1694,7 +1744,7 @@
      String(String),
  }
  
@@ -154,7 +199,7 @@
  extern "C" {
      fn octra_circle_wasm_host_hfhe_call_json(
          input_ptr: *const u8,
-@@ -1520,7 +1559,7 @@
+@@ -1706,7 +1756,7 @@
      ) -> i32;
  }
  
@@ -163,7 +208,7 @@
  unsafe fn octra_circle_wasm_host_hfhe_call_json(
      _input_ptr: *const u8,
      _input_len: usize,
-@@ -1625,6 +1664,10 @@
+@@ -1812,6 +1862,10 @@
      } else {
          unsafe { slice::from_raw_parts(input_ptr, input_len) }
      };
@@ -174,12 +219,53 @@
      let input_text = std::str::from_utf8(input)
          .map_err(|e| format!("octra_circle_wasm_host: invalid utf8 input: {e}"))?;
      let payload: Payload = serde_json::from_str(input_text)
-@@ -8087,6 +8130,12 @@
+@@ -2174,7 +2228,7 @@
+     if let Some(reason) = runtime.store.data().inspect_error.as_ref() {
+         return Err(reason.clone().into());
+     }
+-    if runtime.store.data().local_storage {
++    if runtime.store.data().local_storage || runtime.store.data().local_table_limit {
+         if let Some(reason) = runtime.store.data().unavailable.as_ref() {
+             return Err(HostFailure::Unavailable(reason.clone()));
+         }
+@@ -2495,7 +2549,7 @@
+             if let Some(reason) = store.data().inspect_error.as_ref() {
+                 return Err(HostFailure::Rejected(reason.clone()));
+             }
+-            if calls || store.data().local_storage {
++            if calls || store.data().local_storage || store.data().local_table_limit {
+                 if let Some(reason) = store.data().unavailable.as_ref() {
+                     return Err(HostFailure::Unavailable(reason.clone()));
+                 }
+@@ -2723,9 +2777,7 @@
+             .tables(1)
+             .instances(1)
+             .trap_on_grow_failure(true);
+-        if payload.table_limit == Some(true) {
+-            limits = limits.table_elements(MAX_TABLE_ELEMENTS);
+-        }
++        limits = limits.table_elements(MAX_TABLE_ELEMENTS);
+         Ok(Self {
+             limits: limits.build(),
+             guest: None,
+@@ -2766,6 +2818,8 @@
+             call_request: None,
+             hfhe_invoke_cache: None,
+             unavailable: None,
++            local_table_limit: false,
++            local_table_cap: payload.table_limit != Some(true),
+             inspect_error: None,
+             query_output: !description_only && is_view,
+             local_storage,
+@@ -8251,6 +8305,15 @@
      call_hfhe_backend(payload)
  }
  
 +#[cfg(feature = "rust-host")]
 +fn call_hfhe_backend(payload: JsonValue) -> Result<JsonValue, HostFailure> {
++    // Mirror the native test FFI hook when using the Rust backend adapter.
++    #[cfg(test)]
++    code_cases::host_wait();
 +    rust_api::invoke_backend(&payload)
 +}
 +
@@ -187,7 +273,7 @@
  fn call_hfhe_backend(payload: JsonValue) -> Result<JsonValue, HostFailure> {
      let input = serde_json::to_string(&payload)
          .map_err(|e| HostFailure::Unavailable(format!("hfhe payload encode failed: {e}")))?;
-@@ -8133,6 +8182,7 @@
+@@ -8297,6 +8360,7 @@
      }
  }
  
@@ -195,7 +281,58 @@
  unsafe fn copy_and_free_malloc_string(ptr: *mut u8, len: usize) -> String {
      if ptr.is_null() || len == 0 {
          if !ptr.is_null() {
-@@ -16046,4 +16096,4 @@
+@@ -8539,7 +8603,8 @@
+             assert!(run_describe(&table_input(65_536, profile, true)).is_ok());
+             assert!(run_describe(&table_input(65_537, profile, true)).is_err());
+             assert!(run_describe(&table_input(u32::MAX as u64, profile, true)).is_err());
+-            assert!(run_describe(&table_input(65_537, profile, false)).is_ok());
++            assert!(matches!(run_describe(&table_input(65_537, profile, false)),
++                Err(HostFailure::Unavailable(_))));
+         }
+     }
+ 
+@@ -8550,6 +8615,40 @@
+         let grow = runtime.instance.get_typed_func::<(), i32>(&runtime.store, "grow").unwrap();
+         assert_eq!(grow.call(&mut runtime.store, ()).unwrap(), 65_535);
+         assert!(grow.call(&mut runtime.store, ()).is_err());
++    }
++
++    #[test]
++    fn table_declared_maximum_retains_deterministic_failure() {
++        let _guard = cache_test();
++        let payload = table_payload(1, "standard", false, None);
++        let mut state = HostState::from_payload(&payload, true).unwrap();
++        assert!(state.table_growing(1, 65_537, Some(1)).is_err());
++        assert!(!state.local_table_limit);
++        assert_eq!(state.unavailable, None);
++    }
++
++    #[test]
++    fn table_growth_retains_operational_failure() {
++        let _guard = cache_test();
++        let payload = table_payload(65_535, "standard", false, None);
++        let mut runtime = Runtime::prepare(&payload, false, false, None).unwrap();
++        let grow = runtime
++            .instance
++            .get_typed_func::<(), i32>(&runtime.store, "grow")
++            .unwrap();
++        assert_eq!(grow.call(&mut runtime.store, ()).unwrap(), 65_535);
++        assert!(grow.call(&mut runtime.store, ()).is_err());
++        assert!(runtime.store.data().local_table_limit);
++        assert_eq!(
++            runtime.store.data().unavailable.as_deref(),
++            Some("local WASM table resource limit exceeded")
++        );
++        // The execution wire must retain unavailability even for updates.
++        let result = execute_output(&runtime, 1, false, &[], 0, None);
++        assert_eq!(
++            result["unavailable"],
++            "local WASM table resource limit exceeded"
++        );
+     }
+ 
+     pub(super) fn response_input(local: bool, compute: bool) -> Payload<'static> {
+@@ -16362,4 +16461,4 @@
          );
          cache.remove(&other_key);
      }

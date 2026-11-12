@@ -44,7 +44,7 @@ fn current<'a>(ledger: &'a impl AccountView, tx: &Transaction) -> Result<&'a [u8
         .map(|a| a.encrypted_balance.as_deref().unwrap_or(b"0"))
         .ok_or_else(|| rejected("account not found"))
 }
-fn canonical(raw: &[u8]) -> Result<(crypto::PublicKey, Vec<u8>)> {
+fn canonical(raw: &[u8], keyed: bool) -> Result<(crypto::PublicKey, Vec<u8>)> {
     let raw = octra_node_protocol::transaction::decode_base64(raw)
         .map_err(|e| rejected(format!("Invalid_argument({:?})", e.to_string())))?;
     if raw.len() > 5_000_000 {
@@ -55,7 +55,12 @@ fn canonical(raw: &[u8]) -> Result<(crypto::PublicKey, Vec<u8>)> {
     {
         return Err(rejected("pvac pubkey has invalid envelope"));
     }
-    let key = check(crypto::proof_pubkey(&raw), "key_switch_rejected", b"", None)?;
+    let key = check(
+        crypto::proof_pubkey_keyed(&raw, keyed),
+        "key_switch_rejected",
+        b"",
+        None,
+    )?;
     let raw = key.to_bytes().map_err(unavailable)?;
     Ok((key, raw))
 }
@@ -191,11 +196,43 @@ pub(crate) fn resolve<B: AsRef<[u8]>>(
     {
         return Err(rejected("unknown key_switch migration_mode = cipher_proof"));
     }
-    let payload = Payload::parse(tx, policy.balance.fields)?;
+    let payload = Payload::parse_keyed(tx, policy.balance.fields, policy.balance.keyed)?;
     if payload.kat != hex::encode(octra_hfhe::seeded_rng::aes_kat()).as_bytes() {
         return Err(rejected("AES KAT mismatch - incompatible key"));
     }
-    let (public, new_key) = canonical(&payload.new_key)?;
+    let (public, new_key) = canonical(&payload.new_key, policy.balance.keyed)?;
+    if policy.balance.keyed {
+        let (Some(cipher), Some(proof)) = (&payload.owner_cipher, &payload.owner_proof) else {
+            return Err(rejected("key ownership proof is required"));
+        };
+        if matches!(evidence, Evidence::Proof) {
+            use base64::Engine as _;
+            use octra_hfhe::{proof::generators::pedersen_commit, scalar::Scalar};
+            let blind: [u8; 32] =
+                Sha256::digest([b"octra:pvac:key_owner\0".as_slice(), &tx.from].concat()).into();
+            let commitment = pedersen_commit(&Scalar::ZERO, &Scalar::from_bytes_raw(&blind));
+            let commitment = base64::engine::general_purpose::STANDARD.encode(commitment);
+            let blinding = base64::engine::general_purpose::STANDARD.encode(blind);
+            check(
+                crypto::verify_amount_keyed(
+                    &public,
+                    &0.into(),
+                    &crypto::AmountProof {
+                        cipher,
+                        proof,
+                        commitment: commitment.as_bytes(),
+                        blinding: blinding.as_bytes(),
+                    },
+                    true,
+                    policy.balance.math,
+                    true,
+                ),
+                "key_switch_rejected",
+                b"key ownership proof failed: ",
+                None,
+            )?;
+        }
+    }
     let old = key()?.map(|key| key.as_ref().to_vec());
     let source = current(ledger, tx)?;
     let status = classify::status(source, old.as_deref(), policy.balance.strict)?;

@@ -39,7 +39,8 @@ pub(super) fn check(
         "bundle limit exceeded"
     );
     for tx in &inputs {
-        admission::signature(
+        admission::signature_at(
+            &rules.signing,
             tx,
             ledger
                 .account(&tx.from)
@@ -89,6 +90,7 @@ mod tests {
                 compute: RuleMode::Prior,
                 settle: RuleMode::Prior,
             },
+            signing: octra_node_protocol::tx_signature::Mode::Historical,
         }
     }
     fn bundle(confirmed: Vec<Transaction>, rejected: Transaction) -> Accepted {

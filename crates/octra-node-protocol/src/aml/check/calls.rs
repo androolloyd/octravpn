@@ -197,10 +197,10 @@ impl Checker<'_> {
             _ => (),
         }
         let function = self
-            .contract
+            .symbols
             .functions
-            .iter()
-            .find(|function| function.name == name)
+            .get(name)
+            .map(|&index| &self.contract.functions[index])
             .ok_or_else(|| invalid([b"function is undefined name = ".as_slice(), name].concat()))?;
         if function.params.len() != types.len() {
             return Err(invalid(

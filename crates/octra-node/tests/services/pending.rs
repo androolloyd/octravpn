@@ -31,6 +31,7 @@ pub(super) fn admitted(state: &Snapshot, txs: &[Transaction]) -> Arc<Pending> {
     let ledger = account_store::ledger(&StateBatch::from_snapshot(state.clone())).unwrap();
     let mut pool = Pool::default();
     let rules = intake::Rules {
+        signing: octra_node_protocol::tx_signature::Mode::Historical,
         bft: true,
         profile: Profile {
             admit_ops: b"circle_call".to_vec(),
@@ -40,6 +41,7 @@ pub(super) fn admitted(state: &Snapshot, txs: &[Transaction]) -> Arc<Pending> {
         settle: RuleMode::Active,
         proof: RuleMode::Active,
         duty: Some((0, RuleMode::Active)),
+        duty_marks: false,
         queue_head: Some(0),
         stealth_minimum: 5000.into(),
     };

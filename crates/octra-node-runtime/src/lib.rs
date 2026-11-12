@@ -79,6 +79,7 @@ pub mod proposal_select;
 pub mod pvac;
 pub mod pvac_status_actor;
 pub mod query_peers;
+pub mod query_work;
 pub mod staging;
 pub mod state_batch;
 pub mod status_read;

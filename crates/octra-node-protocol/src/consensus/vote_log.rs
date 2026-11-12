@@ -9,6 +9,8 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
+mod proofs;
+pub use proofs::{check_proof, proof_ready};
 pub const MAX_WIRE_BYTES: u64 = 512;
 pub const MAX_EPOCH_FILES: usize = 4096;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,19 +19,27 @@ pub struct Position {
     pub round: i64,
 }
 pub enum VoteLog {
-    Memory(BTreeMap<Bytes, Vote>),
+    Memory {
+        records: BTreeMap<Bytes, Vote>,
+        proofs: Vec<Vec<Vote>>,
+        value: Option<Bytes>,
+    },
     Disk(PathBuf),
 }
 impl VoteLog {
     pub fn memory() -> Self {
-        Self::Memory(BTreeMap::new())
+        Self::Memory {
+            records: BTreeMap::new(),
+            proofs: Vec::new(),
+            value: None,
+        }
     }
     pub fn disk(data_dir: impl AsRef<Path>) -> Self {
         Self::Disk(data_dir.as_ref().join("vote_log"))
     }
     pub fn floor(&self) -> Result<Option<i64>, Error> {
         match self {
-            Self::Memory(_) => Ok(Some(i64::MIN)),
+            Self::Memory { .. } => Ok(Some(i64::MIN)),
             Self::Disk(path) => {
                 if !path.exists() {
                     return Ok(None);
@@ -45,7 +55,7 @@ impl VoteLog {
     }
     pub fn round_mark(&self) -> Result<Option<Position>, Error> {
         match self {
-            Self::Memory(_) => Ok(None),
+            Self::Memory { .. } => Ok(None),
             Self::Disk(path) => {
                 if !path.exists() {
                     return Ok(None);
@@ -60,7 +70,7 @@ impl VoteLog {
         }
     }
     pub fn set_floor(&mut self, through_epoch: i64) -> Result<(), Error> {
-        if matches!(self, Self::Memory(_)) {
+        if matches!(self, Self::Memory { .. }) {
             return Ok(());
         }
         match self.floor()? {
@@ -114,7 +124,7 @@ impl VoteLog {
     }
     pub fn check(&self, vote: &Vote) -> Result<(), Error> {
         match self {
-            Self::Memory(records) => match records.get(&key(vote)) {
+            Self::Memory { records, .. } => match records.get(&key(vote)) {
                 Some(stored) if !same_statement(stored, vote) => {
                     Err("local vote conflicts with stored vote".into())
                 }
@@ -132,7 +142,7 @@ impl VoteLog {
     }
     pub fn keep(&mut self, vote: Vote) -> Result<Vote, Error> {
         match self {
-            Self::Memory(records) => match records.get(&key(&vote)) {
+            Self::Memory { records, .. } => match records.get(&key(&vote)) {
                 Some(prior) if same_statement(prior, &vote) => Ok(prior.clone()),
                 Some(_) => Err("local vote conflicts with stored vote".into()),
                 None => {
@@ -156,7 +166,7 @@ impl VoteLog {
     }
     pub fn find_statement(&self, expected: &Vote) -> Result<Option<Vote>, Error> {
         let found = match self {
-            Self::Memory(records) => records.get(&key(expected)).cloned(),
+            Self::Memory { records, .. } => records.get(&key(expected)).cloned(),
             Self::Disk(path) => {
                 if !path.exists() {
                     return Ok(None);
@@ -172,6 +182,47 @@ impl VoteLog {
         };
         Ok(found.filter(|v| same_statement(v, expected)))
     }
+    pub fn round_votes(
+        &self,
+        chain: &[u8],
+        validator: &[u8],
+        epoch: i64,
+        round: i64,
+    ) -> Result<Vec<Vote>, Error> {
+        let mut votes = Vec::new();
+        for kind in [VoteType::Prevote, VoteType::Precommit] {
+            let expected = Vote {
+                chain_id: chain.to_vec(),
+                validator: validator.to_vec(),
+                epoch_id: epoch,
+                round,
+                vote_type: kind,
+                proposal_id: Vec::new(),
+                signature: Vec::new(),
+            };
+            let found = match self {
+                Self::Memory { records, .. } => records.get(&key(&expected)).cloned(),
+                Self::Disk(path) => {
+                    let file = path.join(name(&expected));
+                    if file.exists() {
+                        Some(read(&file)?)
+                    } else {
+                        None
+                    }
+                }
+            };
+            if let Some(vote) = found {
+                if !belongs(&vote, chain, validator, epoch)
+                    || vote.round != round
+                    || vote.vote_type != kind
+                {
+                    return Err("vote log round statement differs".into());
+                }
+                votes.push(vote);
+            }
+        }
+        Ok(votes)
+    }
     pub fn max_round(
         &self,
         chain: &[u8],
@@ -179,7 +230,7 @@ impl VoteLog {
         epoch: i64,
     ) -> Result<Option<i64>, Error> {
         match self {
-            Self::Memory(records) => Ok(records
+            Self::Memory { records, .. } => Ok(records
                 .values()
                 .filter(|v| belongs(v, chain, validator, epoch))
                 .map(|v| v.round)
@@ -231,8 +282,9 @@ impl VoteLog {
         }
     }
     pub fn prune(&mut self, through_epoch: i64) -> Result<(), Error> {
+        self.prune_proofs(through_epoch)?;
         match self {
-            Self::Memory(records) => {
+            Self::Memory { records, .. } => {
                 records.retain(|_, v| v.epoch_id > through_epoch);
                 Ok(())
             }

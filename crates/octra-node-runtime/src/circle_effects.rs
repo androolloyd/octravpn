@@ -94,6 +94,7 @@ impl Prepared {
             storage_proof: ctx.storage_proof,
             fhe_work: ctx.fhe_work,
             object_cost: ctx.object_cost,
+            program_inputs: ctx.program_inputs,
         };
         let mut checked = Vec::new();
         // Native mapi_s completes admission of each child before selecting the

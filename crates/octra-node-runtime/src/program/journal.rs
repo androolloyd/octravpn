@@ -26,6 +26,7 @@ pub struct Upgrade {
 pub struct Journal {
     deploys: Vec<Deploy>,
     upgrades: Vec<Upgrade>,
+    records: Vec<(Vec<u8>, octra_node_protocol::program_record::Record)>,
     storage: BTreeMap<Vec<u8>, StorageTable>,
     circles: BTreeMap<Vec<u8>, StorageTable>,
 }
@@ -74,6 +75,20 @@ impl Journal {
             .iter()
             .rev()
             .find(|entry| entry.meta.address == address)
+    }
+    pub fn add_record(
+        &mut self,
+        address: &[u8],
+        record: octra_node_protocol::program_record::Record,
+    ) -> Result<()> {
+        if self.records.iter().any(|(key, _)| key == address) {
+            return Err(Error::unavailable("program record already staged"));
+        }
+        self.records.push((address.to_vec(), record));
+        Ok(())
+    }
+    pub fn records(&self) -> &[(Vec<u8>, octra_node_protocol::program_record::Record)] {
+        &self.records
     }
     pub fn storage(&self, address: &[u8]) -> Option<&StorageTable> {
         self.storage.get(address)
@@ -132,6 +147,16 @@ impl Journal {
             )
             .map_err(Error::unavailable)?;
             store::save_abi(state, &upgrade.meta)?;
+        }
+        for (address, record) in &self.records {
+            octra_node_protocol::program_record::source::check(record).map_err(Error::from)?;
+            let meta = store::meta(&state.snapshot(), address)?;
+            if meta.as_ref().map(|meta| &meta.code_hash) != Some(&record.code_hash) {
+                return Err(Error::unavailable("program record code changed"));
+            }
+            state
+                .set(&[b"contracts", address, b"record"], record.encode())
+                .map_err(Error::unavailable)?;
         }
         for (address, values) in &self.storage {
             store::save_storage(state, address, values)?;

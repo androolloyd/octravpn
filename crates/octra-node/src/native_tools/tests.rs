@@ -30,7 +30,9 @@ fn absent(pid: u32) -> bool {
         .success()
 }
 async fn child_pid(path: &Path) -> u32 {
-    tokio::time::timeout(Duration::from_secs(5), async {
+    // Process startup can be delayed by concurrent proof generation. This is
+    // only the startup marker wait; cancellation/reaping deadlines stay strict.
+    tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(raw) = fs::read_to_string(path) {
                 if let Ok(pid) = raw.trim().parse() {
@@ -80,7 +82,7 @@ async fn native_tool_timeout_and_output_overflow_reap_the_actual_child() {
                 Bounds {
                     // Overflow tests output bounding/reaping, not startup
                     // latency. Concurrent proof suites can delay the shell.
-                    timeout: Duration::from_secs(if overflow { 10 } else { 1 }),
+                    timeout: Duration::from_secs(if overflow { 30 } else { 1 }),
                     max_output: 100,
                 },
             )
@@ -149,7 +151,7 @@ async fn cancelling_caller_retains_writer_ownership_until_child_is_reaped() {
     let (mut tool, _) = backend(temp.path(), "printf '%s' $$ > \"$2\"; exec /bin/sleep 30");
     tool.tool = NativeTool::VoteFloor;
     let pid_file = temp.path().join("pid");
-    let task = tokio::spawn({
+    let mut task = tokio::spawn({
         let pid_file = pid_file.clone();
         let dropped = dropped.clone();
         async move {
@@ -178,7 +180,10 @@ async fn cancelling_caller_retains_writer_ownership_until_child_is_reaped() {
             .await
         }
     });
-    let pid = child_pid(&pid_file).await;
+    let pid = tokio::select! {
+        pid = child_pid(&pid_file) => pid,
+        result = &mut task => panic!("native tool exited before its startup marker: {result:?}"),
+    };
     assert!(NativeDirectoryOwner::acquire(&directory).is_err());
     task.abort();
     assert!(task.await.unwrap_err().is_cancelled());

@@ -145,7 +145,7 @@ struct Input {
     current: Vec<u8>,
     #[serde(with = "bytes")]
     key: Vec<u8>,
-    profile: [u8; 4],
+    profile: [u8; 6],
 }
 mod bytes {
     use base64::Engine as _;
@@ -187,7 +187,14 @@ impl Input {
             1 => ResultPolicy::Recoverable,
             _ => return Err("worker result invalid".into()),
         };
+        let boolean = |i: usize| match self.profile[i] {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err("worker key profile invalid".to_owned()),
+        };
         Ok(Profile {
+            keyed: boolean(4)?,
+            registered: boolean(5)?,
             fields,
             strict,
             math,
@@ -234,6 +241,8 @@ impl Task {
                 u8::from(profile.strict),
                 u8::from(profile.math == ScalarRule::Wide),
                 u8::from(profile.result == ResultPolicy::Recoverable),
+                u8::from(profile.keyed),
+                u8::from(profile.registered),
             ],
         };
         if input.key.len() > 8 * 1024 * 1024 || input.current.len() > 16 * 1024 * 1024 {

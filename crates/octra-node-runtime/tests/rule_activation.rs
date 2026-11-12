@@ -8,6 +8,7 @@ use octra_node_runtime::{
     state_batch::StateBatch, validator_epoch::BoundFold, validator_transaction::EpochFold,
 };
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 fn raw(v: &Value) -> Vec<u8> {
     STANDARD.decode(v.as_str().unwrap()).unwrap()
@@ -99,7 +100,7 @@ fn run(input: &Value, expected: &Value) -> Value {
                 }
             );
             json!({
-                "modes": ([c.mode,c.ready_mode,c.ready_ref_mode,c.live_mode,c.seat_mode,c.open_mode,c.account_mode,c.standard_mode,c.plan_mode,c.exit_mode,c.ready_exec_mode,c.program_mode,c.fhe_work,c.proof_exec,c.vm_bytes,c.wasm_float].map(mode)),
+                "modes": ([c.mode,c.ready_mode,c.ready_ref_mode,c.live_mode,c.seat_mode,c.open_mode,c.account_mode,c.standard_mode,c.plan_mode,c.exit_mode,c.ready_exec_mode,c.program_mode,c.fhe_work,c.proof_exec,c.vm_bytes,c.wasm_float,c.proof_key,c.program_records,c.duty_marks].map(mode)),
                 "overlap":c.program_overlap,"math":c.math,
                 "prune":c.cap_mode == octra_node_protocol::validator::set_fold::CapMode::Prune,
                 "config":c.ready_config_hash.as_deref().map(b64),
@@ -110,7 +111,7 @@ fn run(input: &Value, expected: &Value) -> Value {
     };
     json!({
         "plans":plans.iter().map(|p| p.as_ref().map(|p| json!([p.anchor_epoch,b64(&p.anchor_state_root),p.activation_epoch]))).collect::<Vec<_>>(),
-        "modes":ALL.map(|r| result(graph.mode(r,epoch,&root_at),mode)),
+        "modes":ALL.iter().map(|r| result(graph.mode(*r,epoch,&root_at),mode)).collect::<Vec<_>>(),
         "overlap":result(graph.program_overlap(epoch,&root_at),|v| json!(v)),
         "profiles":rules::profile_epochs(&chain),"live":rules::live_chain(&chain),
         "id":b64(&rules::consensus_id(&chain,epoch)),
@@ -119,16 +120,43 @@ fn run(input: &Value, expected: &Value) -> Value {
     })
 }
 #[test]
-fn native_anchored_rules_and_bound_validator_context() {
+fn current_native_anchored_rules_and_bound_validator_context() {
     let fixtures: Value =
-        serde_json::from_str(include_str!("fixtures/rule-activation.json")).unwrap();
-    let sources: Value =
-        serde_json::from_str(include_str!("../../../docs/rust-node/source-map.json")).unwrap();
+        serde_json::from_str(include_str!("fixtures/rule-activation-c49.json")).unwrap();
+    let sources: Value = serde_json::from_str(include_str!(
+        "../../../docs/rust-node/source-map-candidate.json"
+    ))
+    .unwrap();
     assert_eq!(fixtures["upstream_commit"], sources["upstream_commit"]);
-    assert_eq!(fixtures["source_sha256"], sources["files"]);
+    for (path, hash) in fixtures["source_sha256"].as_object().unwrap() {
+        assert_eq!(&sources["files"][path], hash, "candidate source {path}");
+    }
+    assert_eq!(
+        fixtures["oracle_sha256"],
+        hex::encode(Sha256::digest(include_bytes!(
+            "../../../scripts/node-port/rule-activation-oracle.ml"
+        )))
+    );
+    assert_eq!(
+        fixtures["runner_sha256"],
+        hex::encode(Sha256::digest(include_bytes!(
+            "../../../scripts/node-port/candidate-rule-activation-oracle.py"
+        )))
+    );
+    let historical_bytes = include_bytes!("fixtures/rule-activation.json");
+    assert_eq!(
+        fixtures["historical_fixture_sha256"],
+        hex::encode(Sha256::digest(historical_bytes))
+    );
+    let historical: Value = serde_json::from_slice(historical_bytes).unwrap();
     let cases = fixtures["cases"].as_array().unwrap();
     assert_eq!(cases.len(), 450);
-    for (i, case) in cases.iter().enumerate() {
+    for (i, (case, original)) in cases
+        .iter()
+        .zip(historical["cases"].as_array().unwrap())
+        .enumerate()
+    {
+        assert_eq!(case["input"], original["input"], "historical input {i}");
         assert_eq!(
             run(&case["input"], &case["expected"]),
             case["expected"],

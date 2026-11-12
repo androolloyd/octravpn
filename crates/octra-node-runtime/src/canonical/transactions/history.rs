@@ -18,6 +18,8 @@ pub struct HistoryQuery {
     pub hash: Option<Vec<u8>>,
     pub token_only: bool,
     pub ascending: bool,
+    /// Suppress private operations from address-linked public rejection reads.
+    pub public: bool,
 }
 pub struct HistoryPage<T = (Head, NativeTransaction)> {
     pub total: u64,
@@ -429,8 +431,8 @@ impl Reader {
             .map_err(error)?;
         // Like native rejected storage, the newest rejection for a hash replaces
         // earlier observations before address/epoch pagination is applied.
-        let total:i64=sqlx::query_scalar("SELECT count(*) FROM node_history_rejections r JOIN node_epochs e ON e.sequence=r.sequence WHERE r.sequence<=? AND NOT EXISTS(SELECT 1 FROM node_history_rejections newer WHERE newer.hash=r.hash AND newer.sequence<=? AND (newer.sequence>r.sequence OR (newer.sequence=r.sequence AND newer.position>r.position))) AND (? IS NULL OR r.sender=? OR r.target=?) AND (? IS NULL OR json_extract(CAST(e.head AS TEXT),'$.cursor.epoch')=?) AND (? IS NULL OR r.hash=?)")
-            .bind(prefix).bind(prefix).bind(address).bind(address).bind(address).bind(epoch).bind(epoch).bind(hash).bind(hash).fetch_one(&mut *read).await.map_err(error)?;
+        let total:i64=sqlx::query_scalar("SELECT count(*) FROM node_history_rejections r JOIN node_epochs e ON e.sequence=r.sequence WHERE r.sequence<=? AND NOT EXISTS(SELECT 1 FROM node_history_rejections newer WHERE newer.hash=r.hash AND newer.sequence<=? AND (newer.sequence>r.sequence OR (newer.sequence=r.sequence AND newer.position>r.position))) AND (? IS NULL OR ((?=0 OR json_extract(CAST(r.receipt AS TEXT),'$.tx.op_type') NOT IN ('stealth','claim')) AND (r.sender=? OR r.target=?))) AND (? IS NULL OR json_extract(CAST(e.head AS TEXT),'$.cursor.epoch')=?) AND (? IS NULL OR r.hash=?)")
+            .bind(prefix).bind(prefix).bind(address).bind(query.public).bind(address).bind(address).bind(epoch).bind(epoch).bind(hash).bind(hash).fetch_one(&mut *read).await.map_err(error)?;
         if total == 0 && query.hash.is_some() && self.anchor().epoch.0 != 0 {
             return Err(
                 error("rejection absence before snapshot checkpoint is unavailable").into(),
@@ -445,8 +447,8 @@ impl Reader {
                 .ok_or_else(|| error("rejection offset exhausted"))?;
             let mut read = self.pool.begin().await.map_err(error)?;
             read_prefix(self, &mut read, head, complete).await?;
-            let row=sqlx::query("SELECT r.hash,r.sequence,r.position,r.sender,r.target,r.receipt,r.digest,r.observed_at FROM node_history_rejections r JOIN node_epochs e ON e.sequence=r.sequence WHERE r.sequence<=? AND NOT EXISTS(SELECT 1 FROM node_history_rejections newer WHERE newer.hash=r.hash AND newer.sequence<=? AND (newer.sequence>r.sequence OR (newer.sequence=r.sequence AND newer.position>r.position))) AND (? IS NULL OR r.sender=? OR r.target=?) AND (? IS NULL OR json_extract(CAST(e.head AS TEXT),'$.cursor.epoch')=?) AND (? IS NULL OR r.hash=?) ORDER BY CASE WHEN ? THEN r.sequence END ASC,CASE WHEN ? THEN r.hash END ASC,r.sequence DESC,r.hash DESC LIMIT 1 OFFSET ?")
-                .bind(prefix).bind(prefix).bind(address).bind(address).bind(address).bind(epoch).bind(epoch).bind(hash).bind(hash)
+            let row=sqlx::query("SELECT r.hash,r.sequence,r.position,r.sender,r.target,r.receipt,r.digest,r.observed_at FROM node_history_rejections r JOIN node_epochs e ON e.sequence=r.sequence WHERE r.sequence<=? AND NOT EXISTS(SELECT 1 FROM node_history_rejections newer WHERE newer.hash=r.hash AND newer.sequence<=? AND (newer.sequence>r.sequence OR (newer.sequence=r.sequence AND newer.position>r.position))) AND (? IS NULL OR ((?=0 OR json_extract(CAST(r.receipt AS TEXT),'$.tx.op_type') NOT IN ('stealth','claim')) AND (r.sender=? OR r.target=?))) AND (? IS NULL OR json_extract(CAST(e.head AS TEXT),'$.cursor.epoch')=?) AND (? IS NULL OR r.hash=?) ORDER BY CASE WHEN ? THEN r.sequence END ASC,CASE WHEN ? THEN r.hash END ASC,r.sequence DESC,r.hash DESC LIMIT 1 OFFSET ?")
+                .bind(prefix).bind(prefix).bind(address).bind(query.public).bind(address).bind(address).bind(epoch).bind(epoch).bind(hash).bind(hash)
                 .bind(query.ascending).bind(query.ascending).bind(i64::try_from(at).map_err(error)?).fetch_optional(&mut *read).await.map_err(error)?;
             let Some(row) = row else {
                 read.commit().await.map_err(error)?;

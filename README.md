@@ -10,10 +10,10 @@ commission**.
 [Documentation](docs/README.md) · [Node status](docs/rust-node/status.md) ·
 [Payment model](docs/architecture/circle-prepaid.md) · [octra.to](https://octra.to)
 
-> **Devnet alpha candidate.** Funded private two-hop traffic, recovery,
-> exhaustion and accounting pass in isolated Linux kernels. The public operator
-> is staged; restricted ingress activation and the funded public canary are still required
-> before inviting testers. Mainnet is not qualified.
+> **Devnet alpha candidate.** The upstream update passes local node and native comparison tests.
+> Earlier isolated funded-traffic results do not qualify this build. Sustained
+> public sync and the funded public canary remain required before inviting testers.
+> Mainnet is not qualified.
 
 ## What it does
 
@@ -30,9 +30,9 @@ commission**.
   through preceding tunnels. Shielded payments and funded private routes remain
   experimental and require their own qualification.
 
-The integrated node follows the adopted upstream Octra protocol. Full behavioral
-parity is still being checked; implementation and qualification evidence are
-recorded in the [node status](docs/rust-node/status.md).
+The current implementation candidate follows Octra lite_node `c49de45`.
+Historical replay fixtures retain their original source pins. Full behavioral
+parity and deployment qualification are tracked in the [node status](docs/rust-node/status.md).
 
 ## How payment works
 

@@ -6,7 +6,7 @@ use super::{
 };
 use rand::rngs::OsRng;
 use tokio::{
-    sync::{mpsc, Semaphore},
+    sync::mpsc,
     time::{Instant, MissedTickBehavior},
 };
 #[cfg(test)]
@@ -35,6 +35,8 @@ impl Drop for RunGuard {
             s.peers.clear();
             s.dialing.clear();
             s.record_dialing.clear();
+            s.accepting.clear();
+            s.resolved.clear();
             self.swarm.0.scope_applied.send_replace(u64::MAX);
         }
     }
@@ -43,6 +45,35 @@ struct DialGuard {
     swarm: Swarm,
     generation: u64,
     endpoint: Vec<u8>,
+}
+struct AcceptGuard {
+    swarm: Swarm,
+    generation: u64,
+    token: Arc<()>,
+    host: Vec<u8>,
+    grant: Option<Vec<u8>>,
+    started: std::time::Instant,
+}
+impl Drop for AcceptGuard {
+    fn drop(&mut self) {
+        let mut state = self.swarm.state();
+        state.accepting.release(&self.token);
+        if state.running && state.generation == self.generation {
+            let now = now();
+            let held = self.started.elapsed().as_secs_f64();
+            state
+                .guard
+                .report_hold(guard::Config::default(), now, &self.host, held);
+            if let Some(grant) = &self.grant {
+                state.guard.report_hold(
+                    guard::Config::default(),
+                    now,
+                    &[b"grant:".as_slice(), grant].concat(),
+                    held,
+                );
+            }
+        }
+    }
 }
 struct SessionCompletion {
     swarm: Swarm,
@@ -169,6 +200,52 @@ async fn dial(
         }
     }
     let proxy = swarm.state().proxy;
+    // Admission hints come only from configured bootstrap names or signed
+    // validator records. Preserve interface/proxy DNS policy when remembering IPs.
+    if proxy.is_none() && matches!(swarm.scope(), super::scope::Scope::Public) {
+        let known = {
+            let state = swarm.state();
+            swarm
+                .0
+                .config
+                .bootstrap
+                .iter()
+                .any(|boot| boot.host == endpoint.host)
+                || state
+                    .registry
+                    .host_key(now(), &endpoint.host, swarm.record_keys(&state))
+                    .is_some()
+        };
+        if known {
+            if let Ok(host) = std::str::from_utf8(&endpoint.host) {
+                if let Ok(Ok(addresses)) = tokio::time::timeout(
+                    Duration::from_secs(10),
+                    tokio::net::lookup_host((host, endpoint.port)),
+                )
+                .await
+                {
+                    let mut ips: Vec<_> = addresses
+                        .filter(std::net::SocketAddr::is_ipv4)
+                        .map(|address| address.ip().to_string().into_bytes())
+                        .collect();
+                    ips.sort();
+                    ips.dedup();
+                    ips.truncate(16);
+                    let mut state = swarm.state();
+                    if state.running && state.generation == generation {
+                        let now = now();
+                        state
+                            .resolved
+                            .retain(|(name, _, until)| *until > now && *name != endpoint.host);
+                        state.resolved.truncate(127);
+                        state
+                            .resolved
+                            .insert(0, (endpoint.host.clone(), ips, now + 60.0));
+                    }
+                }
+            }
+        }
+    }
     let stream = match swarm.scope().connect(endpoint, proxy).await {
         Ok(stream) => {
             swarm.note(
@@ -201,11 +278,12 @@ async fn dial(
         );
         return false;
     };
+    let allowed = swarm.dial_keys(&swarm.state());
     let result = super::super::session::dial(
         stream,
         &local,
         &swarm.0.key,
-        &swarm.0.config.allowed_public_keys,
+        &allowed,
         &mut OsRng,
         swarm.0.config.timeouts,
     )
@@ -409,6 +487,8 @@ async fn transition(
     s.dialing.clear();
     s.record_dialing.clear();
     s.due.clear();
+    s.accepting.clear();
+    s.resolved.clear();
     s.scope = request.scope;
     s.scope_revision = request.revision;
     s.connections = diagnostics::Counters::default();
@@ -457,8 +537,6 @@ pub(super) async fn run(
     let (tx, mut rx) = mpsc::channel(64);
     let spawn = Spawner(tx);
     let mut stop = swarm.0.stop.subscribe();
-    // This is an operational resource ceiling, independent of peer roles and consensus.
-    let pending = Arc::new(Semaphore::new(512));
     let mut reconnect = tokio::time::interval_at(
         Instant::now() + Duration::from_secs(10),
         Duration::from_secs(10),
@@ -500,27 +578,45 @@ pub(super) async fn run(
                         if !swarm.scope().accepts(&stream)? { continue; }
                         swarm.note(generation,Direction::Inbound,Phase::Transport,Outcome::Accepted);
                         attempt=0;next_accept=Instant::now();
-                        let key=address.ip().to_string().into_bytes();
-                        let allowed={let mut s=swarm.state();
-                            if let Err(reason)=s.guard.admit(guard::Config::default(),now(),&key){
+                        let (key, network)=super::super::accept::address(address);
+                        let (allowed,permit)={let mut s=swarm.state();
+                            let now=now();
+                            let grant=swarm.host_grant(&s,&key,now);
+                            let known=grant.is_some();
+                            let grant=grant.filter(|grant| !s.guard.holding(now,&[b"grant:".as_slice(),grant].concat()));
+                            let grant=s.accepting.select(grant);
+                            if let Err(reason)=s.guard.admit_known(guard::Config::default(),now,&key,known){
+                                if known { s.guard.note_drop(guard::Config::default(),now,&key,reason.as_bytes()); }
                                 s.connections.record(Direction::Inbound,Phase::Admission,if reason=="banned"{Outcome::Banned}else{Outcome::ConnectionBudget});
                                 continue;
                             }
                             if !(swarm.capacity(&s,PeerClass::Validator)||(swarm.accepts_observers(&s)&&swarm.capacity(&s,PeerClass::Observer))){
+                                if known { s.guard.note_drop(guard::Config::default(),now,&key,b"peer_capacity"); }
                                 s.connections.record(Direction::Inbound,Phase::Admission,Outcome::Capacity);
                                 continue;
                             }
-                            if swarm.accepts_observers(&s){Vec::new()}else{swarm.0.config.allowed_public_keys.clone()}
+                            let Some(token)=s.accepting.acquire(key.clone(),network,grant.clone()) else {
+                                if known { s.guard.note_drop(guard::Config::default(),now,&key,b"handshake_capacity"); }
+                                s.connections.record(Direction::Inbound,Phase::Admission,Outcome::PendingLimit);
+                                continue;
+                            };
+                            let allowed=swarm.handshake_keys(&s);
+                            let permit=AcceptGuard{swarm:swarm.clone(),generation,token,host:key.clone(),grant,started:std::time::Instant::now()};
+                            (allowed,permit)
                         };
-                        let Ok(permit)=pending.clone().try_acquire_owned()else{swarm.note(generation,Direction::Inbound,Phase::Admission,Outcome::PendingLimit);continue;};
                         let owner=swarm.clone();let handler=handler.clone();let spawn=spawn.clone();
                         tasks.spawn(async move{
                             let Ok(local)=owner.hello(port)else{owner.note(generation,Direction::Inbound,Phase::Handshake,Outcome::Config);return;};
-                            let result=super::super::session::accept(stream,&local,&owner.0.key,&allowed,&mut OsRng,owner.0.config.timeouts).await;
+                            let result=tokio::time::timeout(super::super::accept::WAIT,
+                                super::super::session::accept(stream,&local,&owner.0.key,&allowed,&mut OsRng,owner.0.config.timeouts)).await
+                                .unwrap_or_else(|_| Err("handshake timeout".into()));
                             drop(permit);
                             match result{Ok(connection)=>{owner.note(generation,Direction::Inbound,Phase::Handshake,Outcome::Accepted);launch(owner,generation,Direction::Inbound,connection,key.clone(),handler,spawn).await;},Err(e)=>{
                                 owner.note(generation,Direction::Inbound,Phase::Handshake,diagnostics::failure(Phase::Handshake,&e));
-                                if let Some(reason)=guard::handshake_penalty(e.as_bytes()){owner.state().guard.report(guard::Config::default(),now(),&key,reason.as_bytes());}
+                                if let Some(reason)=guard::handshake_penalty(e.as_bytes()){
+                                    let mut state=owner.state();
+                                    if state.running && state.generation==generation { state.guard.report(guard::Config::default(),now(),&key,reason.as_bytes()); }
+                                }
                             }}
                         });
                     }

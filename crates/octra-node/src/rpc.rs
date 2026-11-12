@@ -34,6 +34,7 @@ use std::{
 use tokio::sync::{mpsc, watch};
 mod compute;
 mod context;
+mod public_history;
 pub(crate) use context::{Context, SingleOptions};
 pub(crate) mod grpc;
 pub(crate) mod http;
@@ -156,6 +157,17 @@ impl<A: Host> Submission<A> {
                 &peer.hello().node_id,
                 &frame.payload,
                 p2p_transaction::Rules {
+                    signing: octra_node_protocol::tx_signature::at(
+                        self.node.store.chain().chain_id.as_bytes(),
+                        duty.map_or(0, |(head, _)| head + 1),
+                    ),
+                    duty_marks: duty.is_some_and(|(head, _)| {
+                        octra_node_protocol::rules::at(
+                            self.node.store.chain().chain_id.as_bytes(),
+                            octra_node_protocol::rules::Rule::DutyMarks,
+                            head + 1,
+                        ) == octra_node_protocol::transaction::RuleMode::Active
+                    }),
                     max_drift: 300.,
                     duty,
                     bft: true,
@@ -164,7 +176,24 @@ impl<A: Host> Submission<A> {
                 continue;
             }
             for effect in captured.effects {
-                p2p_transaction::deliver(&self.swarm, &peer, effect).await?;
+                let lookup = self.clone();
+                p2p_transaction::deliver(&self.swarm, &peer, effect, move |hash| {
+                    lookup
+                        .pending
+                        .ingress_read(|pool| pool.find(hash).cloned())
+                        .ok()
+                        .flatten()
+                        .flatten()
+                        .or_else(|| {
+                            lookup
+                                .executor
+                                .shared_transactions()
+                                .find(hash)
+                                .ok()
+                                .flatten()
+                        })
+                })
+                .await?;
             }
             for tx in captured.transactions {
                 if let Ok(hash) = self.submit_peer(tx).await {

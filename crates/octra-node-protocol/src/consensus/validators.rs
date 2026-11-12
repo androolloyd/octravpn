@@ -34,6 +34,7 @@ fn build(weighted: bool, mut entries: Vec<(Validator, BigInt)>) -> ValidatorSet 
         },
         total_weight,
         weighted,
+        authors: None,
     }
 }
 impl ValidatorSet {
@@ -130,12 +131,57 @@ impl ValidatorSet {
                 .collect(),
         ))
     }
-    pub fn for_epoch(&self, chain_id: &[u8], epoch_id: i64) -> Result<Self, Error> {
-        if policy::quorum_active(chain_id, epoch_id) {
-            self.count_capped()
-        } else {
-            Ok(self.clone())
+    pub fn for_rule(&self, rule: policy::Rule) -> Result<Self, Error> {
+        match rule {
+            policy::Rule::Capped => self.count_capped(),
+            _ => Ok(self.clone()),
         }
+    }
+    pub fn for_policy(&self, policy: policy::QuorumPolicy, epoch: i64) -> Result<Self, Error> {
+        let rule = policy.select(epoch);
+        let mut set = self.clone();
+        if set
+            .authors
+            .as_ref()
+            .is_some_and(|(height, _)| *height != epoch || rule != policy::Rule::Stake)
+        {
+            set.authors = None;
+        }
+        set.for_rule(rule)
+    }
+    pub fn for_epoch(&self, chain_id: &[u8], epoch_id: i64) -> Result<Self, Error> {
+        self.for_policy(policy::QuorumPolicy::for_chain(chain_id), epoch_id)
+    }
+    pub fn author_entry(
+        &self,
+        chain: &[u8],
+        epoch: i64,
+        address: &[u8],
+    ) -> Option<(&Validator, &BigInt)> {
+        if let Some(member) = self.validators.iter().find(|v| v.address == address) {
+            return self.weight(address).map(|weight| (member, weight));
+        }
+        self.authors
+            .as_ref()
+            .filter(|(height, _)| {
+                *height == epoch && policy::quorum_rule(chain, epoch) == policy::Rule::Stake
+            })
+            .and_then(|(_, entries)| entries.iter().find(|(member, _)| member.address == address))
+            .map(|(member, weight)| (member, weight))
+    }
+    pub fn is_author(&self, chain: &[u8], epoch: i64, address: &[u8]) -> bool {
+        self.author_entry(chain, epoch, address).is_some()
+    }
+    pub fn source_set(&self, chain: &[u8], epoch: i64) -> Option<Self> {
+        let (_, authors) = self.authors.as_ref().filter(|(height, _)| {
+            *height == epoch && policy::quorum_rule(chain, epoch) == policy::Rule::Stake
+        })?;
+        let mut entries = self.entries().ok()?;
+        entries.extend(authors.clone());
+        Self::weighted(entries).ok()
+    }
+    pub fn weights_valid(&self, rule: policy::Rule) -> bool {
+        rule != policy::Rule::Stake || self.weighted
     }
     pub fn signed_weight(&self, signers: &[Bytes]) -> Option<BigInt> {
         let mut seen = BTreeSet::new();
@@ -164,39 +210,69 @@ impl ValidatorSet {
     }
     pub fn has_quorum_at(
         &self,
-        chain_id: &[u8],
-        epoch_id: i64,
+        chain: &[u8],
+        epoch: i64,
         signers: &[Bytes],
     ) -> Result<bool, Error> {
-        let effective = self.for_epoch(chain_id, epoch_id)?;
-        Ok(if policy::quorum_active(chain_id, epoch_id) {
-            effective.has_quorum(signers)
-        } else {
-            effective.has_weight_quorum(signers)
-        })
+        self.has_quorum_for_policy(policy::QuorumPolicy::for_chain(chain), epoch, signers)
     }
-    pub fn quorum_reached_at(
+    pub fn has_quorum_for_policy(
         &self,
-        chain_id: &[u8],
-        epoch_id: i64,
+        policy: policy::QuorumPolicy,
+        epoch: i64,
+        signers: &[Bytes],
+    ) -> Result<bool, Error> {
+        let rule = policy.select(epoch);
+        let effective = self.for_rule(rule)?;
+        Ok(self.weights_valid(rule)
+            && match rule {
+                policy::Rule::Prior => effective.has_weight_quorum(signers),
+                _ => effective.has_quorum(signers),
+            })
+    }
+    pub fn quorum_reached_at(&self, chain: &[u8], epoch: i64, count: i64, weight: &BigInt) -> bool {
+        self.quorum_reached_for_policy(policy::QuorumPolicy::for_chain(chain), epoch, count, weight)
+    }
+    pub fn quorum_reached_for_policy(
+        &self,
+        policy: policy::QuorumPolicy,
+        epoch: i64,
         count: i64,
         weight: &BigInt,
     ) -> bool {
-        weight >= &self.quorum_weight
-            && (!policy::quorum_active(chain_id, epoch_id) || count >= self.quorum)
+        let rule = policy.select(epoch);
+        self.weights_valid(rule)
+            && weight >= &self.quorum_weight
+            && (rule == policy::Rule::Prior || count >= self.quorum)
     }
     pub fn round_skip_weight(&self) -> BigInt {
         &self.total_weight - &self.quorum_weight + 1
     }
     pub fn round_skip_reached_at(
         &self,
-        chain_id: &[u8],
-        epoch_id: i64,
+        chain: &[u8],
+        epoch: i64,
         count: i64,
         weight: &BigInt,
     ) -> bool {
-        weight >= &self.round_skip_weight()
-            && (!policy::quorum_active(chain_id, epoch_id) || count > self.f)
+        self.round_skip_reached_for_policy(
+            policy::QuorumPolicy::for_chain(chain),
+            epoch,
+            count,
+            weight,
+        )
+    }
+    pub fn round_skip_reached_for_policy(
+        &self,
+        policy: policy::QuorumPolicy,
+        epoch: i64,
+        count: i64,
+        weight: &BigInt,
+    ) -> bool {
+        let rule = policy.select(epoch);
+        self.weights_valid(rule)
+            && weight >= &self.round_skip_weight()
+            && (rule == policy::Rule::Prior || count > self.f)
     }
     pub fn leader(&self, epoch_id: i64, round: i64) -> Result<&Validator, Error> {
         if self.n <= 0 {
@@ -262,7 +338,7 @@ impl ValidatorSet {
             && if proposal.valid_round.is_none() {
                 proposal.header.creator_addr == proposal.proposer
             } else {
-                self.is_validator(&proposal.header.creator_addr)
+                self.is_author(chain_id, proposal.epoch_id, &proposal.header.creator_addr)
             })
     }
 }

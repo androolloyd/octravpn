@@ -67,6 +67,7 @@ mod finality_host;
 
 fn rules() -> WasmRules {
     WasmRules {
+        proof_key: false,
         wasm_float: false,
         proof_exec: false,
         math: false,
@@ -552,6 +553,7 @@ fn add_rejected_call(view: &Committed, executed: &mut ExecutedEpoch) {
             storage_proof: true,
             fhe_work: false,
             object_cost: false,
+            program_inputs: false,
         },
         view.head().cursor.epoch.0 as i64 + 1,
         1.,

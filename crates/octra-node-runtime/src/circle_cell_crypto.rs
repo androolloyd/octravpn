@@ -47,6 +47,7 @@ pub(crate) fn verify(
     amount: &[u8],
     strict: bool,
     math: ScalarRule,
+    keyed: bool,
 ) -> Result<(), Error> {
     if cipher.is_empty() || cipher.len() > 96 * 1024 {
         return Err(Error::rejected(
@@ -56,7 +57,7 @@ pub(crate) fn verify(
     if encoded_proof.len() > 64 * 1024 {
         return Err(Error::rejected("proof exceeds verifier resource policy"));
     }
-    let public = crypto::proof_pubkey(public)?;
+    let public = crypto::proof_pubkey_keyed(public, keyed)?;
     let cipher = crypto::decode_cipher(cipher, strict, strict)?;
     let expected = commitment(expected)?;
     let shape = cipher.shape().map_err(Error::Unavailable)?;
@@ -82,14 +83,14 @@ pub(crate) fn verify(
             }
         }
         Kind::Zero => verified(
-            zero::verify_zero(&public, &cipher, &proof(encoded_proof, false)?, math),
+            zero::verify_zero_keyed(&public, &cipher, &proof(encoded_proof, false)?, math, keyed),
             "zero proof verification failed",
         ),
         Kind::BoundZero => {
             let proof = proof(encoded_proof, true)?;
             let amount = commitment(amount)?;
             verified(
-                zero::verify_bound(
+                zero::verify_bound_keyed(
                     &public,
                     &cipher,
                     &proof,
@@ -97,6 +98,7 @@ pub(crate) fn verify(
                     BoundProfile::Standard,
                     strict,
                     math,
+                    keyed,
                 ),
                 "bound zero proof verification failed",
             )
@@ -116,7 +118,7 @@ pub(crate) fn verify(
                 }
             })?;
             verified(
-                zero::verify_bound(
+                zero::verify_bound_keyed(
                     &public,
                     &cipher,
                     &proof,
@@ -124,6 +126,7 @@ pub(crate) fn verify(
                     BoundProfile::Range,
                     strict,
                     math,
+                    keyed,
                 ),
                 "bound range proof verification failed",
             )

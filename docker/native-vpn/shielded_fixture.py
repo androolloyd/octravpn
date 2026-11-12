@@ -30,7 +30,7 @@ def install(index, application, pool):
     config['shielded'] = {
         'application': application, 'pool': pool,
         'wallet': str(path.parent / 'private-wallet'), 'master_key': str(master),
-        'purchases': {'max_channels': 16, 'max_requests': 1024,
+        'purchases': {'allowed_receipt_keys': [], 'max_channels': 16, 'max_requests': 1024,
                       'max_ceiling_ou': 100_000_000, 'max_invoice_lifetime_ms': 120_000},
         'ip_tunnel': {'name': multi.ENTRY if index == 0 else multi.EXIT},
     }
@@ -40,6 +40,21 @@ def install(index, application, pool):
     g.start(index)
     multi.ready(index, config['shielded']['ip_tunnel']['name'], 1)
     return config
+
+
+def admit(index, keys):
+    # Fixture-only trusted orchestration, never a public admission endpoint.
+    assert 1 <= len(keys) <= 4
+    assert all(len(key) == 32 and all(type(b) is int and 0 <= b <= 255 for b in key) for key in keys)
+    path = g.ROOT / f'chain/node-{index}/config.json'
+    config = json.loads(path.read_text())
+    config['shielded']['purchases']['allowed_receipt_keys'] = keys
+    before = g.epoch(index)
+    g.stop(index)
+    atomic(path, config)
+    g.start(index)
+    multi.ready(index, config['shielded']['ip_tunnel']['name'], before)
+    return {'admitted': len(keys)}
 
 
 def extra_links(role, mapping):
@@ -118,6 +133,7 @@ class A(multi.A):
         atomic(g.EVIDENCE / 'shielded-ready.json', self.private)
 
     def command(self, request):
+        if request['action'] == 'admit': return admit(0, request['keys'])
         if request['action'] == 'accounting': return observe('A')
         if request['action'] == 'client_checkpoint':
             g.until(lambda: g.epoch(3) >= self.private['minimum_epoch'], 240, 'client imports pool and tariff history')
@@ -168,6 +184,7 @@ class B(multi.B):
                                                      'epoch': g.epoch(1)})
 
     def command(self, request):
+        if request['action'] == 'admit': return admit(1, request['keys'])
         if request['action'] == 'accounting': return observe('B')
         if request['action'] == 'hold_private':
             self.control.hold_status(); return {'held': True}

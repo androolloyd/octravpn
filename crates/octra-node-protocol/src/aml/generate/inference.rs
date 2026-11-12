@@ -7,6 +7,8 @@ use super::{
     Syntax, Type, TypeId, UnOp,
 };
 use num_traits::Zero;
+use std::collections::{BTreeMap, BTreeSet};
+type CacheKey = (Name, Vec<Local>);
 
 #[derive(Clone)]
 struct Env {
@@ -30,6 +32,7 @@ enum One {
     List,
 }
 enum Task {
+    ConstantDone(CacheKey, BTreeSet<Name>),
     Infer(ExprId, Env),
     Unary(UnOp),
     Binary(BinOp, ExprId, ExprId),
@@ -127,6 +130,13 @@ impl Generator<'_> {
         if self.code.is_protocol() {
             return self.protocol_infer(id);
         }
+        if *self.inferred_locals != *self.locals || self.inferred_pure != self.code.pure {
+            self.inferred_types.clear();
+            self.inferred_locals = self.locals.clone();
+            self.inferred_pure = self.code.pure;
+        }
+        let mut inferred = BTreeMap::<CacheKey, (TypeId, BTreeSet<Name>)>::new();
+        let mut used = BTreeSet::new();
         let root = Env {
             locals: self.locals.clone(),
             constants: Arc::new(vec![]),
@@ -135,6 +145,14 @@ impl Generator<'_> {
         let mut values: Vec<TypeId> = vec![];
         while let Some(task) = tasks.pop() {
             match task {
+                Task::ConstantDone(key, outer) => {
+                    let typ = *values.last().expect("constant inferred value");
+                    inferred.insert(key.clone(), (typ, used.clone()));
+                    if key.1 == *self.locals {
+                        self.inferred_types.insert(key.0, (typ, used.clone()));
+                    }
+                    used.extend(outer);
+                }
                 Task::Infer(id, mut env) => {
                     let typ = match self.nodes.expression(id).clone() {
                         Expr::Bool(_) => Type::Bool,
@@ -154,13 +172,34 @@ impl Generator<'_> {
                                         .concat(),
                                 ));
                             }
-                            if let Some(constant) =
-                                self.contract.consts.iter().find(|item| item.name == name)
-                            {
+                            if let Some(constant) = self.constant(&name) {
                                 if self.nodes.typ(constant.typ) == &Type::Void {
-                                    Arc::make_mut(&mut env.constants).push(name);
-                                    tasks.push(Task::Infer(constant.value, env));
+                                    let value = constant.value;
+                                    let key = (name.clone(), (*env.locals).clone());
+                                    let saved = if *env.locals == *self.locals {
+                                        self.inferred_types.get(&name)
+                                    } else {
+                                        None
+                                    }
+                                    .or_else(|| inferred.get(&key));
+                                    if let Some((typ, dependencies)) =
+                                        saved.filter(|(_, dependencies)| {
+                                            env.constants
+                                                .iter()
+                                                .all(|name| !dependencies.contains(name))
+                                        })
+                                    {
+                                        used.extend(dependencies.iter().cloned());
+                                        values.push(*typ);
+                                    } else {
+                                        let outer = std::mem::take(&mut used);
+                                        used.insert(name.clone());
+                                        Arc::make_mut(&mut env.constants).push(name);
+                                        tasks.push(Task::ConstantDone(key, outer));
+                                        tasks.push(Task::Infer(value, env));
+                                    }
                                 } else {
+                                    used.insert(name);
                                     values.push(constant.typ);
                                 }
                             } else if let Some(local) =
@@ -255,12 +294,7 @@ impl Generator<'_> {
                                 ));
                             }
                             if self.is_direct(&name) {
-                                if let Some(function) = self
-                                    .contract
-                                    .functions
-                                    .iter()
-                                    .find(|item| item.name == name)
-                                {
+                                if let Some(function) = self.function_by_name(&name) {
                                     values.push(function.ret);
                                     continue;
                                 }
@@ -331,12 +365,7 @@ impl Generator<'_> {
                                 tasks.push(Task::Infer(args[0], env));
                             } else if let Some(typ) = super::super::check::builtin(&name) {
                                 values.push(self.nodes.intern(typ));
-                            } else if let Some(function) = self
-                                .contract
-                                .functions
-                                .iter()
-                                .find(|item| item.name == name)
-                            {
+                            } else if let Some(function) = self.function_by_name(&name) {
                                 values.push(function.ret);
                             } else {
                                 return Err(self.code.located_error(

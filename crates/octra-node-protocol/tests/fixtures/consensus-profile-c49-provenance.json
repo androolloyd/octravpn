@@ -1,0 +1,1654 @@
+{
+  "upstream_commit": "c49de45cf49ebbc2e5c0697eb956cbcada5845e7",
+  "source_sha256": {
+    "circle_runtime/circle_runtime_storage.ml": "c9f6fdf2491452ac9046528c5cd97d2776f394640bc90441559ebb0e8c48138c",
+    "lib/consensus/c_epoch_time_policy.ml": "cf83184df409e6a34d0fa49943428f201400499278e06088ec1d1008bb1ce82a",
+    "lib/consensus/c_protocol.ml": "29e9eca729d6cf09572320f9585febda32031ef8b3b4c0cd594612af1437939d",
+    "lib/consensus/c_quorum_policy.ml": "0f452a0d87d5ed4d788054d2c88a5202b1da5ca6695040176ed29745865b23fd",
+    "lib/consensus/epoch_time.ml": "91d265f902559a670c1df60aa123022dc1be6b51b09315db262ede2b87f14f1d",
+    "lib/core/circle_private/circle_cell_transition.ml": "8ebab8d09dea3db6fb8ba4f21bd86b66e5cf5551ed4d0a033141b894bc378e03",
+    "lib/core/circle_wasm/circle_hfhe_transcript.ml": "895886bb0063907ef046ae31673ad8b207aa4108e115773a92f3d00a3cb1a4d4",
+    "lib/core/circle_wasm/circle_wasm_host.ml": "2f065ee171ff32eb6edf8023577b1bb2bf5a9c8cabe3a018eef03bd44d4dc1bd",
+    "lib/core/compute_bill.ml": "96313ba5143b96c17f3ffa97ff5b85ce41233c1db55b50d046e54bfc941ffd61",
+    "lib/core/crypto.ml": "b29d9cf2588a3dd5a593d6f418916cc77b491c4113bc063e1e6193638a3d716b",
+    "lib/core/emission_schedule.ml": "fb4c5cad4f1292c1885db6295771da806c5faacf2ab68ee523cb93547e424477",
+    "lib/core/fee_policy.ml": "5e89c35aa4a20c85c70f5da75bfbd4f89a490dbc4076add3e3e3a80344d0c88e",
+    "lib/core/fhe_image.ml": "cdb9b3c52800a1952360248866018a7c3e8e8b9b85bdc4fc5f966d90b14879e9",
+    "lib/core/preverify_receipt_policy.ml": "b3c7ca5f9423b707f2ae229c01a40e082639617f6370ae4365d03468920ad681",
+    "lib/core/private_ledger.ml": "16dce20c4b152e202ff9f813c2cd5ed51541c13da9cc954f2534fd24b39b602c",
+    "lib/core/private_result_policy.ml": "566afb926c9a15030b6aaf54c6e5cd7cf7d126be72a16ddb10ad075708664ac4",
+    "lib/core/private_transition.ml": "5af7dbeb588e8886dd7ab72a0e6afb8879907b249cb2724696d55e501be8d353",
+    "lib/core/pvac_registry.ml": "8276e9dbd86f4917285606dcda49b080a43271a9b35e1b3c2595634f214932fd",
+    "lib/core/resource_lanes.ml": "20311e2c96c464711765cd3f1f56ada6d803f36b6e4e49b92767929ae82b8c4b",
+    "lib/core/reward_policy.ml": "af1fdd6b384b75c1996d52de7b05777dca754b03a063fef4f9c26b148641a7a4",
+    "lib/core/rule_graph.ml": "60df74d8887bff1cb316aa45978048bb414accccee701a21914c683c1379cf84",
+    "lib/core/set_fold.ml": "3c2cbf2914e0e1ba9c2e1f815ecba897da11964b17eee9750df30dc071d2eeb7",
+    "lib/core/transaction.ml": "b7fed1a8d2442150b78aba6b0ebca7959d57f150230939d201a0623cb736533a",
+    "lib/core/tx_envelope.ml": "1e9d43bc615368784acf153e63790401a4283b2563940a8a64b7915fe22572c2",
+    "lib/core/tx_signature.ml": "850f53fde7283dc38eed3b8552257e70ae44976c44d4491cb5fdac3f2327e4e9",
+    "lib/core/tx_staging.ml": "826c3699e5308609fc99ee9402012ae788fdf15dc8101cb0116b4bcd115bb912",
+    "lib/core/validator_entry.ml": "7c241c55d87c22ded901db35abdba35b48c6f5329b3d6c67fff22dddef97f0d7",
+    "lib/core/validator_participation.ml": "1077e213ba406a3ad706a9c484c51d58da49145fb9ae4728a75f78e3d14b3173",
+    "lib/core/validator_policy.ml": "1c381e74f66c50e555e1ed7322f40f0203489bc4aa1930571ca32b4fa66e7529",
+    "lib/core/validator_ready_policy.ml": "5ac4ae25ddb530712b3df6854e6899803e8b49b680815c1246ec964f87f48e17",
+    "lib/vm/aml/analysis/c_braid.ml": "b245ac2bfaea58be7f48ed4e63c2a05ffa553640f70f5afdd132632b49aea6fe",
+    "lib/vm/aml/analysis/c_braid.mli": "df66a3283c5ab15676649a27b5eed79e27aa2b1d52baa378356e14efaff0875e",
+    "lib/vm/aml/analysis/c_check.ml": "032841e3e9640eb2a75d6ceebfe4d57bc247445cfc3d0df00d39b7c420503279",
+    "lib/vm/aml/analysis/c_check.mli": "143410fdf82f91a35d9784be1604fffa01e2f149a8dcc41e7b3e2685b6a42376",
+    "lib/vm/aml/analysis/c_eff.ml": "1102f17e6b5ae5fce386b6ad59b2bd1f03e4d1a3b18c468f60d9b4138ab62b90",
+    "lib/vm/aml/analysis/c_eff.mli": "c294f60547fe562854d8b1ffc3202f078b98fff57ab212760df608f890a52927",
+    "lib/vm/aml/analysis/c_ent.ml": "e92790ab9d79d6272bdecc60f2edea5ff65e4316d7241b8ffa569fdc7f04ae19",
+    "lib/vm/aml/analysis/c_ent.mli": "17502df321356a2da228d7763e8dc09c23be6a5a3e4a0cf874d67f2ccc250fbd",
+    "lib/vm/aml/analysis/c_fin.ml": "53d3b7914b074b4496007e5d537fb9611e58cc528530f4dd78c861ab63924ef2",
+    "lib/vm/aml/analysis/c_fin.mli": "6bff06488154ea928cc7ec575a3a00d9398a0db996a741055bea7e07d5fef074",
+    "lib/vm/aml/analysis/c_graph.ml": "e42cc8a8fef134818b89411aa3a9e5ba04804e5ee49b94c9724ed944dfebf669",
+    "lib/vm/aml/analysis/c_graph.mli": "a08a9120eb0b301abfbf3fecfab9aea1cfc65f61c466d1db714ce126bc4445af",
+    "lib/vm/aml/analysis/c_loom.ml": "2c4cc24ab85a1e1c3dd43262c0805cd79d185d2797bb3675b7ae078aa217b39b",
+    "lib/vm/aml/analysis/c_loom.mli": "80caa57f67383c45fe9575daeab8f6d01e6eb8414e0fd58052475d9206bbc800",
+    "lib/vm/aml/analysis/c_orbit.ml": "57a239de6d366a72694fd8d3f545345e18c7e8c897278bc7fba23b86c569a363",
+    "lib/vm/aml/analysis/c_orbit.mli": "29ff91690c18595ec7aa1fb12ea1f0d477eeac5a46ce8f9ff1147d1d93d87796",
+    "lib/vm/aml/analysis/c_perm.ml": "8a744a7a57574509ba96e4d5e4b52493127137dd6c233d2cb2c311907e879fcc",
+    "lib/vm/aml/analysis/c_perm.mli": "c10739038f7a0bed3db01ceb669a73806adb0c8015b4b611ef40d5f414941ab2",
+    "lib/vm/aml/analysis/c_quant.ml": "62de0bdfe6c32e67db4421505ca146b1cca604e02b372ac6f893a848028558bc",
+    "lib/vm/aml/analysis/c_quant.mli": "352aca2e8cc0e37006e2ae40ab07a1b50e7b0b8db285d8b870f153a62172294d",
+    "lib/vm/aml/analysis/c_rift.ml": "1104cea61c29019dec852148fde0d121f7af0a057a4af75f20eb945db9053457",
+    "lib/vm/aml/analysis/c_rift.mli": "d6b3a5a9bae8213bba766c923e2c4b267fe88837e431e7d626a84f5ca3827d8d",
+    "lib/vm/aml/analysis/c_wake.ml": "e1a194a565ceb8842552c0c69c36a2fefaabb45d13b9a187343eb723891b26c3",
+    "lib/vm/aml/analysis/c_wake.mli": "4a584c804affab59cd08a4ce137f2049df6cab34894115d86a131f3563051a77",
+    "lib/vm/aml/analysis/c_weave.ml": "9850d847c5c0f308dee50398238756343f5cc0fb8eb6aaad22f2be4a4c740e1f",
+    "lib/vm/aml/analysis/c_weave.mli": "fbc9944077d42fe5af66a24d3f2c41322725cb9f2e1b77368ad2e0ed635e0f57",
+    "lib/vm/aml/artifact/codec/c_bin.ml": "99333e7f378355e84be20e19576b71fa4abaf317979c707b32c21d2a6089fa91",
+    "lib/vm/aml/artifact/codec/c_bin.mli": "5d96c39523e5fc4becd5b74201b4979daafd2edfc73eec7a560f339fa8a8f92d",
+    "lib/vm/aml/artifact/codec/c_pbin.ml": "d8a97ee7177cb0dd9d743300af97c31e2e50b5f424ae9fb12fed340c6f9f6f2e",
+    "lib/vm/aml/artifact/codec/c_pbin.mli": "2740d48d7795bdf16125d01b67fb379751d88b79acbd607016771d99e3307667",
+    "lib/vm/aml/artifact/codec/c_sbin.ml": "a4119d8cde881ba95a11c84447008e378d5d82f5c1e7a587ed16390a8ae5c946",
+    "lib/vm/aml/artifact/codec/c_sbin.mli": "b9aad81df1981c1d25d6c41b5d666dc8a771f9f817feb58ff7ad2b1a895c8d16",
+    "lib/vm/aml/artifact/project/c_feed.ml": "482fb50aee33f8f9eed5da223d9798af3611c847c3b5374f0da5a7f9d1c2eee4",
+    "lib/vm/aml/artifact/project/c_feed.mli": "c23aa3acb93a428bf74b9fef910f099df779080c56450e6141fbef4589ebdb48",
+    "lib/vm/aml/artifact/project/c_folio.ml": "9bae4bf9f57648994bf3d19229cc54c0bb73b70ebf112cadb7b540e6c0029f0c",
+    "lib/vm/aml/artifact/project/c_folio.mli": "0b64d71b3cda62e8179d096920ca79fb0dadd286fb80c98db8b6ff13a6d2ff9d",
+    "lib/vm/aml/artifact/project/c_pfile.ml": "8575979b621ebc17e19a359eef6b51a2d0fc60b9afb3a1b953ea68b49dd2482f",
+    "lib/vm/aml/artifact/project/c_pfile.mli": "838f1a0e036067db42bd9f85a583a8259fc47cbbfb8ab65d8b298b4187ceb869",
+    "lib/vm/aml/artifact/project/c_pimg.ml": "e98cbca26e9a83c8303bd516f1d960cc0e879607b97518614e7313c7ba47341a",
+    "lib/vm/aml/artifact/project/c_pimg.mli": "dbd504106abc010ecd46e2cb423e55d77af6c66e390d786a8f3502111a5009df",
+    "lib/vm/aml/artifact/project/c_proj.ml": "b4e16dd63c00ffc439504dd190c97734490496dbe0c315953f6b36740919e05f",
+    "lib/vm/aml/artifact/project/c_proj.mli": "bc3d363f1fbf0b9eaf8d7c20846fd4b22202b124ddc2825aed5c97e2f7f08161",
+    "lib/vm/aml/artifact/project/c_rval.ml": "9db5e46dd2a688931749654d044ca768afe780b4b7d82d115433118d000490ad",
+    "lib/vm/aml/artifact/project/c_rval.mli": "825e7d1c5e29fda8394982a37773b30983eb94be001a4dd90701cdaff2062e09",
+    "lib/vm/aml/artifact/proof/c_cert.ml": "08082e238d6f854e4650a55543687d6e9812d122f8c0bceeba7e45b15620bc97",
+    "lib/vm/aml/artifact/proof/c_cert.mli": "187c4c795d7adda7ee3ea5830a24b54ef3c56dee5b2797fb6d78554005fbfe9b",
+    "lib/vm/aml/artifact/proof/c_root.ml": "9762c036221f062561fc93027975e98f93a91cb03a984955a854e31aa84cf31a",
+    "lib/vm/aml/artifact/proof/c_root.mli": "26e94dbb3d43c1ab1e35c14582c1a44fdb6e961632d07e2435074fecfb09cee3",
+    "lib/vm/aml/artifact/proof/c_scert.ml": "05c50bf010ca6c81c32a0a3ce43b875cf9e401a21f0b165e93ae4c696501c6d3",
+    "lib/vm/aml/artifact/proof/c_scert.mli": "7cf857a331a453aa54ad29e590fd6bc78c8379cd1265f372366cc645b088bc08",
+    "lib/vm/aml/artifact/proof/c_seal.ml": "57da3201142103a4fb4ff51c0b5829e51fa2d2fa6d395d04f23a1f2087f89a38",
+    "lib/vm/aml/artifact/proof/c_seal.mli": "4df6b0b4f2bdb5d2f2c35f160f1441eb0ceed4605336c5c88040d1ee40707f70",
+    "lib/vm/aml/artifact/proof/c_sha.ml": "3fc7e4c4e04f5a29fe45eb272063b09b761dee67e4d2520045eee1e5a034d9e1",
+    "lib/vm/aml/artifact/proof/c_sha.mli": "142e42c3693efde711b61a4d66eb7e3fca373e0d3bdc3d4fde4cea73e7ab1ca7",
+    "lib/vm/aml/artifact/trace/c_dbg.ml": "1cba33fc521d625b48e47feb567d820fdba39bcbce8e82666fb9466eb77db3f7",
+    "lib/vm/aml/artifact/trace/c_dbg.mli": "adabce8be74409913cab5fdeb0a56887ac9bccd66274801d45f4a144755abfc5",
+    "lib/vm/aml/artifact/trace/c_live.ml": "16b3dd89f0fb119df9bd06213af1ea6ff5f452462ac126ae6c6058a8a66e3273",
+    "lib/vm/aml/artifact/trace/c_live.mli": "9deb69e9c2b9278c4bd95cf94c4b53bf9062c8d718ddd8f0af0118b53ff0cfd1",
+    "lib/vm/aml/artifact/trace/c_path.ml": "97fa491204c1f893d0c8051b87a82fa81f4662fb01aed7d01fba164b9601071b",
+    "lib/vm/aml/artifact/trace/c_path.mli": "1e8e4cefdf5021b50920360b22c065121bafd016519aa2a80c4c7f26226f0088",
+    "lib/vm/aml/artifact/trace/c_sess.ml": "450528094e034e8a7b1b5fbb8b5f7aadbd205d0760c711769390b7a0d5c2ab0c",
+    "lib/vm/aml/artifact/trace/c_sess.mli": "1b9f9d484d60f8312089faa982fda47cfe81becfe96e1d921f774fb18af2d7f7",
+    "lib/vm/aml/artifact/trace/c_smap.ml": "60c1e2155565bbee78a5b66206b7c217f687fd43ab72a2ec2518b21df888a3f9",
+    "lib/vm/aml/artifact/trace/c_smap.mli": "fee01a90be7441d2c30d0b13972ac1f3d0052e22d20e9097269a62f0144bb1bc",
+    "lib/vm/aml/artifact/trace/c_trace.ml": "c323a3d4ab144375395338c17999b2f824b3033c33142ee517989e23980f047a",
+    "lib/vm/aml/artifact/trace/c_trace.mli": "e7379b2f9e0cec0215351c4d22ab9f085298ead7acb77cedf57c126bff2eeb20",
+    "lib/vm/aml/artifact/trace/c_turn.ml": "2363d9797ac6214736e4cfc94fcd0224596ef1206acd1c2b1d3bc5ea4ee3b0fa",
+    "lib/vm/aml/artifact/trace/c_turn.mli": "a49d5e6c005bdde0cad84e95869a2b91a5bd8868a5e39e789d8f705d496bd05f",
+    "lib/vm/aml/core/c_fp.ml": "1f4bdd12d2a3c355676ba9a40dfb7950320b64e8299ecb219135e3b1b7ec5194",
+    "lib/vm/aml/core/c_fp.mli": "b5c097a0aac6a78c29d60a6ce3b2e6457b7bc5dc5bb3fe6be1dc50f1d5482936",
+    "lib/vm/aml/core/c_limit.ml": "3fc513482d334405317db46dadc3c70a5b180f0754124967d9857b6266bfc708",
+    "lib/vm/aml/core/c_limit.mli": "2a95a8a03a7e700a1995ced90ee1f8b40757ac47ee2a901a5779dbfea169dc1d",
+    "lib/vm/aml/core/c_nat.ml": "e22082858476e8cd82b8db0c4a3ca6027cf2215b7313cbe18e22bc146eead67f",
+    "lib/vm/aml/core/c_nat.mli": "df4ce9b9bc5bc74ce637f025266a5c89bf1e0b29ac0bb19fdf6feec0d02149c6",
+    "lib/vm/aml/core/c_res.ml": "5a1ed2ddcc8de6d407557460622ca94ce95d75bedba0cb01d0d65b9d95b5b4ec",
+    "lib/vm/aml/core/c_res.mli": "8ff2bace96ff001a7eb83ffe7d8ea43b1c7cb2588d2b950971ffc714c7c54ed6",
+    "lib/vm/aml/core/c_rule.ml": "dd26da9a9bf6ba1f1ee88c2e2f270638149e9b714120db464f8b2458a63ecb68",
+    "lib/vm/aml/core/c_rule.mli": "b8ae3369a578179ff22bc4317543df8bc0b1a6525e6bf622b6614bce08e6f570",
+    "lib/vm/aml/core/c_term.ml": "1431fcf26bcf71b1481b3c3bd80e8233774025c578b2d10da6805bb59c8abdef",
+    "lib/vm/aml/core/c_term.mli": "bdae6b24206f7b462cbdb10ae1f594563e821098239b39667c6f7d25f680bce6",
+    "lib/vm/aml/core/c_text.ml": "8c392fdd83f809ab23c0f568a36db177b0173b6edb14dcb258b444f5af386a1b",
+    "lib/vm/aml/core/c_text.mli": "ef8dae3ec9e934e6a8dad5ed4c2c8bbeca685c26a4dff2527e5eb4bd1adc58eb",
+    "lib/vm/aml/core/c_type.ml": "65922d9b4d5e56cb2040d623c9f1800f40da5bf3b88c81a2698616dbc336fdb8",
+    "lib/vm/aml/core/c_type.mli": "4e9b24a1c9d24202a5ec92620d9220190b0ca48cbb7bb855cb11355b9c7fd568",
+    "lib/vm/aml/crypto/c_crypt.ml": "6f022c1051c24d9deaf8d161f7bf85a8308b448047e9170d7e5191cb8fa6cafa",
+    "lib/vm/aml/crypto/c_crypt.mli": "3a5545e1dfd2d22c3ecc0241943930ba6097d80387bfd7f282e06284d5f71ce2",
+    "lib/vm/aml/crypto/c_fhe.ml": "a7f5f6c5caffda7ffe48c7448131624cf7ee03a2bf3ae623e76b841f185d137e",
+    "lib/vm/aml/crypto/c_fhe.mli": "689e37ff2d58a89f85efdae1fb7ea5ec0426024a9cf1fcdf9d45dcfb7ea3dfa8",
+    "lib/vm/aml/crypto/c_hfhe.ml": "ed020140a0a3b852874382e91ea64ec9bcfcc6b56f16ae0dbd4443bedfc48898",
+    "lib/vm/aml/crypto/c_hfhe.mli": "dd9ac11cc9eb903dd5628a0a2c3039063d2573f84151b04eeff1f597c4928770",
+    "lib/vm/aml/crypto/c_hpar.ml": "a79c917dfdda9ea54bf1d3e63742e0ec60fd5c8edc26a2bbf039322d9463b0ef",
+    "lib/vm/aml/crypto/c_hpar.mli": "e56065d52e7ca97eb2b1a44036646da115cd7484334b9a734a9a94b13af06f24",
+    "lib/vm/aml/machine/c_emit.ml": "02765d735746f65013468e910ab41008d1db97b673211a0776e1157a375ff741",
+    "lib/vm/aml/machine/c_emit.mli": "202430d243539e14882d645e8ab5612db78fde0ae67761de320f9afb7a2a3969",
+    "lib/vm/aml/machine/c_eval.ml": "2ffe8d8dea4834d6aa133133ea83c3990f52ae76344a87e6d27876421e0033b2",
+    "lib/vm/aml/machine/c_eval.mli": "bf59dabc350f4bc73ffd28bc169210f332fee7aefc8a9e34d83873f99d59e924",
+    "lib/vm/aml/machine/c_low.ml": "c35b65b7ae52fa6b06b6263eab64cbbf4ae6e5c1a4162f7a6bbd9493405dac06",
+    "lib/vm/aml/machine/c_low.mli": "c8ce27c837b9ba73d1a8a79906fb1eaf799e431e338168afa1c7a2e162ac3cde",
+    "lib/vm/aml/machine/c_mach.ml": "39c1bf9cff3f122b50bc3ad8a90e4a2557c95e23a2a40dd23bbf60ff6e30bbdf",
+    "lib/vm/aml/machine/c_mach.mli": "4e0b1c09ab61027ef61ce7c0ad0ddc14637ddcafdcfb852dcf19a8c1f8782c33",
+    "lib/vm/aml/machine/c_octb.ml": "328664b2209cf7e27122a1ddadab41736181a91da057b53811024b359c3235fd",
+    "lib/vm/aml/machine/c_octb.mli": "609229d5b63b60498c27fb15228f808b0adb1d9dd738e83fe7b8dcf87b37477e",
+    "lib/vm/aml/machine/c_print.ml": "469d4ef75bd32bfaa19db5537ee8f4ae1d62ce5872ddbe7a6c2a3d668eacb508",
+    "lib/vm/aml/machine/c_print.mli": "03056837681d5450d211f3ca84b75b71d7b2f4ceac76860c181eb229509c66dc",
+    "lib/vm/aml/machine/c_vm.ml": "ad13235ca1f3c19eae9f683d46f394f3e6ab560e27d930dbda7e2afdbd9e0b10",
+    "lib/vm/aml/machine/c_vm.mli": "e08b0f5ae5922c71a2af7b7967a16c0712d3b7c7b9814c3858fb28cb57db0295",
+    "lib/vm/aml/syntax/c_comments.ml": "47be5500a8182b7a6f34d25cd440c287debc39453758f78affcee4f3951d0c7f",
+    "lib/vm/aml/syntax/c_comments.mli": "ded4903e1b140fecb51ea54cfccf0518a17ccc35a0a35432990f53460845f0df",
+    "lib/vm/aml/syntax/c_data.ml": "4a9c99a9bfba398bd9b4a967125f5fece94ce8c7d37a17eb71fb43691d5b0e21",
+    "lib/vm/aml/syntax/c_data.mli": "f619e67fb3e572b4d574212fe929f3c8a81f8cfaac73375f4f5a94318dcadb10",
+    "lib/vm/aml/syntax/c_decl.ml": "ddcd246f4ef1cf43db2fdeb2a57b58dc61a6e7e7dcf93ad36065701dd3d35510",
+    "lib/vm/aml/syntax/c_decl.mli": "c36723000ebfd889da1c66d91dc0bbef570febb32d524f56aa4d86aaba1e3b92",
+    "lib/vm/aml/syntax/c_fun.ml": "3d06fabfeb7f1fd7277ac46d4456cb4e6b4780a8c65bcc7ba583bea02ec1588a",
+    "lib/vm/aml/syntax/c_fun.mli": "0b02824df4f93c548152603f22bb6ee8ccd1fa664ba36679b84aeda64e70916b",
+    "lib/vm/aml/syntax/c_idx.ml": "a42c70b30c21513d7310b3fbae0434800cbffb731d6fc36326589745a7f9b06f",
+    "lib/vm/aml/syntax/c_idx.mli": "128b0d4913473772e83521420cc3063a8108fc15967d35bc654654d542569d1b",
+    "lib/vm/aml/syntax/c_law.ml": "d46c6b1ef17083efdba2e6c04bf83a054615966ffe11b238797f2a8206b2a52b",
+    "lib/vm/aml/syntax/c_law.mli": "b8dbd632ecd2126382dad0d4468436db65ba5cb6ac53d176daf72f5a001f9056",
+    "lib/vm/aml/syntax/c_lex.ml": "9a9fb100b160352e5e3294460fa45f0d6547ef124bbae8585249a9d00c364735",
+    "lib/vm/aml/syntax/c_lex.mli": "cb234db296f34af86b6e87dd9ecc59f2266d2bacb8627b6c68d39af5d49d3c17",
+    "lib/vm/aml/syntax/c_parse.ml": "6b250ac8b92b02e1aecadf5618619b961a430646e331dc47cd5c20b69468cd1c",
+    "lib/vm/aml/syntax/c_parse.mli": "f5c4d4320afb3c243eb6a260fb8ec8996607d025c747a6a585d232624149389f",
+    "lib/vm/aml/syntax/c_poly.ml": "165c012deeedefab3b65fbf2d648bb14a6731683a54175cc0bb9eb2363486f5c",
+    "lib/vm/aml/syntax/c_poly.mli": "f19adab9aac7109540c34590e3632afe4fa23ce382383ab266bcafb04a518a9d",
+    "lib/vm/aml/syntax/c_raw.ml": "cd4007b63bf8b3e62455bab6e676e935b38374aa963e908776e8c79b65b88f41",
+    "lib/vm/aml/syntax/c_raw.mli": "41c74eca7897aa1aaa742e3e67f06d3e9b03a0e0ef4d86c6e076da1a60108487",
+    "lib/vm/aml/syntax/c_rec.ml": "5b66a2b4e98a7c57baf4f405cb6e531dcca0231c8a407a6af1eef3c6022131a6",
+    "lib/vm/aml/syntax/c_rec.mli": "960715183b12f9537927489842826524d73122d1965716dbaf8f6b322b58c1c7",
+    "lib/vm/aml/syntax/c_spec.ml": "28cce47ab32d3faa987aca6143aa960bc2ad3277cb741fd097d26a7cb9e0b74a",
+    "lib/vm/aml/syntax/c_spec.mli": "2eed975bcf0c6ad564de4e26b006f9dab8ed61b99d64bea8013771ee2e5cb101",
+    "lib/vm/aml/syntax/c_syn.ml": "1da5d2011b9b5b5365777c494babc9ea8fdb66e9e6b2a4235eb0ad06eff82300",
+    "lib/vm/aml/syntax/c_syn.mli": "b7a9bc3603f07d797f9b80e7b9b4bf4e77fee7c6e0ee6b0b51af1dd93a9a799b",
+    "lib/vm/compiler/aml_call.ml": "e9423935e5cd86e742cfe9be8fb68018666893de429f8c720e617b5ba5c2d5eb",
+    "lib/vm/compiler/aml_call.mli": "ffa063e27796291723cbdaf8e23ce36e2334219d811cfdda09fc2ede1bb52b5c",
+    "lib/vm/compiler/aml_effect.ml": "a2677abe53662f78dc22be1b398310918984445a62a29b7d0fb01f40fd86f6ca",
+    "lib/vm/compiler/aml_effect.mli": "e76748dc1c455933783322c6573c0268cc7e809bd117b01b47c4b2af78bdd7b2",
+    "lib/vm/compiler/aml_evidence.ml": "52edd0caccf5a7d324e4596b411cb4eb9a118f163bf41031ce1855efa9930b78",
+    "lib/vm/compiler/aml_evidence.mli": "6e4bec0c2e68742783a2defb26dddbd0e22637b342c9caf77e12ec4f350204ab",
+    "lib/vm/compiler/aml_input.ml": "6919c508b2e60e84b763261da6d0d301a809eae8ee7f026d72268b2d2ee7718a",
+    "lib/vm/compiler/aml_input.mli": "9a5c1d7ed340b1e49bbcbc54046b935ae6c0982d155b09a3ac78186200eac134",
+    "lib/vm/compiler/aml_program.ml": "49f2105f5839dcc05f90accdb0a98567731ecb075cc77a6e2fded9ca8c683ea1",
+    "lib/vm/compiler/aml_program.mli": "896f4ff8578ea32196f2789706d271108428eede0dfaa02028101ff4855a062a",
+    "lib/vm/compiler/aml_source.ml": "1c0aee2759d95107b52ff56735d34f1e75e28af7e8c09477cd833b76004add81",
+    "lib/vm/compiler/aml_source.mli": "5c72dd8759b5d7609aa8d7641612a855ca042be501ba55779413a903a8c058af",
+    "lib/vm/compiler/aml_verify.ml": "145ca02b96378bde0afa6f18e890330f3974b88900afbe8405350e824210bf44",
+    "lib/vm/compiler/ocs01.ml": "2368b418b8ed8afb8c6b788255866b3f18c53d196f57168c4292d28dcae36a04",
+    "lib/vm/compiler/ocs01_bytecode.ml": "761d487af3276e07891d3570e6e2173b301e3358abed1ba0493dc8c4df927804",
+    "lib/vm/compiler/ocs01_model.ml": "ea62dc2e6ed78cf0e5cf2350f5de025fc3f29fe458fef97c1c642308523c8072",
+    "lib/vm/compiler/oct_check.ml": "9896934ed54de7d1e7005d20f9087af40e97d271069466aec1c7121fd046ff3a",
+    "lib/vm/compiler/oct_compile.ml": "7841f15742fd6d089c1426c28f16e6d69ffe535bba2713249c1c1ece5d0c43a8",
+    "lib/vm/compiler/oct_emit.ml": "3541eafa12d5c2d5461b80d498fa4cc67a7221142e09e6b07457f80020a09bdb",
+    "lib/vm/compiler/oct_form.ml": "6da29d31881626953b68a1ba6f39b031a33d0bfac2ab05e44757ae56b156f225",
+    "lib/vm/compiler/oct_gen.ml": "30d9b178dacacdbc354a313967c8bbc8e09c1598457cf5acbbe73688a6afd8d0",
+    "lib/vm/compiler/oct_lang.ml": "56ab0b3e89fc4f71c06e9c10e090d523180b292894cd2ef6f132a54e9bba5630",
+    "lib/vm/compiler/oct_lex.ml": "2566096bdeb68b218f3d6858cbee4067854234e20835ab9540a99ae7a3a01a06",
+    "lib/vm/compiler/oct_parse.ml": "91e3435d5fc76bc75cd3681484251523784aba8cd03dfad2a5622311a55510b8",
+    "lib/vm/compiler/oct_scope.ml": "0db24489293dc5e4d8e4a8d618022e0bf445dd0f244cef7374b0c691c02ac870",
+    "lib/vm/compiler/oct_symbols.ml": "985f7cfb11db4eafb1a8af35f513d72fef77ca3858c94ec3c152ef7756c3ded6",
+    "lib/vm/compiler/oct_types.ml": "900c7e1535a0752759186f5cad224798afd9ab3d420c81c5408c07f762aa75a1",
+    "lib/vm/compiler/prior/prior_compile.ml": "bf189163796a9287a19f4070840349601486081619ba6c9fb85b00122b98913f",
+    "lib/vm/compiler/prior/prior_gen.ml": "30fd77edb647e8bb15c3cef4184b3997e6040d762213ff68bddd4ac6f4408c3c",
+    "lib/vm/compiler/prior/prior_lang.ml": "7017bb3701bcd36fc0d218b200de9cf7f7cb903334250535bfcc3e7b6a20af0a",
+    "lib/vm/compiler/prior/prior_lex.ml": "3eb2aec5b339f80ef93897c2a7e76865897dc428a3d329a87a1e613c1625bda9",
+    "lib/vm/compiler/prior/prior_parse.ml": "0764a3c3edb5f4ef0a903fc868f45d45d250dc62b895fb0be9018ea9db319d54",
+    "lib/vm/compiler/prior/prior_verify.ml": "de035c3c084219a6494450bcd688d7abc781dda204ef13779d176705d8d3eb72",
+    "lib/vm/compiler/source_abi.ml": "e5a7cc73ae08e9a20070974771bf9f47e4eba2d1e27a4cff83798bfe4e040f8f",
+    "lib/vm/compiler/source_abi.mli": "c797db997a5ae0fde18062b8bcba39a5422d231a53dc4bcea545549c18390072",
+    "lib/vm/compiler/type_graph.ml": "ec1032b287a032292c7b940825e4206cee10649a311b493117f2be548f4c45e3",
+    "lib/vm/compiler/type_graph.mli": "7b54363790b287da43181f528328009601d4b2a30555be058cf34af495ac1e17",
+    "lib/vm/compiler/type_index_stubs.c": "7a8031b740a86a0b652947be7fd38f3fed1c9ab8141ea9524038e0286c334d7a",
+    "lib/vm/dune": "8d8fafa8e566621c1e9920aecee4557a6feaeb90ab281bf7ae5cd97aebcaf1e4",
+    "lib/vm/policy/opcode_inventory.ml": "09c9299e10ea5dbe56353fb977014baaa342a0a3b4957108d918b0279b329689",
+    "lib/vm/policy/opcode_policy.ml": "08fb17a668ef67f6b2a66dba0703eeefda703c60976b862e1aa4be7446e173f3",
+    "lib/vm/runtime/aml_profile.ml": "982f1ba632ff9bc6d38816bb5374b496081c016ae0fda0658cda3cf87c24d0ae",
+    "lib/vm/runtime/byte_work.ml": "26f1096335eda8b08eadef321d820e26e4d0c12dbec4b584ed0a9a32b79b4187",
+    "lib/vm/runtime/byte_work.mli": "b745c45769fb14e64dbed011b8d4eb55bfc8bf055991bbe2bafc1b3c1f8e952d",
+    "lib/vm/runtime/call_plan.ml": "c77acf78aa2e60eae66cafdad5211d22f3f67644f79dcf6fe23744130717e12b",
+    "lib/vm/runtime/call_plan.mli": "cfc63d7506fbc3f1298509be9dc61ea5536f2db931d61873e94757505f656249",
+    "lib/vm/runtime/code_cache.ml": "f777f35c563b3dd8da3776856031a82be951f31fd56659271dda34356b0ba380",
+    "lib/vm/runtime/code_cache.mli": "e271079c59fd831769564e0369c1ae0257d825add0e5e05c07f727d2375b7844",
+    "lib/vm/runtime/code_check.ml": "e43a1b090453840333b6c6ca4df19cd54269cc0916e5a565c9b9e3c86fa67255",
+    "lib/vm/runtime/code_check.mli": "0b2a3b7dc87b4e3d93ef00e92d332c556dcc4577b4a052848e72354a08f10b60",
+    "lib/vm/runtime/contract.ml": "0f6df77625674e712b5d8ed794ee9361920c422140c639c79617f0957d7b28a6",
+    "lib/vm/runtime/contract_vm.ml": "2721748dce06edcc1856691f799a7fbe6ff7b832578758f7c74f88fa883381f6",
+    "lib/vm/runtime/cost.ml": "e8daeac05ff59e8a9b25628aa382cb6622837f3c1ab07f0dad2cf7c547fa502a",
+    "lib/vm/runtime/cost.mli": "7151668f8eae7537003447bb598f46ffb2049a1d4089185e9587cc416156117c",
+    "lib/vm/runtime/direct_exec.ml": "aa2873c2fec90ee06f36aee1e11d969c7979f0c015defc478f528ce7082dcc46",
+    "lib/vm/runtime/direct_exec.mli": "e27960d5f0b1933d7242a8d68501e6ed2e1c7c0b03379e2be99d494ed41a39b6",
+    "lib/vm/runtime/fhe_memory.ml": "46fa1b7b9e6889e061caa5449aac795741c133dd6c3b2f81b72af9fcae55c44d",
+    "lib/vm/runtime/fhe_memory.mli": "41e71ba5ac25c1867f726c0a992e2f7f663ca25a2950df897cac680f844d1e21",
+    "lib/vm/runtime/fhe_queue.ml": "3dafb0991f1ef28056853e03f75d4c2ccf4643ec480dde5f7479b156285aac3a",
+    "lib/vm/runtime/fhe_task.ml": "826f9dfd01b366f865856cb53c4e3475b6f07f710e25954d9003bb59de71b1cd",
+    "lib/vm/runtime/fhe_task.mli": "560894702ca7cf07df728ec3efec0f1a0c6def2c545608f6773006cc2f961bf2",
+    "lib/vm/runtime/fhe_view_policy.ml": "602d99af20b12632cd57c0dba1be9b48bfdfc80db0495addd36f8409666208a9",
+    "lib/vm/runtime/fhe_view_policy.mli": "6ed1f861f2293e7ef2eda5226f9ed5a62704faa0ba44aa60e8db3dab2d178fae",
+    "lib/vm/runtime/fixed_q16.ml": "d5fcb5ce65b26e937583f8cffba4eb204e15a34c95e42946252d9fd48cf927dd",
+    "lib/vm/runtime/fixed_q16.mli": "7897df6f02f50bed35670fa75d169cae2cfd4594a47cc4fed5e99b69aac8a520",
+    "lib/vm/runtime/int_text.ml": "cd2e94227926027043cf3bdce6542bcb8e3394995549a648fa634388d32d305f",
+    "lib/vm/runtime/int_text.mli": "eedc19924c65bfd90eed094c3af0956275c70483b4e39392f82b0abdd01b7ce3",
+    "lib/vm/runtime/int_work.ml": "49652f1d083ed90e78751f5bebd6d738e4545ebb2546a9f94ba889cbdeec94aa",
+    "lib/vm/runtime/local_vm.ml": "3a6c42f8396bb6b528efb8f1d949196c4f9d4cb7ddc6e2fa8ed5ad4c9adedc86",
+    "lib/vm/runtime/local_vm.mli": "56fe9ac1f8295dcdd8800b8fbcce9fbda75826ad0c9e9426fd8855614e8a72f3",
+    "lib/vm/runtime/mem_span.ml": "cb1790d23dacd8d7abedc1b9b35d4a677c0d5baf15808750d0fc3a96b431c1bb",
+    "lib/vm/runtime/multi_exec.ml": "545de715220e2b8cd95de3bf167144850bb6db1401306de4c97c7eb434290f91",
+    "lib/vm/runtime/multi_exec.mli": "38c97121257e69d8b1881e2e0e5d1cce09190424fb04359370798c08cab1b7d5",
+    "lib/vm/runtime/program_attestation.ml": "55ef4a1c0691389181ff80ee11ffe67a0ddb51936b6237243359966eed84f4c2",
+    "lib/vm/runtime/program_attestation.mli": "4696de9606431cf154ffb298454be363f168c9ab7af9b548f182ddfac3817a8d",
+    "lib/vm/runtime/program_effects.ml": "dedac431df0360cc06c48d33360d4a1530e95408fb05a3ccfe14f18d35a31449",
+    "lib/vm/runtime/program_effects.mli": "e97fd212ac417444b3fdba9ad08084b1f0df41ba90d0fe3506b188bb580ee453",
+    "lib/vm/runtime/program_input.ml": "3e63425098e7f251efa625713383a059bceeca4ec862eebc3682cb8a82916ef3",
+    "lib/vm/runtime/program_input.mli": "a75e2a580dc8bd3e00fdcf58a03e073a1d4d774e9dae7dca7b8e11eb385e0a68",
+    "lib/vm/runtime/program_journal.ml": "45fe9e5128a3cb78372910c025ea96db6eced110f871e43cf47cff6e021f53a0",
+    "lib/vm/runtime/program_journal.mli": "67c586ea72ff85184c223388dc6285e675c96c9a4a846d6c9c2943c71165f84e",
+    "lib/vm/runtime/program_limits.ml": "9315e154db40fa1e346a1967953ff5961be49411969635b82cccd87132fee745",
+    "lib/vm/runtime/program_policy.ml": "7a6518938b16c712a9f742b90aa85e64f58b54b1b3d260e58b55203c2bfe1131",
+    "lib/vm/runtime/program_policy.mli": "ea6499018bedfc3da0b0da668aa55568a6ad0bb6188342118346d1e7bb4ad464",
+    "lib/vm/runtime/program_record.ml": "3308f8fb38602fbe0b7d027c028c0d41eb29e19081417d77c7dc52a5d118290d",
+    "lib/vm/runtime/program_store.ml": "728fc38d6a83096016e0c015099dd6ac6243d11ea0259d1fdf29407ffd018920",
+    "lib/vm/runtime/program_store.mli": "248a06588514c50a87f4698d3b2d2c9172a6a3c8accf2dfa73fcd057eb373c29",
+    "lib/vm/runtime/program_trust.ml": "acdff5cebdde89d39f18a1af9a01ef6ea71522a769560c200cb041a623806cf8",
+    "lib/vm/runtime/program_trust.mli": "21b8907176c2579069921eecde0238f1d8746ef42915cdffcf906fac928155f3",
+    "lib/vm/runtime/program_type_flow.ml": "a9613d5666b4795b2f03eafb7599864e37f0d533caf9560ae6e7a38d87ca7f17",
+    "lib/vm/runtime/program_type_flow.mli": "c45147fe89c648a4524729448b024402cab2450b30536c4946d500577c3c96af",
+    "lib/vm/runtime/program_upgrade.ml": "94dd9540bc993d92cc5b0d5eff3be70a7cc539d6b59cc6fd5870444eaf40eb97",
+    "lib/vm/runtime/proof_wait.ml": "b72b093ed70aea1de49ef18ff4f92747f3a5b9fd7a5e46c840dc16ee99d0bc4c",
+    "lib/vm/runtime/receipt_view.ml": "7c00d24477b9458f3b346065a28632594f5f41337158b34603c7410135a19f62",
+    "lib/vm/runtime/receipt_view.mli": "2db95bb273fa3336b9bfb88a8216224ae2d3d1243bba0228cc3cf6161d8a9e50",
+    "lib/vm/runtime/text_work.ml": "642c415b7cd154ea552c38dd2d521628b0780028ed58baaf57710cf721ce84f3",
+    "lib/vm/runtime/text_work.mli": "dcd3e9de3fc34054b0e4c4bbba32efc2f8962b03e8fa145476ebd6150ed3249b",
+    "lib/vm/runtime/tx_effects.ml": "b02317c6df57cfcbd50dbd9c2c3839ed5ca9bc2ae676d2697257cc35c6c7d7ad",
+    "lib/vm/runtime/tx_effects.mli": "b99e0de0225f82421963f2c01f45cae81630b99ebe72fd71c600918660095fc5",
+    "lib/vm/runtime/value_journal.ml": "620682226c0189062a6e0f04173f7d7254cf2ee581b9083536bf8de42c8a2583",
+    "lib/vm/runtime/value_journal.mli": "63bf758ebff4f2c3bbf6ca0f37653f0d690bae71ac907b4e853bb70e35f7c117",
+    "lib/vm/runtime/vector_space.ml": "371d52984da74308334fe1ec6e4b4a4daa1b00c4574160ee70adce8efb54afbb",
+    "lib/vm/runtime/vm_program.ml": "ec5bd1853e865a3e33956d6ef7b4bd110dc8f22f346965ebec5bf97f5060676c",
+    "lib/vm/runtime/vm_program.mli": "3ced91aea6d88da561ff888e07d19d5538fcac76214255f1b8e3d233440e3b2e",
+    "lib/vm/wire/assembler.ml": "64a229481dcc7b71e9831c6a6611ce5168f4adec891969f2172e85cbca7786df",
+    "lib/vm/wire/bytecode.ml": "dba758bded3899fd704f3bf19111042c4ca8ec25e0c91393c8f22347ea23bb27",
+    "lib/vm/wire/program_envelope.ml": "690500a9d96bcd26ed39d50f86abe6c659a727ead0b495bc4f7deb65f1c9e63b",
+    "lib/vm/wire/program_envelope.mli": "367de55fc2a91dafe0d25837fa7114596c45ad1b3cad5bf37162855f0cd645f9",
+    "lib/vm/wire/program_package.ml": "0a79d8d430eaa3d7d7e55048ba5ade4ff0eabf5068d8eae2f1aa4c1d2f9ade4d",
+    "lib/vm/wire/program_package.mli": "aaf2cec9ecd3f6f89ad40369e8d2f684cc64e4fde0d15c61c572913dc7d238eb",
+    "net/hash_domain.ml": "4da5d93da24f9be2a34d787697ada6612d6fcb56e9ec614f9163fe3a828d6963",
+    "net/oce1.ml": "09b42cc78182a45c783e91e8e84b38e04a63195da6a78c3ddb62fa6d51307d87",
+    "node_runtime/consensus_profile.ml": "7a4bc9d30b63833a187fb540e60efa1359e938fbb6bcbe46b459bbe66ef73315",
+    "node_runtime/consensus_proposal.ml": "4a5978cd64c1a0ccb9b5a88544553941e3eafab0f6c5a5b005c722ef3f343e5e",
+    "node_runtime/consensus_reward_attribution.ml": "59a187a6462a56fd67b0eab1d582fd5180f29e833e8422e33d1586761484a06a",
+    "node_runtime/epoch_cadence.ml": "3e51008e5f047a335b4e82a0e037439fe90040e685042160e6ca0f00b94cd7e0",
+    "node_runtime/set_rule.ml": "10db8ece264e14a1e62c2cdf6e92d2fceeac8d8ab5e622f72429cede8fde577c",
+    "node_runtime/startup_runtime_limits.ml": "4e8f9598b34dae9dc4372a288de739a01134e8bfb481c09fb8d2e77f7cc780e0",
+    "pvac/include/pvac/core/bitvec.hpp": "b100c917583e09694f86dd3f8c40a1dd8b47e85526111f6834827a21f45149a7",
+    "pvac/include/pvac/core/config.hpp": "1912fbaf58b8c4f777c36454742e2859b6a5e9fb00155807fc0805773f4a7e40",
+    "pvac/include/pvac/core/ct_safe.hpp": "7d1179bb7b8d729e953dedd531d646595c3e20bc786fcdf7b8819afee5b20eb1",
+    "pvac/include/pvac/core/field.hpp": "8e13993d70a956443187a5f1fc146f56b501be2f69b76ef92df17db6f338ffe2",
+    "pvac/include/pvac/core/hash.hpp": "973f09a869f7cd25fd091110196164e45b5e47ea781f4a9ce28e435c8a4a5a4f",
+    "pvac/include/pvac/core/pvac_compress.hpp": "8e5aeb2497f3487f5a93ccab9acf597547bbabcc06b36c966bab6a4dce6b7d8d",
+    "pvac/include/pvac/core/random.hpp": "7b59e5ee4c120973113505b60aa8b62bff85ac7686d50ce9fe7b5e1cac9efa1e",
+    "pvac/include/pvac/core/seedable_rng.hpp": "204dde45bb99429827a4758a51121ffcb6a8e911c2ecfaed49ab5d374dc2d616",
+    "pvac/include/pvac/core/types.hpp": "7da9cf8e4f5f473bfdfbc2bc286f5bc82270f15244b59bad3e0b1c4c7db58e93",
+    "pvac/include/pvac/crypto/bulletproofs/gadgets.hpp": "ded9002736fe5caf7607fded2a783d7c204fe69e430d684dfc63a0537cf5dbe4",
+    "pvac/include/pvac/crypto/bulletproofs/generators.hpp": "54541edda0e7a8bc4d91d8d57064e69f23a3dc0df41406fc4c9febedf03f9749",
+    "pvac/include/pvac/crypto/bulletproofs/inner_product.hpp": "243f97bf64c44d7d38d09bdd52b76f2de074f9e684dd8823c83f555f783211dd",
+    "pvac/include/pvac/crypto/bulletproofs/prover_msm.hpp": "708ef06d2e70671ad88c274458e93c3701a87724a47d1160acd179073be385ff",
+    "pvac/include/pvac/crypto/bulletproofs/r1cs.hpp": "5aa169749faf4b54189158ebc936a605e10f822c68df453e3dfae471a72e327a",
+    "pvac/include/pvac/crypto/bulletproofs/r1cs_limits.hpp": "cad8ceb8bf6b470fc4e8eb6988d5476dbd406d5bd98ed15c3b0d97c34778febf",
+    "pvac/include/pvac/crypto/bulletproofs/r1cs_prover.hpp": "94c4ff6209fc76688bd575933f4c4f0b37e5ab94133dc4679d79c0557226b50c",
+    "pvac/include/pvac/crypto/bulletproofs/r1cs_types.hpp": "e7d1a0bbf38767e5de757afbd73f9c4153d17035aee667fb46a4212b3c24bc67",
+    "pvac/include/pvac/crypto/bulletproofs/r1cs_verifier.hpp": "a0e21cc2526fa6b02c0d45f4110f87f829e1ba09620ed6f3a65fba9e0384597a",
+    "pvac/include/pvac/crypto/bulletproofs/transcript.hpp": "075423f25e6449e526a84d5a3837a402238fdb11fbd2a4673fb5fb027c3ca45d",
+    "pvac/include/pvac/crypto/circuit_prf_profile.hpp": "4a990388677b657aa7e71c2bb37867880adf32d99554664d3cd6d4099d811ba0",
+    "pvac/include/pvac/crypto/keygen.hpp": "9628f6ab957ce05c6a511534e079903b2184fa823c245a36c84efe15e2994066",
+    "pvac/include/pvac/crypto/legacy_profile.hpp": "ff0d5db6fabad10cb2992b137f179afa55548255cc57d3b1b13c9188cb812027",
+    "pvac/include/pvac/crypto/lpn.hpp": "3e3ba1826d3bf4e8f82ea423a8c80ad93d8d7d2e35d1a3f923f250aeb6bec80c",
+    "pvac/include/pvac/crypto/lpn_v2.hpp": "3e8cc9374211a4fa73361db9573d01a2d2c56591e2032632fa52713ea9ae2524",
+    "pvac/include/pvac/crypto/matrix.hpp": "a7f5732c5a59517b82acb9d61c53b9733b45fd7d40b319c64799491a65f9e6a5",
+    "pvac/include/pvac/crypto/ristretto255.hpp": "be7c04653d4856bdc89718c317c44b550cefd6df434628a1a7fd481e86a41956",
+    "pvac/include/pvac/crypto/toeplitz.hpp": "75361810219017961de38b7a7d9e837fbee074f018f877d3ffe6d6f74ba9bbeb",
+    "pvac/include/pvac/crypto/toeplitz_full.hpp": "630830831a4f5fc25fec1f265b301cc11d5ad7fb454275ae641f3be6c46f28cb",
+    "pvac/include/pvac/ops/arithmetic.hpp": "5a0f71daae1bf57778669671517990cfdc0e37c50b8d9776faf50f0133d88d79",
+    "pvac/include/pvac/ops/commit.hpp": "3db24b6aed21bb94bb66e81882adedba423d97c15b288d379925c16fe636858b",
+    "pvac/include/pvac/ops/decrypt.hpp": "87e70d2d974914face97b37f73d7bfd47a307620458fbb101455a805c5e0a207",
+    "pvac/include/pvac/ops/encrypt.hpp": "84378bf1eda7d65fb5856dc2753a8aab7aaa8627721a732c22340d3305f3ba7d",
+    "pvac/include/pvac/ops/layer_coeffs.hpp": "a69bff914ae319a907b44c9c961cf31b61faba29a7d11c0aaf128455d371dd49",
+    "pvac/include/pvac/ops/range_proof.hpp": "61f60713cabf3776a8555dcd722da6399b6618e7db0ac8fae0f0acb8f78e0842",
+    "pvac/include/pvac/ops/recrypt.hpp": "156aeba8d18c85e2991f5d8a027a5b923b1021a20df9b78f1e5802c339aa977c",
+    "pvac/include/pvac/ops/recrypt_arith_proof.hpp": "8a2267b9801806183c551d4659026177be1cb5045a98b55cad818a5d71961d5d",
+    "pvac/include/pvac/ops/recrypt_capsule.hpp": "c87fab0962ead501ecdbacbd7b2796e5e3a1f7929b6a3f499a5dbc51f8351403",
+    "pvac/include/pvac/ops/recrypt_chosen_privacy.hpp": "ef3c0f49fc60f209147fd4e0208c76183db1f9d4f37130f2ee8fea7f9b8dadfa",
+    "pvac/include/pvac/ops/recrypt_com.hpp": "10671817bbba0b438fdba905fb6160cd0567f72d1b3140485bc82385e7477bd0",
+    "pvac/include/pvac/ops/recrypt_com_reset.hpp": "52400133fb4fb93be455bad3f70893bf9f74a6756ec74af4ed0af62bb051e036",
+    "pvac/include/pvac/ops/recrypt_eval.hpp": "271057b0ccf26f0b6ca8a7d548f591e031fc004fe1cabea97396534195c0e82e",
+    "pvac/include/pvac/ops/recrypt_field_native.hpp": "adab90b0e181878817f20f91c6e07c9f323239f11af4f662dfc572824923866b",
+    "pvac/include/pvac/ops/recrypt_field_native_cipher.hpp": "0a5c854c6a3c249e6a1747f013b2757fc31b85da40fd934a9a6d2af57ff01672",
+    "pvac/include/pvac/ops/recrypt_fold.hpp": "4ea080bb594a9ea7e9d9d70b7ee0277c6a5fcb591de73df3f77c3d34666d6ae9",
+    "pvac/include/pvac/ops/recrypt_hidden_coeff.hpp": "cb8fe5f9c4f89ba004f1fdfaecd56a6ae61a3957519aa13ff1dc37f44cf4a0c9",
+    "pvac/include/pvac/ops/recrypt_layer_proof.hpp": "8d3b8e5fe66f7f2ddde80bf866eefe5bcff34e5dee5fb20ecda4639242e5013b",
+    "pvac/include/pvac/ops/recrypt_legacy.hpp": "df2a716414bf42d31db37638cb08e01a30347c402a03a8db9a7dff44db7f97a4",
+    "pvac/include/pvac/ops/recrypt_mat.hpp": "3f7df275ebb01a9e91050dd1bd96b383995d8d1cf7e3aaad7963cfced2cf7937",
+    "pvac/include/pvac/ops/recrypt_native.hpp": "1b48ccbb847ef84f876e9587cf1da02db0286f24bff27f2cb5efa9f5b4754cec",
+    "pvac/include/pvac/ops/recrypt_native_cert.hpp": "f92ec3301cac82b45cc288f2379bac9b3f26fae9e04458da51362db7c82138d0",
+    "pvac/include/pvac/ops/recrypt_proof_profile.hpp": "d910e954c0066d5ce6d88c3696f084a94de56881cbb27e59f678e7853645ec75",
+    "pvac/include/pvac/ops/recrypt_public.hpp": "a00b09c76c5266515019117d4f12a70acff2d48eb6dc87e620218a4a2d8d2bb1",
+    "pvac/include/pvac/ops/recrypt_ru.hpp": "1f3f0241f716274d1adcb7429bc26185fc4faaa55e3c523eb0bcadbdb54ef370",
+    "pvac/include/pvac/ops/recrypt_runtime_eval.hpp": "dbd56fef7f40fc5fcab52c9a858c2a69efe7b39032c0627579e4cf0297fc3495",
+    "pvac/include/pvac/ops/recrypt_sha_compat.hpp": "db5acfe0d0a2264f9a9fcb2c5294254d079c60999f55c7380884e0070d371cc3",
+    "pvac/include/pvac/ops/recrypt_src.hpp": "e71368bac894851cfd4bb914f45b096b2aeb7776835e4dc8f25a4f43275210f7",
+    "pvac/include/pvac/ops/recrypt_src_core.hpp": "9b841af17661a8623f16767f26c458bb9bb46ebc53b8f0930cf1c1ded7592c65",
+    "pvac/include/pvac/ops/recrypt_stage_eval.hpp": "ebd42274c304f906a418b3848f630cb063da79c2ea344e169455899c9badb00c",
+    "pvac/include/pvac/ops/recrypt_stage_link.hpp": "9ff552071c0e3a05b9015fb318bda93935aa3dc23db9bdb3befcf63b9e0d96e6",
+    "pvac/include/pvac/ops/recrypt_stmt_legacy.hpp": "0bc1e206544f56c0a970f0678db7102c6cd83716640b7ffc28a9b978b9c35085",
+    "pvac/include/pvac/ops/sha256_hidden_trace.hpp": "cead51438c32f5acd4e6e043cef4809ee8978a16ade8407d2a0320143e3132e3",
+    "pvac/include/pvac/ops/sha256_trace.hpp": "628e1dcb9a7433e544ade49e1eecf6fa335bd82233d1d7cb51e6ee25a50969bd",
+    "pvac/include/pvac/ops/tape_verify.hpp": "00d9205e81d0f846988e63543ca49f7f9247b85e57e1ce45ef7c947d97f92c9b",
+    "pvac/include/pvac/ops/verify_zero.hpp": "c52f6d942254aa8b75ef9b37b29646d6bb8ae77b5bc9e579a06cf01b16995ac2",
+    "pvac/include/pvac/ops/verify_zero_circuit.hpp": "8dd3bafc5cf0e55fe0f72d2037ef3b4d1d546f54287e95fffeaadfd477fec679",
+    "pvac/include/pvac/pvac.hpp": "3adee622e764cb9f82a6aae5e78fac19797936164f2200dfbf97c03fe798cedb",
+    "pvac/include/pvac/pvac_native.hpp": "45ef4ff7245752594680ee51b645be048699512ce0849ad97664c911d1eed9e6",
+    "pvac/include/pvac/pvac_recrypt_experimental.hpp": "90eb0270501039e03b2abc831673d40fc701d4ef3422c39c92428b1a24ec3a84",
+    "pvac/include/pvac/pvac_sha_compat.hpp": "e5a24791964d289f4497a56bb3ae553478b68694b1b308c65a5548330f20ad23",
+    "pvac/include/pvac/research/cipher_sim.hpp": "5adf9e92fa271657016ec4fe6febfaac30703cf7b209309c88388187c6238bc4",
+    "pvac/include/pvac/research/mask_profile.hpp": "556246fa87e3f6fbc6a8d9dacb3642f414e666cbcb655b9e837dc26ad3adae6c",
+    "pvac/include/pvac/utils/metrics.hpp": "391a1e7b67db66f63b5518299726fec7a948373acba17022490a6bcc96aa09c4",
+    "pvac/include/pvac/utils/text.hpp": "67a0dfb05f88c64aa447907665dbe88add957a18e495f39303b221d0f7440cff",
+    "pvac_ffi/pvac_ffi.ml": "722efbf7ad4eee263eaf37c6de182b290011bd1b9290eabcd5ef0bffcdfabeb5",
+    "pvac_ffi/pvac_stubs.cpp": "d8fc28785de58709db27d4929e064578f6f4138eaf7ec9b3e9bc0ac91ffeae2d"
+  },
+  "extraction": {
+    "transaction.ml": {
+      "source": "lib/core/transaction.ml",
+      "spans": [
+        [
+          null,
+          "type t ="
+        ],
+        [
+          "let stealth_min_ou_default",
+          "let program_deploy_min_ou_from_wire_len"
+        ]
+      ],
+      "compiled_sha256": "4139b0ef7f329b12c1102964ec71684273fb8621c8074a35259264762b4acafa"
+    },
+    "preverify_receipt_policy.ml": {
+      "source": "lib/core/preverify_receipt_policy.ml",
+      "spans": [
+        [
+          null,
+          "let check ~epoch_id"
+        ]
+      ],
+      "compiled_sha256": "5c872f035725467cb13bc506f3e3dfc2ac29856b873f1bc4de23d7762936c147"
+    },
+    "emission_schedule.ml": {
+      "source": "lib/core/emission_schedule.ml",
+      "spans": [
+        [
+          null,
+          "let parse_nonnegative"
+        ]
+      ],
+      "compiled_sha256": "a179e74e9ae665f335e602ed430cbf3534d217212744af1bed83cd1401babc0a"
+    },
+    "validator_entry.ml": {
+      "source": "lib/core/validator_entry.ml",
+      "spans": [
+        [
+          "type parameters = {",
+          "type snapshot = {"
+        ]
+      ],
+      "compiled_sha256": "ed70cef34eea3320c4a0bf65aa6af47df11d2c4b99e37cdac5c2da27c101cc6b"
+    },
+    "validator_policy.ml": {
+      "source": "lib/core/validator_policy.ml",
+      "spans": [
+        [
+          null,
+          "let withdraw_epoch"
+        ],
+        [
+          "let parse_activation",
+          "let lifecycle_enabled"
+        ]
+      ],
+      "compiled_sha256": "79484117d65c059ef1552096705589fc59ad93f84308601c851e1185a59ab809"
+    },
+    "validator_ready_policy.ml": {
+      "source": "lib/core/validator_ready_policy.ml",
+      "spans": [
+        [
+          "let window = 2L",
+          "let window_id = Printf.sprintf \"proposal_delay%Ld_inclusion_first\" window"
+        ],
+        [
+          "let window_id = Printf.sprintf \"proposal_delay%Ld_inclusion_first\" window",
+          "let expired ~head ~reference ="
+        ]
+      ],
+      "compiled_sha256": "ad44219f4476808bdcdce059e880948ee53bbfce1caab812f127836695fae060"
+    },
+    "set_fold.ml": {
+      "source": "lib/core/set_fold.ml",
+      "spans": [
+        [
+          "type cfg = {",
+          "type proof = {"
+        ],
+        [
+          "let marks_id = \"duty_marks:final_round:historic_set:precommit:ordered:atomic:age_2_16:wire_72\"",
+          "type counts = {"
+        ],
+        [
+          "let standard = {",
+          "let participating = {"
+        ],
+        [
+          "let participating = {",
+          "let empty = {"
+        ],
+        [
+          "let validate_cfg cfg =",
+          "let consensus_id cfg ="
+        ],
+        [
+          "let consensus_id cfg =",
+          "let replacement_limit cfg ="
+        ]
+      ],
+      "compiled_sha256": "b38d7de8d3d7d1706830bfba764872db06a9f6d7e39228c6fb8205c06e924ab3"
+    },
+    "set_rule.ml": {
+      "source": "node_runtime/set_rule.ml",
+      "spans": [
+        [
+          "let consensus_id = \"set_fold:standard_then_participating\"",
+          "let start rules ="
+        ]
+      ],
+      "compiled_sha256": "6a1aaea7a3acea620ca5a6f3da07592c77ec4554a0c0c6e283c80fb6efaad00a"
+    },
+    "private_transition.ml": {
+      "source": "lib/core/private_transition.ml",
+      "spans": [
+        [
+          "let consensus_id = \"private_receipt:verify_apply:retry_tx:amount_link_v1\"",
+          "type limits = {"
+        ]
+      ],
+      "compiled_sha256": "44840eb45d79e4357505ed1e074da0a25074531a8dfb7863aec59141a4ad0d98"
+    },
+    "circle_cell_transition.ml": {
+      "source": "lib/core/circle_private/circle_cell_transition.ml",
+      "spans": [
+        [
+          "let consensus_id = \"circle_receipt:verify_apply:retry_tx:amount_link_v1\"",
+          "type cell ="
+        ]
+      ],
+      "compiled_sha256": "c8e88e224f9f3b37814a5077adca0e0f210e2552e17bf793f4e4fd309fce44f6"
+    },
+    "circle_hfhe_transcript.ml": {
+      "source": "lib/core/circle_wasm/circle_hfhe_transcript.ml",
+      "spans": [
+        [
+          "let consensus_id = \"receipt_mode:amount_link_v1\"",
+          "let max_entries = 16"
+        ]
+      ],
+      "compiled_sha256": "52caf359f30af059f4f42d519ec25e56439213ed46c829bb0983e8f1472936c0"
+    },
+    "circle_runtime_storage.ml": {
+      "source": "circle_runtime/circle_runtime_storage.ml",
+      "spans": [
+        [
+          "let consensus_id = \"circle_storage:cell_owner:standard\"",
+          "let reserved_prefix key ="
+        ]
+      ],
+      "compiled_sha256": "f37140f062347465e60af0d6d3b0891019cd73ad84a1663e759c71093d68bcd6"
+    },
+    "consensus_reward_attribution.ml": {
+      "source": "node_runtime/consensus_reward_attribution.ml",
+      "spans": [
+        [
+          "let consensus_id = \"reward_source:finalized_parent\"",
+          "type t = Epoch_exec.reward_attribution = {"
+        ]
+      ],
+      "compiled_sha256": "6f19575794cf1d96da184ea3237a26d2abc0db1489d9529e7283a74d1b535aef"
+    },
+    "fee_policy.ml": {
+      "source": "lib/core/fee_policy.ml",
+      "spans": [
+        [
+          "let consensus_id = \"fee_burn:1:5\"",
+          "type market = {"
+        ]
+      ],
+      "compiled_sha256": "9afe910b429ffc8768e27ef61d25e0ce0ef4b5b96e749fdbe5374ccb9013327f"
+    },
+    "private_ledger.ml": {
+      "source": "lib/core/private_ledger.ml",
+      "spans": [
+        [
+          "let cipher_proof_id =",
+          "let prepared_cipher_proof ~cap current_cipher payload ="
+        ]
+      ],
+      "compiled_sha256": "99c6d62b75708ea5de9a5fe69143bc03aca2fa8d126863561b48ded7c5a1ed42"
+    },
+    "circle_wasm_host.ml": {
+      "source": "lib/core/circle_wasm/circle_wasm_host.ml",
+      "spans": [
+        [
+          "let float_id = \"wasm_float:arith_nan_7fc00000_7ff8000000000000:operand_calls:metered_helpers:v1\"",
+          "let float_enabled = function Rule_graph.Active -> true | Rule_graph.Prior -> false"
+        ]
+      ],
+      "compiled_sha256": "cffe11f66c1d4fc5b9c2ef4adab9a5c9b618a0581f7c3418af668f2bae0039f6"
+    },
+    "compute_bill.ml": {
+      "source": "lib/core/compute_bill.ml",
+      "spans": [
+        [
+          "let max_wire = 262_144",
+          "let max_fuel = 5_000_000"
+        ],
+        [
+          "let max_fuel = 5_000_000",
+          "let model_limit = 67_108_864L"
+        ],
+        [
+          "let model_limit = 67_108_864L",
+          "let resource_limits ~fuel ~memory ~guest ="
+        ],
+        [
+          "let consensus_id = Printf.sprintf",
+          "let encode_request ~fuel records ="
+        ]
+      ],
+      "compiled_sha256": "2699f3c3afd21286024bb3964a9b34a615c813ad8119298593e0127bda056149"
+    },
+    "tx_envelope.ml": {
+      "source": "lib/core/tx_envelope.ml",
+      "spans": [
+        [
+          "let consensus_id = \"sender_key32_signature64_base64_scalar_unique_nonce\"",
+          "module Nonces = Set.Make (struct"
+        ]
+      ],
+      "compiled_sha256": "1174fde3709417239e6e6881657656a7d135ac54ff457ff0d8cfc84ed8fd946f"
+    },
+    "tx_signature.ml": {
+      "source": "lib/core/tx_signature.ml",
+      "spans": [
+        [
+          "type t = Historical | Network of string",
+          "let at_plan ~chain_id ~activation_epoch ~epoch ="
+        ],
+        [
+          "let at_plan ~chain_id ~activation_epoch ~epoch =",
+          "let at ~chain_id ~epoch ="
+        ],
+        [
+          "let at ~chain_id ~epoch =",
+          "let bytes mode tx ="
+        ],
+        [
+          "let consensus_id = \"ed25519:oce1:transaction_network:chain_id:signing_json\"",
+          null
+        ]
+      ],
+      "compiled_sha256": "063da563b34b01a8ed9ca3089938a17d53090d4b7fac9665abb17ba2dd60858d"
+    },
+    "resource_lanes.ml": {
+      "source": "lib/core/resource_lanes.ml",
+      "spans": [
+        [
+          "type lane =",
+          "type budget = {"
+        ],
+        [
+          "type budget = {",
+          "type used = {"
+        ],
+        [
+          "let to_string = function",
+          "let all = ["
+        ],
+        [
+          "let all = [",
+          "let preverify_lanes = [Circle_compute; Pvac; Fhe]"
+        ],
+        [
+          "let default_budget = function",
+          "let preverify_required_queue_limit = 128"
+        ]
+      ],
+      "compiled_sha256": "a1412ec6a8641b5b7a74c5c68fefda076e5ab8e2c310dd3358e860a999f36257"
+    },
+    "tx_staging.ml": {
+      "source": "lib/core/tx_staging.ml",
+      "spans": [
+        [
+          "let max_ou_per_epoch = Z.of_int 10_000_000_000",
+          "let compare_sender_entry a b ="
+        ]
+      ],
+      "compiled_sha256": "8f55354540fe1954b4b36325a126aabaccfbc3b529148fa65a2ba15faedf6c91"
+    },
+    "startup_runtime_limits.ml": {
+      "source": "node_runtime/startup_runtime_limits.ml",
+      "spans": [
+        [
+          null,
+          "let consensus_limits env"
+        ],
+        [
+          "let proposal_limits env",
+          null
+        ]
+      ],
+      "compiled_sha256": "bb375d688326027234359eb5c6c17bf900a7698e8c1ec8148c5e4584b1b2bebd"
+    },
+    "consensus_proposal.ml": {
+      "source": "node_runtime/consensus_proposal.ml",
+      "spans": [
+        [
+          "type limits = {",
+          "type totals = {"
+        ],
+        [
+          "let limits ~max_txs ~max_bytes ~max_ou =",
+          "let wire_size tx ="
+        ]
+      ],
+      "compiled_sha256": "4aa934eacd5f50aea90d64d7a224b74a07959f0ff871a5042d24f982cb22150e"
+    },
+    "int_work.ml": {
+      "source": "lib/vm/runtime/int_work.ml",
+      "spans": [
+        [
+          "let consensus_id = \"cells_64_product_cap_1000000\"",
+          "let item_cap = 1_000_000"
+        ]
+      ],
+      "compiled_sha256": "8ab24932e83346a0e439618448f3a057e8c51eb20447994756e536cabe0d242c"
+    },
+    "byte_work.ml": {
+      "source": "lib/vm/runtime/byte_work.ml",
+      "spans": [
+        [
+          "type limits = {",
+          "type request ="
+        ],
+        [
+          "let consensus_limits = {",
+          "let consensus_id ="
+        ],
+        [
+          "let consensus_id =",
+          "let event_left budget = budget.event_left"
+        ]
+      ],
+      "compiled_sha256": "a8fa29fe3281f31362d26760d1e7185f884e68bc137ca804f94cc71cc86f5b10"
+    },
+    "fhe_memory.ml": {
+      "source": "lib/vm/runtime/fhe_memory.ml",
+      "spans": [
+        [
+          "let limit = Z.of_int 536_870_912",
+          "let image_factor = Z.of_int 16"
+        ],
+        [
+          "let image_factor = Z.of_int 16",
+          "let key_factor = Z.of_int 8"
+        ],
+        [
+          "let key_factor = Z.of_int 8",
+          "let key_scratch = Z.of_int 270_336"
+        ],
+        [
+          "let key_scratch = Z.of_int 270_336",
+          "let public_cells = Z.of_int 65_536"
+        ],
+        [
+          "let public_cells = Z.of_int 65_536",
+          "let cell_bytes = Z.of_int 64"
+        ],
+        [
+          "let cell_bytes = Z.of_int 64",
+          "let key_io_bytes = Z.of_int 64"
+        ],
+        [
+          "let key_io_bytes = Z.of_int 64",
+          "let consensus_id = String.concat \":\" ["
+        ],
+        [
+          "let consensus_id = String.concat \":\" [",
+          "let create () = {spent = Z.zero}"
+        ]
+      ],
+      "compiled_sha256": "47d6ba33b57d1743fd8cb13933391dfc30946c9be01e51b01aa632149f806d62"
+    },
+    "fhe_view_policy.ml": {
+      "source": "lib/vm/runtime/fhe_view_policy.ml",
+      "spans": [
+        [
+          "let base_effort = 10_000",
+          "let base_layer_pairs = 4"
+        ],
+        [
+          "let base_layer_pairs = 4",
+          "let edge_divisor = 8"
+        ],
+        [
+          "let edge_divisor = 8",
+          "let valid shape ="
+        ],
+        [
+          "let cell_limit = Z.of_int 65_536",
+          "let layer_limit = Z.of_int 4_096"
+        ],
+        [
+          "let layer_limit = Z.of_int 4_096",
+          "let word_limit = Z.of_int 1_048_576"
+        ],
+        [
+          "let word_limit = Z.of_int 1_048_576",
+          "let cell_effort = 16"
+        ],
+        [
+          "let cell_effort = 16",
+          "let product_edges = 8"
+        ],
+        [
+          "let product_edges = 8",
+          "let sample_factor = 32"
+        ],
+        [
+          "let sample_factor = 32",
+          "let memory_cell = 1024"
+        ],
+        [
+          "let memory_cell = 1024",
+          "let memory_item = 4096"
+        ],
+        [
+          "let memory_item = 4096",
+          "let memory_word = 128"
+        ],
+        [
+          "let memory_word = 128",
+          "let sampling ~rows ~columns ~weight ~noise ~branches ="
+        ],
+        [
+          "let consensus_id = String.concat \":\" [",
+          "let plan op ~base ~left_words ~right_words ~product_words ~sample_work ~left ~right ="
+        ]
+      ],
+      "compiled_sha256": "3b4a894d9d03f268713412d6c17cf0bcff87c17418f56735ce98882d098d8b9e"
+    },
+    "program_package.ml": {
+      "source": "lib/vm/wire/program_package.ml",
+      "spans": [
+        [
+          "let source_id = \"aml_source:oct_gen_count:source_abi:checked_address:option_values:scalar_equality:shape_limits:overlap_64\"",
+          "let preview_id = \"aml_2_preview:certificate_version:stored_version:source_compat\""
+        ],
+        [
+          "let preview_id = \"aml_2_preview:certificate_version:stored_version:source_compat\"",
+          "type package = {"
+        ],
+        [
+          "let compiler_profile_id = \"rehovot_1\"",
+          "let standard_id = \"rehovot_runtime\""
+        ],
+        [
+          "let standard_id = \"rehovot_runtime\"",
+          "let supported_compiler_profiles = [1]"
+        ]
+      ],
+      "compiled_sha256": "d335e73451330e568d8f1ddaf94fd5643faca7f53a2b73e3cf8d77fd735a25a8"
+    },
+    "program_record.ml": {
+      "source": "lib/vm/runtime/program_record.ml",
+      "spans": [
+        [
+          "let identity stamp =",
+          "let consensus_id = identity Source_stamp.id"
+        ],
+        [
+          "let consensus_id = identity Source_stamp.id",
+          "let released_id = identity \"b21391865660ba35426eaabc15e8d8a4d5a04a3754b73042bf57d5697fe108b6\""
+        ],
+        [
+          "let released_id = identity \"b21391865660ba35426eaabc15e8d8a4d5a04a3754b73042bf57d5697fe108b6\"",
+          "let encode_sources value ="
+        ]
+      ],
+      "compiled_sha256": "adbdb93e4a105b3f1047ac6c98a4a8b5204e132c94c2eea85f34285040b2bfb6"
+    },
+    "contract_vm.ml": {
+      "source": "lib/vm/runtime/contract_vm.ml",
+      "spans": [
+        [
+          null,
+          "type mem ="
+        ],
+        [
+          "let effort_cost =",
+          "let is_valid_addr "
+        ]
+      ],
+      "compiled_sha256": "f0bab461af48cde0fabebeb2d2aef6c8163984cc7162cb4ff11822be5d7bb618"
+    },
+    "fhe_image.ml": {
+      "source": "lib/core/fhe_image.ml",
+      "spans": [
+        [
+          null,
+          "let key_size "
+        ]
+      ],
+      "compiled_sha256": "b440cff7e1b190c41fd917406f720e1011510a6ae609057d9d8cb845cbd445ba"
+    },
+    "pvac_ffi.ml": {
+      "source": "pvac_ffi/pvac_ffi.ml",
+      "spans": [
+        [
+          null,
+          "external isolate_worker"
+        ],
+        [
+          "external aes_kat :",
+          null
+        ]
+      ],
+      "compiled_sha256": "90c34b45128c0f6b781f5c076f3a90e7121983ed5d20eb12713e4e5ceea295c8"
+    },
+    "crypto_fhe_balance.ml": {
+      "source": "lib/core/crypto.ml",
+      "spans": [
+        [
+          "  let aes_kat_hex_cache",
+          "  let derive_pvac_keys"
+        ]
+      ],
+      "compiled_sha256": "639b0582007071e6e43fe6d8d0f739d4df5e7fb7669965d5ac5046ab2c8fb52b"
+    },
+    "pvac_registry.ml": {
+      "source": "lib/core/pvac_registry.ml",
+      "spans": [
+        [
+          "module FB = Crypto.FheBalance",
+          "type status = {"
+        ],
+        [
+          "let expected_kat () = FB.aes_kat_hex ()",
+          "let key_hash blob ="
+        ]
+      ],
+      "compiled_sha256": "6df125a75740e8976d3a7f5aa968088d9e1333d35e4f4f6a17ba991cc62595e4"
+    },
+    "kat.cpp": {
+      "source": "pvac_ffi/pvac_stubs.cpp",
+      "start": 63861,
+      "end": 64361,
+      "compiled_sha256": "518f6793d8bbe28ab7bb4f479487f3d15d399d9d02f4f7494b667d6010697f25"
+    }
+  },
+  "compiled_modules": [
+    "circle_cell_transition.ml",
+    "circle_hfhe_transcript.ml",
+    "circle_wasm_host.ml",
+    "compute_bill.ml",
+    "emission_schedule.ml",
+    "fee_policy.ml",
+    "pvac_ffi.ml",
+    "fhe_image.ml",
+    "preverify_receipt_policy.ml",
+    "private_ledger.ml",
+    "private_result_policy.ml",
+    "private_transition.ml",
+    "crypto_fhe_balance.ml",
+    "crypto.ml",
+    "pvac_registry.ml",
+    "resource_lanes.ml",
+    "reward_policy.ml",
+    "epoch_time.ml",
+    "c_epoch_time_policy.ml",
+    "c_protocol.ml",
+    "c_quorum_policy.ml",
+    "octra_consensus.ml",
+    "rule_graph.ml",
+    "validator_participation.ml",
+    "set_fold.ml",
+    "transaction.ml",
+    "tx_envelope.ml",
+    "tx_signature.ml",
+    "tx_staging.ml",
+    "validator_entry.ml",
+    "validator_policy.ml",
+    "validator_ready_policy.ml",
+    "octra_core.ml",
+    "consensus_reward_attribution.ml",
+    "epoch_cadence.ml",
+    "circle_runtime_storage.ml",
+    "octra_circle_runtime.ml",
+    "oce1.ml",
+    "hash_domain.ml",
+    "octra_net.ml",
+    "byte_work.ml",
+    "contract_vm.ml",
+    "fhe_memory.ml",
+    "fhe_view_policy.ml",
+    "int_work.ml",
+    "program_package.ml",
+    "source_stamp.ml",
+    "program_record.ml",
+    "octra_vm.ml",
+    "set_rule.ml",
+    "consensus_proposal.ml",
+    "startup_runtime_limits.ml",
+    "consensus_profile.ml",
+    "octra_node_runtime.ml",
+    "oracle.ml"
+  ],
+  "compiled_sha256": {
+    "circle_cell_transition.ml": "c8e88e224f9f3b37814a5077adca0e0f210e2552e17bf793f4e4fd309fce44f6",
+    "circle_hfhe_transcript.ml": "52caf359f30af059f4f42d519ec25e56439213ed46c829bb0983e8f1472936c0",
+    "circle_wasm_host.ml": "cffe11f66c1d4fc5b9c2ef4adab9a5c9b618a0581f7c3418af668f2bae0039f6",
+    "compute_bill.ml": "2699f3c3afd21286024bb3964a9b34a615c813ad8119298593e0127bda056149",
+    "emission_schedule.ml": "a179e74e9ae665f335e602ed430cbf3534d217212744af1bed83cd1401babc0a",
+    "fee_policy.ml": "9afe910b429ffc8768e27ef61d25e0ce0ef4b5b96e749fdbe5374ccb9013327f",
+    "pvac_ffi.ml": "90c34b45128c0f6b781f5c076f3a90e7121983ed5d20eb12713e4e5ceea295c8",
+    "fhe_image.ml": "b440cff7e1b190c41fd917406f720e1011510a6ae609057d9d8cb845cbd445ba",
+    "preverify_receipt_policy.ml": "5c872f035725467cb13bc506f3e3dfc2ac29856b873f1bc4de23d7762936c147",
+    "private_ledger.ml": "99c6d62b75708ea5de9a5fe69143bc03aca2fa8d126863561b48ded7c5a1ed42",
+    "private_result_policy.ml": "566afb926c9a15030b6aaf54c6e5cd7cf7d126be72a16ddb10ad075708664ac4",
+    "private_transition.ml": "44840eb45d79e4357505ed1e074da0a25074531a8dfb7863aec59141a4ad0d98",
+    "crypto_fhe_balance.ml": "639b0582007071e6e43fe6d8d0f739d4df5e7fb7669965d5ac5046ab2c8fb52b",
+    "crypto.ml": "bc5f4ab04a0cab943cbd9df0e9acbe70d0f3bbfda257ac67ee2e5fa910606061",
+    "pvac_registry.ml": "6df125a75740e8976d3a7f5aa968088d9e1333d35e4f4f6a17ba991cc62595e4",
+    "resource_lanes.ml": "a1412ec6a8641b5b7a74c5c68fefda076e5ab8e2c310dd3358e860a999f36257",
+    "reward_policy.ml": "af1fdd6b384b75c1996d52de7b05777dca754b03a063fef4f9c26b148641a7a4",
+    "epoch_time.ml": "91d265f902559a670c1df60aa123022dc1be6b51b09315db262ede2b87f14f1d",
+    "c_epoch_time_policy.ml": "cf83184df409e6a34d0fa49943428f201400499278e06088ec1d1008bb1ce82a",
+    "c_protocol.ml": "29e9eca729d6cf09572320f9585febda32031ef8b3b4c0cd594612af1437939d",
+    "c_quorum_policy.ml": "0f452a0d87d5ed4d788054d2c88a5202b1da5ca6695040176ed29745865b23fd",
+    "octra_consensus.ml": "c5f18ca7bad090e2fc0735783a67b955d9da9923281a93fb76f59444ff7fedcc",
+    "rule_graph.ml": "60df74d8887bff1cb316aa45978048bb414accccee701a21914c683c1379cf84",
+    "validator_participation.ml": "1077e213ba406a3ad706a9c484c51d58da49145fb9ae4728a75f78e3d14b3173",
+    "set_fold.ml": "b38d7de8d3d7d1706830bfba764872db06a9f6d7e39228c6fb8205c06e924ab3",
+    "transaction.ml": "4139b0ef7f329b12c1102964ec71684273fb8621c8074a35259264762b4acafa",
+    "tx_envelope.ml": "1174fde3709417239e6e6881657656a7d135ac54ff457ff0d8cfc84ed8fd946f",
+    "tx_signature.ml": "063da563b34b01a8ed9ca3089938a17d53090d4b7fac9665abb17ba2dd60858d",
+    "tx_staging.ml": "8f55354540fe1954b4b36325a126aabaccfbc3b529148fa65a2ba15faedf6c91",
+    "validator_entry.ml": "ed70cef34eea3320c4a0bf65aa6af47df11d2c4b99e37cdac5c2da27c101cc6b",
+    "validator_policy.ml": "79484117d65c059ef1552096705589fc59ad93f84308601c851e1185a59ab809",
+    "validator_ready_policy.ml": "ad44219f4476808bdcdce059e880948ee53bbfce1caab812f127836695fae060",
+    "octra_core.ml": "4ea0ee191397435d8b951fedef9a60b0e1ad6355622ec1cb625beb3a49b6cd0f",
+    "consensus_reward_attribution.ml": "6f19575794cf1d96da184ea3237a26d2abc0db1489d9529e7283a74d1b535aef",
+    "epoch_cadence.ml": "3e51008e5f047a335b4e82a0e037439fe90040e685042160e6ca0f00b94cd7e0",
+    "circle_runtime_storage.ml": "f37140f062347465e60af0d6d3b0891019cd73ad84a1663e759c71093d68bcd6",
+    "octra_circle_runtime.ml": "8ec4db5b926bb861bf33d975c16eb7af352ebd8090983255603c9f1cd7b91946",
+    "oce1.ml": "09b42cc78182a45c783e91e8e84b38e04a63195da6a78c3ddb62fa6d51307d87",
+    "hash_domain.ml": "4da5d93da24f9be2a34d787697ada6612d6fcb56e9ec614f9163fe3a828d6963",
+    "octra_net.ml": "6daef1b1b5a0746e8f928ee92e31caf3ea5ec1ae7b7b054b7f8c262bacf41df8",
+    "byte_work.ml": "a8fa29fe3281f31362d26760d1e7185f884e68bc137ca804f94cc71cc86f5b10",
+    "contract_vm.ml": "f0bab461af48cde0fabebeb2d2aef6c8163984cc7162cb4ff11822be5d7bb618",
+    "fhe_memory.ml": "47d6ba33b57d1743fd8cb13933391dfc30946c9be01e51b01aa632149f806d62",
+    "fhe_view_policy.ml": "3b4a894d9d03f268713412d6c17cf0bcff87c17418f56735ce98882d098d8b9e",
+    "int_work.ml": "8ab24932e83346a0e439618448f3a057e8c51eb20447994756e536cabe0d242c",
+    "program_package.ml": "d335e73451330e568d8f1ddaf94fd5643faca7f53a2b73e3cf8d77fd735a25a8",
+    "source_stamp.ml": "6cdba56500e573759f3f381d35b817db0cc3233911e81a31fd982d0034a3f1c2",
+    "program_record.ml": "adbdb93e4a105b3f1047ac6c98a4a8b5204e132c94c2eea85f34285040b2bfb6",
+    "octra_vm.ml": "c65b97707698d2c7c9858d1a27770cf45fec09deec40383141a24087417097a5",
+    "set_rule.ml": "6a1aaea7a3acea620ca5a6f3da07592c77ec4554a0c0c6e283c80fb6efaad00a",
+    "consensus_proposal.ml": "4aa934eacd5f50aea90d64d7a224b74a07959f0ff871a5042d24f982cb22150e",
+    "startup_runtime_limits.ml": "bb375d688326027234359eb5c6c17bf900a7698e8c1ec8148c5e4584b1b2bebd",
+    "consensus_profile.ml": "7a4bc9d30b63833a187fb540e60efa1359e938fbb6bcbe46b459bbe66ef73315",
+    "octra_node_runtime.ml": "bd4c4cc4754c02a6ee26b2520f56ec89f4e0732d39dfbd2834575556169505cc",
+    "oracle.ml": "efec28c25ef4133112fbb3fa42b93558e225fb33ac9b977816bcc6f237030667"
+  },
+  "source_stamp": "dc82575c6ce78ea308000118d83b80ba7006fc77cf06c66cc98902cc85382ec5",
+  "oracle_sha256": "efec28c25ef4133112fbb3fa42b93558e225fb33ac9b977816bcc6f237030667",
+  "build_command": [
+    [
+      "clang++",
+      "-std=c++17",
+      "-O2",
+      "-I",
+      "/Users/androolloyd/.opam/4.14.2/lib/ocaml",
+      "-I",
+      "/Users/androolloyd/Development/octra/out/upstream-adoption-20261112/native-profile/pvac/include",
+      "-c",
+      "kat.cpp",
+      "-o",
+      "kat.o"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "circle_cell_transition.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "circle_hfhe_transcript.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "circle_wasm_host.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "compute_bill.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "emission_schedule.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "fee_policy.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "pvac_ffi.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "fhe_image.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "preverify_receipt_policy.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "private_ledger.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "private_result_policy.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "private_transition.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "crypto_fhe_balance.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "crypto.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "pvac_registry.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "resource_lanes.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "reward_policy.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "epoch_time.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "c_epoch_time_policy.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "c_protocol.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "c_quorum_policy.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "octra_consensus.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "rule_graph.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "validator_participation.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "set_fold.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "transaction.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "tx_envelope.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "tx_signature.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "tx_staging.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "validator_entry.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "validator_policy.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "validator_ready_policy.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "octra_core.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "consensus_reward_attribution.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "epoch_cadence.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "circle_runtime_storage.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "octra_circle_runtime.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "oce1.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "hash_domain.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "octra_net.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "byte_work.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "contract_vm.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "fhe_memory.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "fhe_view_policy.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "int_work.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "program_package.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "source_stamp.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "program_record.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "octra_vm.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "set_rule.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "consensus_proposal.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "startup_runtime_limits.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "consensus_profile.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "octra_node_runtime.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-w",
+      "-a",
+      "-c",
+      "oracle.ml"
+    ],
+    [
+      "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+      "ocamlopt",
+      "-package",
+      "zarith,yojson,base64,digestif.c,unix",
+      "-linkpkg",
+      "circle_cell_transition.cmx",
+      "circle_hfhe_transcript.cmx",
+      "circle_wasm_host.cmx",
+      "compute_bill.cmx",
+      "emission_schedule.cmx",
+      "fee_policy.cmx",
+      "pvac_ffi.cmx",
+      "fhe_image.cmx",
+      "preverify_receipt_policy.cmx",
+      "private_ledger.cmx",
+      "private_result_policy.cmx",
+      "private_transition.cmx",
+      "crypto_fhe_balance.cmx",
+      "crypto.cmx",
+      "pvac_registry.cmx",
+      "resource_lanes.cmx",
+      "reward_policy.cmx",
+      "epoch_time.cmx",
+      "c_epoch_time_policy.cmx",
+      "c_protocol.cmx",
+      "c_quorum_policy.cmx",
+      "octra_consensus.cmx",
+      "rule_graph.cmx",
+      "validator_participation.cmx",
+      "set_fold.cmx",
+      "transaction.cmx",
+      "tx_envelope.cmx",
+      "tx_signature.cmx",
+      "tx_staging.cmx",
+      "validator_entry.cmx",
+      "validator_policy.cmx",
+      "validator_ready_policy.cmx",
+      "octra_core.cmx",
+      "consensus_reward_attribution.cmx",
+      "epoch_cadence.cmx",
+      "circle_runtime_storage.cmx",
+      "octra_circle_runtime.cmx",
+      "oce1.cmx",
+      "hash_domain.cmx",
+      "octra_net.cmx",
+      "byte_work.cmx",
+      "contract_vm.cmx",
+      "fhe_memory.cmx",
+      "fhe_view_policy.cmx",
+      "int_work.cmx",
+      "program_package.cmx",
+      "source_stamp.cmx",
+      "program_record.cmx",
+      "octra_vm.cmx",
+      "set_rule.cmx",
+      "consensus_proposal.cmx",
+      "startup_runtime_limits.cmx",
+      "consensus_profile.cmx",
+      "octra_node_runtime.cmx",
+      "oracle.cmx",
+      "kat.o",
+      "-cclib",
+      "-lc++",
+      "-o",
+      "oracle"
+    ]
+  ],
+  "compiler_version": "4.14.2",
+  "scope": "Native c49 startup/profile oracle using exact dependency declaration slices.\n\nConsensus_profile and all hash/activation implementations are unchanged. Unused\nexecution/store code is excluded, with every original source and compiled slice\nhashed. The KAT calls the original native PVAC AES implementation, not a constant.\nThis captures profile commitments, not state execution or whole-node parity.\n"
+}

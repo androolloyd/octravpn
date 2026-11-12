@@ -59,10 +59,11 @@ impl<H: Host, C: Publication> Driver<H, C> {
                         && vote.vote_type == octra_node_protocol::consensus::VoteType::Prevote
                         && vote.round < self.engine.state().round
                         && self.engine.polc_request_pending(vote.round)
-                        && !self
-                            .engine
-                            .historical_prevote_known(vote.round, &vote.validator)
+                        && self.engine.historical_prevote_needed(&vote)
                 }
+                0x30 => self
+                    .engine
+                    .past_proposal_needed(&Proposal::decode(&frame.payload)?)?,
                 0x32 => {
                     let f = Finalize::decode(&frame.payload)?;
                     f.chain_id == self.chain
@@ -71,7 +72,20 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 }
                 _ => false,
             };
-            if !needed || !self.historical_replays.remember(&id) {
+            let replay_id = if frame.message == 0x30 {
+                let proposal = Proposal::decode(&frame.payload)?;
+                let request = self
+                    .proof_search
+                    .as_ref()
+                    .filter(|search| {
+                        search.height == proposal.epoch_id && search.target == proposal.round
+                    })
+                    .map_or_else(|| "once".to_owned(), |search| search.sent_at.to_string());
+                [id.as_slice(), b":", request.as_bytes()].concat()
+            } else {
+                id.to_vec()
+            };
+            if !needed || !self.historical_replays.remember(&replay_id) {
                 return Ok(());
             }
         }
@@ -97,12 +111,23 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 } else {
                     self.host.validators(p.epoch_id).await?
                 };
-                if let Some(reason) = driver_policy::validate_proposal_frame(
-                    &self.chain,
-                    &validators,
-                    self.engine.protocol(),
-                    &p,
-                )? {
+                let historical = self.engine.past_proposal_needed(&p)?
+                    && octra_node_protocol::consensus::engine::proof_proposal_valid(
+                        &self.chain,
+                        &validators,
+                        self.engine.protocol(),
+                        &p,
+                    )?;
+                if let Some(reason) = if historical {
+                    None
+                } else {
+                    driver_policy::validate_proposal_frame(
+                        &self.chain,
+                        &validators,
+                        self.engine.protocol(),
+                        &p,
+                    )?
+                } {
                     // An unresolved future set is not evidence against its
                     // relay. Current authenticated errors retain native fault
                     // ownership: envelope faults belong to the signer.
@@ -157,7 +182,18 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 } else {
                     self.host.validators(vote.epoch_id).await?
                 };
-                let Some(public) = validators.public_key(&vote.validator) else {
+                let source = if vote.vote_type == octra_node_protocol::consensus::VoteType::Prevote
+                    && vote.round < round
+                {
+                    validators.source_set(&self.chain, height)
+                } else {
+                    None
+                };
+                let Some(public) = validators.public_key(&vote.validator).or_else(|| {
+                    source
+                        .as_ref()
+                        .and_then(|set| set.public_key(&vote.validator))
+                }) else {
                     if vote.epoch_id == height {
                         self.seen.remember(&id);
                     }
@@ -343,6 +379,14 @@ impl<H: Host, C: Publication> Driver<H, C> {
         Ok(())
     }
     async fn reply_sync(&mut self, peer: &Peer, sync: &RoundSync) -> Result<(), Error> {
+        if self
+            .engine
+            .validators()
+            .public_key(&sync.validator)
+            .is_none_or(|key| handshake::node_id(key).as_slice() != peer.hello().node_id)
+        {
+            return Ok(());
+        }
         let prior = self.round_replies.get(&sync.validator);
         let progresses = prior.is_some_and(|(epoch, round, step, _)| {
             sync.epoch_id > *epoch
@@ -416,9 +460,23 @@ impl<H: Host, C: Publication> Driver<H, C> {
             Self::send(peer, 0x30, proposal).await?;
         }
         let mut votes = self.engine.current_votes();
-        if sync.round < self.engine.state().round {
-            votes.extend(self.engine.polc_votes(sync.round));
+        if sync.round < self.engine.state().round
+            || (sync.round == self.engine.state().round && self.engine.round_wait())
+        {
+            let proof = self.engine.polc_votes(sync.round);
+            if let Some(proposal) = proof
+                .first()
+                .and_then(|v| self.engine.find_proposal(&v.proposal_id, sync.round))
+            {
+                Self::send(peer, 0x30, proposal).await?;
+            }
+            votes.extend(proof);
+            if self.engine.round_wait() {
+                votes.extend(self.engine.precommits_for_round(sync.round));
+            }
         }
+        votes.sort_by_key(driver_policy::vote_key);
+        votes.dedup();
         for vote in votes {
             let host = self.host.clone();
             if let Some(stored) = self

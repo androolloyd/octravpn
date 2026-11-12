@@ -26,6 +26,7 @@ pub enum Action {
     RouteConsent {
         hops: Vec<super::payer::startup::route::Consent>,
         resume: bool,
+        admission_output: Option<PathBuf>,
     },
 }
 impl Action {
@@ -53,11 +54,15 @@ impl Action {
                 config.consent(node, requests).await?;
                 Ok(config.wallet.clone())
             }
-            Self::RouteConsent { hops, resume } => {
+            Self::RouteConsent {
+                hops,
+                resume,
+                admission_output,
+            } => {
                 Box::pin(
                     route
                         .context("private route configuration missing")?
-                        .consent(node, hops, resume),
+                        .consent_with_admission(node, hops, resume, admission_output.as_deref()),
                 )
                 .await
             }
@@ -195,7 +200,7 @@ impl Config {
                     ip_tunnel: self.ip_tunnel.clone(),
                 },
                 &wallet,
-                self.purchases,
+                self.purchases.clone(),
             )
             .await?;
         Ok((service, wallet))

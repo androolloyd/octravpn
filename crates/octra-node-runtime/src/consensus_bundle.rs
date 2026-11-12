@@ -14,6 +14,7 @@ use octra_node_protocol::{
 
 /// Resolve from trusted historical configuration at the bundle's epoch.
 pub struct Rules {
+    pub signing: octra_node_protocol::tx_signature::Mode,
     pub payload: Limits,
     pub crypto_active: bool,
     pub stealth_minimum: BigInt,
@@ -112,6 +113,7 @@ fn artifacts(
     let inputs = transaction_outcome::merge(txs, &items.rejections)
         .map_err(|e| error(format!("bundle outcome: {e}")))?;
     if check_epoch {
+        rules.signing.check_active(&inputs).map_err(error)?;
         transaction::check_compute(rules.envelope.compute, rules.envelope.settle, &inputs)
             .map_err(error)?;
         transaction::check_envelopes(rules.envelope.envelope, &inputs).map_err(error)?;

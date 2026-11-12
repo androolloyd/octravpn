@@ -275,6 +275,10 @@ pub(super) async fn run(
             .unwrap(),
         vec![signed.sequence()]
     );
+    // Proof-only probes do not drive this manual fixture's consensus actor.
+    // Publish a real empty QC as a live network would, preserving the pool
+    // roots while keeping the unchanged production freshness check meaningful.
+    fixture.publish(vec![]).await;
     let unsigned = payer
         .prepare_deposit([195; 32], 1, window, &next, prover)
         .await
@@ -292,6 +296,7 @@ pub(super) async fn run(
         relayer: address(&payment_host::address(15)),
         ..window
     };
+    fixture.publish(vec![]).await;
     let no_funds = payer
         .prepare_deposit([194; 32], 1, unfunded, &next, prover)
         .await

@@ -22,6 +22,8 @@ pub(crate) struct Parameters {
     strict: bool,
     cap: bool,
     math: bool,
+    #[serde(default)]
+    keyed: bool,
 }
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Prepared(Parameters);
@@ -43,6 +45,7 @@ pub(crate) fn parameters(input: &Value) -> Step<Parameters> {
         }
         let cap = boolean(input, "cap", None)?;
         let math = boolean(input, "math", Some(false))?;
+        let keyed = boolean(input, "proof_key", Some(false))?;
         let _pairs = boolean(input, "hfhe_pairs", Some(false))?;
         let action = string(input, "action")?;
         if !matches!(action, "verify_zero" | "verify_range" | "verify_bound") {
@@ -70,6 +73,7 @@ pub(crate) fn parameters(input: &Value) -> Step<Parameters> {
             strict,
             cap,
             math,
+            keyed,
         })
     };
     match run() {
@@ -119,7 +123,7 @@ pub(crate) fn verify(prepared: Prepared) -> Value {
         // reapply the incoming Circle five-megabyte registration envelope to a
         // canonical serialization, which native passes straight to its worker.
         let public = private_crypto::load_pubkey(&parameters.public).map_err(crypto)?;
-        if !public.supports_alias_rejection() {
+        if !public.supports_alias_rejection() || (parameters.keyed && !public.powers_ok()) {
             return Ok(false);
         }
         let bound = parameters.action != "verify_zero";
@@ -156,7 +160,7 @@ pub(crate) fn verify(prepared: Prepared) -> Value {
                 &json!({"amount_commitment":commitment}),
                 "amount_commitment",
             )?;
-            proof_result(zero::verify_bound(
+            proof_result(zero::verify_bound_keyed(
                 &public,
                 &cipher,
                 &proof,
@@ -168,9 +172,16 @@ pub(crate) fn verify(prepared: Prepared) -> Value {
                 },
                 parameters.strict,
                 rule,
+                parameters.keyed,
             ))
         } else {
-            proof_result(zero::verify_zero(&public, &cipher, &proof, rule))
+            proof_result(zero::verify_zero_keyed(
+                &public,
+                &cipher,
+                &proof,
+                rule,
+                parameters.keyed,
+            ))
         }
     };
     let result = match run() {

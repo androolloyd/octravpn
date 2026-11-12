@@ -103,9 +103,8 @@ pub fn expected_set(
         target: &target,
         fingerprint: plan.fingerprint.as_bytes(),
     }
-    .restore(&mark)
-    .map_err(error)?
-    .cloned();
+    .restore_with_authors(&mark)
+    .map_err(error)?;
     match round {
         Some(r) if r < 0 => Err(b"pending round is negative".to_vec()),
         Some(r) if epoch == mark.height && r <= mark.round => Ok(current),

@@ -26,7 +26,11 @@ pub struct Score {
     pub bad_count: i64,
     pub connection_count: i64,
     pub ban_until: f64,
+    pub held_seconds: f64,
+    pub pause_until: f64,
     pub last_reason: Vec<u8>,
+    pub drop_count: i64,
+    pub drop_reason: Vec<u8>,
     pub invalid_frames: i64,
     pub bad_signatures: i64,
     pub stale_roots: i64,
@@ -34,6 +38,8 @@ pub struct Score {
 struct Entry {
     bad_start: f64,
     connection_start: f64,
+    held_start: f64,
+    drop_start: f64,
     last_seen: f64,
     score: Score,
 }
@@ -42,12 +48,18 @@ impl Entry {
         Self {
             bad_start: now,
             connection_start: now,
+            held_start: now,
+            drop_start: now,
             last_seen: now,
             score: Score {
                 bad_count: 0,
                 connection_count: 0,
                 ban_until: 0.0,
+                held_seconds: 0.0,
+                pause_until: 0.0,
                 last_reason: Vec::new(),
+                drop_count: 0,
+                drop_reason: Vec::new(),
                 invalid_frames: 0,
                 bad_signatures: 0,
                 stale_roots: 0,
@@ -101,9 +113,21 @@ impl Guard {
         e
     }
     pub fn admit(&mut self, config: Config, now: f64, key: &[u8]) -> Result<(), &'static str> {
+        self.admit_known(config, now, key, false)
+    }
+    pub fn admit_known(
+        &mut self,
+        config: Config,
+        now: f64,
+        key: &[u8],
+        known: bool,
+    ) -> Result<(), &'static str> {
         let e = self.entry(now, key);
-        if e.score.ban_until > now {
+        if e.score.ban_until > now && !known {
             return Err("banned");
+        }
+        if e.score.pause_until > now {
+            return Err("handshake_budget");
         }
         if now - e.connection_start >= config.connection_window {
             e.connection_start = now;
@@ -111,12 +135,49 @@ impl Guard {
         }
         e.score.connection_count = increment(e.score.connection_count);
         if e.score.connection_count > config.max_connections {
-            e.score.last_reason = b"connection_budget".to_vec();
-            e.score.ban_until = now + config.ban;
+            if !known {
+                e.score.last_reason = b"connection_budget".to_vec();
+                e.score.ban_until = now + config.ban;
+            }
             Err("connection_budget")
         } else {
             Ok(())
         }
+    }
+    pub fn report_hold(&mut self, config: Config, now: f64, key: &[u8], held_seconds: f64) {
+        if held_seconds.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+            return;
+        }
+        let e = self.entry(now, key);
+        if now - e.held_start >= config.connection_window {
+            e.held_start = now;
+            e.score.held_seconds = 0.0;
+        }
+        e.score.held_seconds += held_seconds.min(config.connection_window);
+        if e.score.held_seconds > config.connection_window {
+            e.score.pause_until = now + config.connection_window;
+        }
+    }
+    pub fn holding(&self, now: f64, key: &[u8]) -> bool {
+        self.entries
+            .get(key)
+            .is_some_and(|e| e.score.pause_until > now)
+    }
+    pub fn note_drop(
+        &mut self,
+        config: Config,
+        now: f64,
+        key: &[u8],
+        reason: &[u8],
+    ) -> Option<i64> {
+        let e = self.entry(now, key);
+        if now - e.drop_start >= config.connection_window || e.score.drop_reason != reason {
+            e.score.drop_count = 0;
+            e.drop_start = now;
+        }
+        e.score.drop_reason = reason.to_vec();
+        e.score.drop_count = e.score.drop_count.min((1_i64 << 62) - 2) + 1;
+        (e.score.drop_count & (e.score.drop_count - 1) == 0).then_some(e.score.drop_count)
     }
     pub fn report(&mut self, config: Config, now: f64, key: &[u8], reason: &[u8]) -> Bad {
         let e = self.entry(now, key);
@@ -164,6 +225,22 @@ impl Guard {
             .iter()
             .map(|(key, e)| (key.as_slice(), &e.score))
     }
+    pub fn snapshot_at(&self, config: Config, now: f64) -> impl Iterator<Item = (&[u8], Score)> {
+        self.entries.iter().map(move |(key, e)| {
+            let mut score = e.score.clone();
+            if now - e.connection_start >= config.connection_window {
+                score.connection_count = 0;
+            }
+            if now - e.held_start >= config.connection_window {
+                score.held_seconds = 0.0;
+            }
+            if now - e.drop_start >= config.connection_window {
+                score.drop_count = 0;
+                score.drop_reason.clear();
+            }
+            (key.as_slice(), score)
+        })
+    }
 }
 fn increment(value: i64) -> i64 {
     (value.wrapping_add(1) << 1) >> 1
@@ -186,15 +263,77 @@ pub fn identity_key(node_id: &[u8]) -> Vec<u8> {
     [b"node:".as_slice(), node_id].concat()
 }
 pub fn handshake_penalty(reason: &[u8]) -> Option<&'static str> {
-    if contains(reason, b"invalid Ed25519 signature")
+    if [
+        b"chain_id mismatch".as_slice(),
+        b"p2p proto mismatch",
+        b"consensus_config_hash mismatch",
+        b"unknown validator pubkey",
+    ]
+    .iter()
+    .any(|part| contains(reason, part))
+    {
+        None
+    } else if contains(reason, b"invalid Ed25519 signature")
         || contains(reason, b"node_id does not match pubkey")
     {
         Some("bad_signature_handshake")
-    } else if contains(reason, b"frame_payload_limit") || contains(reason, b"expected HELLO") {
+    } else if [
+        b"frame_payload_limit".as_slice(),
+        b"frame_payload_too_large",
+        b"frame_too_large",
+        b"p2p hello:",
+        b"p2p finish:",
+        b"Invalid_argument",
+        b"End_of_file",
+        b"expected HELLO",
+    ]
+    .iter()
+    .any(|part| contains(reason, part))
+    {
         Some("invalid_frame_handshake")
     } else if contains(reason, b"handshake timeout") {
         Some("timeout_handshake")
+    } else if [
+        b"invalid listen port".as_slice(),
+        b"HELLO_FINISH",
+        b"decode",
+        b"malformed",
+    ]
+    .iter()
+    .any(|part| contains(reason, part))
+    {
+        Some("invalid_frame_handshake")
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod upgrade_tests {
+    use super::*;
+    #[test]
+    fn known_hosts_bypass_bans_but_never_handshake_hold_budgets() {
+        let cfg = Config::default();
+        let mut guard = Guard::default();
+        for _ in 0..4 {
+            guard.report(cfg, 0., b"peer", b"signature");
+        }
+        assert_eq!(guard.admit_known(cfg, 1., b"peer", false), Err("banned"));
+        assert_eq!(guard.admit_known(cfg, 1., b"peer", true), Ok(()));
+        guard.report_hold(cfg, 1., b"peer", 6.);
+        guard.report_hold(cfg, 1., b"peer", 5.);
+        assert_eq!(
+            guard.admit_known(cfg, 2., b"peer", true),
+            Err("handshake_budget")
+        );
+        assert_eq!(guard.admit_known(cfg, 11., b"peer", true), Ok(()));
+        guard.report_hold(cfg, 11., b"peer", f64::NAN);
+        let score = guard.snapshot_at(cfg, 11.).next().unwrap().1;
+        assert_eq!(score.held_seconds.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(guard.note_drop(cfg, 11., b"peer", b"capacity"), Some(1));
+        assert_eq!(guard.note_drop(cfg, 11., b"peer", b"capacity"), Some(2));
+        assert_eq!(guard.note_drop(cfg, 11., b"peer", b"capacity"), None);
+        assert_eq!(guard.note_drop(cfg, 11., b"peer", b"capacity"), Some(4));
+        assert_eq!(guard.note_drop(cfg, 11., b"peer", b"paused"), Some(1));
     }
 }

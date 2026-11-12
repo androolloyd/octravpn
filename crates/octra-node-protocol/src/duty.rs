@@ -63,6 +63,15 @@ pub fn ready_expired(head: i64, reference: i64) -> bool {
     reference < 0 || head < 0 || reference <= head && head.wrapping_sub(reference) > 2
 }
 pub fn expired(tx: &Transaction, head: Option<i64>, mode: RuleMode) -> bool {
+    expired_with_marks(tx, head, mode, false)
+}
+pub fn expired_with_marks(
+    tx: &Transaction,
+    head: Option<i64>,
+    mode: RuleMode,
+    marks: bool,
+) -> bool {
+    use crate::validator::set_fold::{self, Evidence};
     let Some(head) = head.filter(|_| tx.op_type == OpType::ValidatorReady) else {
         return false;
     };
@@ -72,10 +81,17 @@ pub fn expired(tx: &Transaction, head: Option<i64>, mode: RuleMode) -> bool {
             RuleMode::Active => {
                 ready.head_proposal_id.is_none()
                     || ready_expired(head, ready.head_epoch)
-                    || match proof_of_message(tx.message.as_deref()) {
+                    || match set_fold::evidence_of_message(
+                        marks,
+                        &set_fold::Config::participating(),
+                        tx.message.as_deref(),
+                    ) {
                         Err(_) => true,
-                        Ok(None) => false,
-                        Ok(Some(proof)) => {
+                        Ok(Evidence::Pulse) => false,
+                        Ok(Evidence::Marks(claims)) => claims.iter().any(|claim| {
+                            claim.epoch < 0 || claim.epoch <= head && head - claim.epoch >= 16
+                        }),
+                        Ok(Evidence::Commit(proof)) => {
                             proof.vote.epoch_id < 0
                                 || proof.vote.epoch_id <= head
                                     && head.wrapping_sub(proof.vote.epoch_id) >= 16

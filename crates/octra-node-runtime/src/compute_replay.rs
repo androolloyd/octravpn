@@ -164,6 +164,7 @@ fn raw32_lossy(raw: &[u8]) -> Result<Vec<u8>> {
 }
 pub(crate) fn execute_single(
     runtime: &CircleRuntime,
+    chain: &[u8],
     model: &crate::compute_provider::owner::Model,
     program: &crate::compute_provider::Program,
     request: &octra_node_protocol::resource_compute::provider::Execute,
@@ -175,12 +176,12 @@ pub(crate) fn execute_single(
         &request.caller,
         &raw32_lossy(&request.session_id)?,
     )?;
-    let payload = payload::single(request, program, model, &bytes, &scope, true)?;
+    let payload = payload::single(chain, request, program, model, &bytes, &scope, true)?;
     let reply = match runtime.execute(&payload) {
         Err(crate::circle::Error::Rejected(reason))
             if reason.starts_with("missing wasm module cache:") =>
         {
-            let full = payload::single(request, program, model, &bytes, &scope, false)?;
+            let full = payload::single(chain, request, program, model, &bytes, &scope, false)?;
             runtime.execute(&full).map_err(host)?
         }
         other => other.map_err(host)?,

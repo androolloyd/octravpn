@@ -93,6 +93,8 @@ pub struct Elaborator<'a> {
     types: ct::Types,
     terms: term::Terms,
     cache: BTreeMap<ast::Name, Checked>,
+    host_to_core: BTreeMap<ast::TypeId, syn::TypeId>,
+    core_to_host: BTreeMap<syn::TypeId, Option<ast::TypeId>>,
 }
 impl<'a> Elaborator<'a> {
     pub fn new(ast: &'a ast::Ast) -> Self {
@@ -103,6 +105,8 @@ impl<'a> Elaborator<'a> {
             types: ct::Types::default(),
             terms: term::Terms::default(),
             cache: BTreeMap::new(),
+            host_to_core: BTreeMap::new(),
+            core_to_host: BTreeMap::new(),
         }
     }
     pub fn syntax(&self) -> &syn::Syntax {

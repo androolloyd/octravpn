@@ -307,3 +307,111 @@ pub fn check_loops(ast: &Ast) -> std::result::Result<(), Vec<u8>> {
     }
     Ok(())
 }
+
+pub(crate) fn references(
+    nodes: &Nodes,
+    values: impl IntoIterator<Item = ExprId>,
+    accept: impl Fn(&[u8]) -> bool,
+) -> BTreeSet<Name> {
+    let mut refs = BTreeSet::new();
+    let mut pending: Vec<_> = values.into_iter().collect();
+    let mut seen = BTreeSet::new();
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        match nodes.expression(id) {
+            Expr::Var(name) if accept(name) => {
+                refs.insert(name.clone());
+            }
+            Expr::Index(_, values)
+            | Expr::Call(_, values)
+            | Expr::Array(values)
+            | Expr::Tuple(values)
+            | Expr::StoragePath(_, values, _)
+            | Expr::IndexField(_, values, _) => pending.extend(values),
+            Expr::Binop(_, left, right) | Expr::Equal(_, left, right) => {
+                pending.extend([*left, *right]);
+            }
+            Expr::Unop(_, value) | Expr::Balance(value) | Expr::Action(_, value) => {
+                pending.push(*value);
+            }
+            Expr::Ternary(guard, yes, no) => pending.extend([*guard, *yes, *no]),
+            Expr::Let(_, input, body) | Expr::Split(input, _, _, body) => {
+                pending.extend([*input, *body]);
+            }
+            Expr::Orbit(_, turns, seed, _, body) => {
+                pending.extend(turns);
+                pending.extend([*seed, *body]);
+            }
+            Expr::Use(value) => {
+                pending.extend(&value.caps);
+                pending.extend([value.arg, value.body]);
+            }
+            _ => (),
+        }
+    }
+    refs
+}
+
+/// Native source-record verification rejects cycles even in unused constants.
+/// First definitions own the edge set, matching compiler lookup precedence.
+pub fn check_consts(ast: &Ast) -> Result<(), Vec<u8>> {
+    use std::collections::BTreeMap;
+    let names: BTreeSet<_> = ast
+        .contract
+        .consts
+        .iter()
+        .map(|value| value.name.clone())
+        .collect();
+    let mut edges = BTreeMap::new();
+    for item in &ast.contract.consts {
+        if edges.contains_key(&item.name) {
+            continue;
+        }
+        let refs = references(&ast.nodes, [item.value], |name| names.contains(name));
+        edges.insert(item.name.clone(), refs);
+    }
+    let mut done = BTreeSet::new();
+    let mut active = BTreeSet::new();
+    for root in edges.keys() {
+        let mut pending = vec![(root, false)];
+        while let Some((name, finish)) = pending.pop() {
+            if finish {
+                active.remove(name);
+                done.insert(name);
+            } else if !done.contains(name) {
+                if !active.insert(name) {
+                    return Err(b"constant dependency is cyclic".to_vec());
+                }
+                pending.push((name, true));
+                pending.extend(edges[name].iter().rev().map(|name| (name, false)));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Source publishing must reproduce scoped control-flow emission when any
+/// function or constructor uses a branch, loop, match, or direct form.
+pub fn source_scope(ast: &Ast) -> bool {
+    if !ast.contract.forms.is_empty() {
+        return true;
+    }
+    let mut pending: Vec<_> = ast
+        .contract
+        .constructor
+        .iter()
+        .chain(&ast.contract.functions)
+        .flat_map(|function| function.body.iter().copied())
+        .collect();
+    while let Some(id) = pending.pop() {
+        match ast.nodes.statement(id) {
+            Stmt::Located(_, _, child) => pending.push(*child),
+            Stmt::If(..) | Stmt::While(..) | Stmt::Match(..) | Stmt::For(..) => return true,
+            Stmt::ForEach(_, _, body) => pending.extend(body),
+            _ => (),
+        }
+    }
+    false
+}

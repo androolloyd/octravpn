@@ -110,6 +110,69 @@ impl JournalOwner {
     pub fn find_vote(&self, expected: &Vote) -> Result<Option<Vote>, Error> {
         self.state()?.votes.find_statement(expected)
     }
+    pub fn round_votes(
+        &self,
+        chain: &[u8],
+        validator: &[u8],
+        epoch: i64,
+        round: i64,
+    ) -> Result<Vec<Vote>, Error> {
+        self.state()?
+            .votes
+            .round_votes(chain, validator, epoch, round)
+    }
+    pub fn load_proofs(
+        &self,
+        policy: super::policy::QuorumPolicy,
+        chain: &[u8],
+        epoch: i64,
+        set: &super::ValidatorSet,
+    ) -> Result<Vec<Vote>, Error> {
+        self.state()?.votes.load_proofs(policy, chain, epoch, set)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn save_proof(
+        &self,
+        policy: super::policy::QuorumPolicy,
+        chain: &[u8],
+        epoch: i64,
+        set: &super::ValidatorSet,
+        locked: i64,
+        keep: &[i64],
+        votes: &[Vote],
+    ) -> Result<(), Error> {
+        self.state()?
+            .votes
+            .save_proof(policy, chain, epoch, set, locked, keep, votes)
+    }
+    pub fn load_value(
+        &self,
+        policy: super::policy::QuorumPolicy,
+        protocol: super::policy::Protocol,
+        chain: &[u8],
+        epoch: i64,
+        set: &super::ValidatorSet,
+    ) -> Result<Option<super::value_log::Record>, Error> {
+        super::value_log::load(&self.state()?.votes, policy, protocol, chain, epoch, set)
+    }
+    pub fn save_value(
+        &self,
+        record: &super::value_log::Record,
+        policy: super::policy::QuorumPolicy,
+        protocol: super::policy::Protocol,
+        chain: &[u8],
+        epoch: i64,
+        set: &super::ValidatorSet,
+    ) -> Result<(), Error> {
+        record.save(
+            &mut self.state()?.votes,
+            policy,
+            protocol,
+            chain,
+            epoch,
+            set,
+        )
+    }
     pub fn max_round(
         &self,
         chain: &[u8],

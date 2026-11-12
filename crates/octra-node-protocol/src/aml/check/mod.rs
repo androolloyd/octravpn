@@ -50,6 +50,7 @@ impl Env {
     }
 }
 struct Checker<'a> {
+    symbols: super::symbols::Index,
     contract: &'a Contract,
     nodes: &'a mut Nodes,
 }
@@ -71,10 +72,10 @@ impl Checker<'_> {
         }
     }
     fn field(&self, name: &[u8]) -> Result<TypeId> {
-        self.contract
+        self.symbols
             .state
-            .iter()
-            .find(|field| field.name == name)
+            .get(name)
+            .map(|&index| &self.contract.state[index])
             .map(|field| field.typ)
             .ok_or_else(|| invalid([b"state field is undefined name = ".as_slice(), name].concat()))
     }
@@ -97,10 +98,10 @@ impl Checker<'_> {
                 return None;
             };
             let structure = self
-                .contract
+                .symbols
                 .structs
-                .iter()
-                .find(|item| item.name == *structure)?;
+                .get(&structure[..])
+                .map(|&index| &self.contract.structs[index])?;
             typ = structure.fields.iter().find(|(field, _)| field == name)?.1;
         }
         Some(typ)
@@ -139,6 +140,7 @@ pub fn check(ast: &mut Ast) -> Result<()> {
     let returns = types::Returns::new(&ast.nodes);
     let contract = &ast.contract;
     let mut checker = Checker {
+        symbols: super::symbols::Index::new(contract),
         contract,
         nodes: &mut ast.nodes,
     };

@@ -125,7 +125,12 @@ impl Checker<'_> {
                 for value in values {
                     types.push(self.infer(env, value)?);
                 }
-                if let Some(event) = self.contract.events.iter().find(|event| event.name == name) {
+                if let Some(event) = self
+                    .symbols
+                    .events
+                    .get(&name[..])
+                    .map(|&index| &self.contract.events[index])
+                {
                     if event.fields.len() != types.len() {
                         return Err(invalid(
                             [b"event argument count differs event = ".as_slice(), &name].concat(),

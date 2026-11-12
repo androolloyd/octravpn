@@ -29,6 +29,7 @@ fn parse(language: Language, raw: &[u8]) -> std::result::Result<Ast, parser::Err
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Options {
+    pub metered: bool,
     pub loops: bool,
     pub checked: bool,
     pub abi: AbiMode,
@@ -37,6 +38,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            metered: false,
             loops: false,
             checked: false,
             abi: AbiMode::Existing,
@@ -55,6 +57,7 @@ pub(super) fn legacy_caught(error: CompileError) -> Result<Output> {
 }
 fn emitted_error(error: emit::Error) -> Result<Output> {
     match error {
+        emit::Error::EmissionLimit => Ok(Output::failure(b"Program instruction limit exceeded")),
         emit::Error::Unavailable(reason) => {
             Err(CompileError::Unavailable(reason.as_bytes().to_vec()))
         }
@@ -197,6 +200,9 @@ fn compile_ast_with(
     if program && ast.contract.functions.len() > limits::FUNCTIONS {
         return finish(Output::failure(b"Program function limit exceeded"));
     }
+    if let Err(reason) = super::super::symbols::check(&ast.contract, options.metered) {
+        return Ok(Output::failure(reason));
+    }
     if program && options.checked && ast.contract.forms.is_empty() {
         if let Err(error) = check::check(&mut ast) {
             return Ok(Output::failure(
@@ -210,7 +216,12 @@ fn compile_ast_with(
                 b"frozen Prior AST transport contains modern forms".to_vec(),
             ));
         }
-        return match source::compile_ast(&ast, Syntax::Forms, options.loops) {
+        return match source::compile_ast_metered(
+            &ast,
+            Syntax::Forms,
+            options.loops,
+            options.metered,
+        ) {
             Ok(compiled) => Ok(source_result(
                 &compiled,
                 Version::Source,
@@ -223,7 +234,9 @@ fn compile_ast_with(
         };
     }
     let generated = match language {
-        Language::Protocol => generate::protocol(&mut ast, options.loops, options.checked),
+        Language::Protocol => {
+            generate::protocol_metered(&mut ast, options.loops, options.checked, options.metered)
+        }
         Language::Prior => generate::prior(&mut ast),
     };
     let code = match generated {

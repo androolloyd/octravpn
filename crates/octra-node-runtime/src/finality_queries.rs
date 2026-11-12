@@ -50,6 +50,10 @@ struct Windows {
     proof: Option<(Bytes, i64)>,
     proof_owner: Option<Arc<()>>,
     range: Option<range::Slot>,
+    replies: std::collections::BTreeMap<
+        Bytes,
+        octra_node_protocol::consensus::reply_window::ReplyWindow,
+    >,
 }
 impl Windows {
     fn epoch(&self, id: &[u8]) -> Option<i64> {
@@ -70,6 +74,7 @@ struct Inner<H> {
     proofs: AsyncMutex<()>,
     ranges: AsyncMutex<()>,
     delivered: broadcast::Sender<(Bytes, Finalize)>,
+    work: crate::query_work::Service,
 }
 struct ProofReader<H> {
     inner: Arc<Inner<H>>,
@@ -94,7 +99,9 @@ impl<H> Drop for ProofReader<H> {
             .as_ref()
             .is_some_and(|owner| Arc::ptr_eq(owner, &self.owner))
         {
-            windows.proof = None;
+            if let Some((id, _)) = windows.proof.take() {
+                windows.replies.remove(&id);
+            }
             windows.proof_owner = None;
         }
     }
@@ -143,7 +150,25 @@ impl<H: Host> Finality<H> {
         swarm: Swarm,
         clock: Arc<dyn Fn() -> i64 + Send + Sync>,
     ) -> Self {
+        Self::with_work(
+            chain,
+            address,
+            host,
+            swarm,
+            clock,
+            crate::query_work::Service::default(),
+        )
+    }
+    pub fn with_work(
+        chain: Bytes,
+        address: Bytes,
+        host: H,
+        swarm: Swarm,
+        clock: Arc<dyn Fn() -> i64 + Send + Sync>,
+        work: crate::query_work::Service,
+    ) -> Self {
         Self(Arc::new(Inner {
+            work,
             chain,
             address,
             host,
@@ -233,6 +258,10 @@ impl<H: Host> Finality<H> {
             let mut windows = self.0.windows.lock().expect("finality windows");
             if proof {
                 let id = request_id(&self.0.address, epoch, now, None)?;
+                if let Some((prior, _)) = &windows.proof {
+                    let prior = prior.clone();
+                    windows.replies.remove(&prior);
+                }
                 windows.proof = Some((id.clone(), epoch));
                 windows.proof_owner = owner;
                 id
@@ -246,10 +275,26 @@ impl<H: Host> Finality<H> {
                 };
                 let id = request_id(&self.0.address, epoch, now, Some(attempts))?;
                 windows.retry = next;
+                if let Some((prior, _)) = &windows.missing {
+                    let prior = prior.clone();
+                    windows.replies.remove(&prior);
+                }
                 windows.missing = Some((id.clone(), epoch));
                 id
             }
         };
+        self.0
+            .windows
+            .lock()
+            .expect("finality windows")
+            .replies
+            .insert(
+                id.clone(),
+                octra_node_protocol::consensus::reply_window::ReplyWindow::new(
+                    i64::MAX,
+                    peers.clone(),
+                ),
+            );
         let frame = Frame {
             message: 0x3a,
             payload: CatchupQuery {
@@ -270,6 +315,7 @@ impl<H: Host> Finality<H> {
     }
     pub fn close(&self) {
         let mut windows = self.0.windows.lock().expect("finality windows");
+        windows.replies.clear();
         windows.range = None;
         windows.missing = None;
         windows.proof = None;
@@ -277,7 +323,9 @@ impl<H: Host> Finality<H> {
     }
     pub fn clear_proofs(&self) {
         let mut windows = self.0.windows.lock().expect("finality windows");
-        windows.proof = None;
+        if let Some((id, _)) = windows.proof.take() {
+            windows.replies.remove(&id);
+        }
         windows.proof_owner = None;
     }
     /// Operational decode/lookup failures are logged by the enclosing driver.
@@ -296,8 +344,15 @@ impl<H: Host> Finality<H> {
                 {
                     return Ok(true);
                 }
+                let validator =
+                    crate::query_work::Service::validator(&self.0.host.active_validators()?, peer);
+                let max_epochs = q.max_epochs.min(if validator { 16 } else { 4 });
+                let Some(permit) = self.0.work.start(peer, validator, max_epochs.max(1)).await
+                else {
+                    return Ok(true);
+                };
                 let (status, error_code, records, next_epoch) =
-                    match self.0.host.lookup(q.from_epoch, q.max_epochs).await? {
+                    match self.0.host.lookup(q.from_epoch, max_epochs).await? {
                         Range::Found {
                             records,
                             next_epoch,
@@ -339,43 +394,61 @@ impl<H: Host> Finality<H> {
                     )?
                 };
                 response.signature = self.0.host.sign(&sign)?;
-                peer.enqueue_wait(Frame {
-                    message: if v2 { 0x3b } else { 0x39 },
-                    payload: response.encode(v2)?,
-                })
-                .await;
+                let cost = max_epochs.min(response.records.len() as i64).max(1);
+                permit
+                    .send(
+                        Frame {
+                            message: if v2 { 0x3b } else { 0x39 },
+                            payload: response.encode(v2)?,
+                        },
+                        cost,
+                    )
+                    .await;
                 Ok(true)
             }
             0x39 | 0x3b => {
                 let v2 = frame.message == 0x3b;
-                let response = CatchupResponse::decode(&frame.payload, v2)?;
-                if response.chain_id != self.0.chain {
+                let (chain, request_id) = CatchupResponse::header(&frame.payload)?;
+                if chain != self.0.chain {
+                    self.0.swarm.report_peer(peer, b"wrong_chain_catchup_reply");
                     return Ok(true);
                 }
                 let request = {
-                    let windows = self.0.windows.lock().expect("finality windows");
-                    windows
-                        .epoch(&response.request_id)
-                        .map(|epoch| {
-                            (
-                                QueryWindow {
-                                    from_epoch: epoch,
-                                    max_epochs: 1,
-                                },
-                                None,
-                            )
-                        })
-                        .or_else(|| {
-                            windows
-                                .range
-                                .as_ref()
-                                .filter(|slot| slot.id == response.request_id)
-                                .map(|slot| (slot.window, Some(slot.owner.clone())))
-                        })
+                    use octra_node_protocol::consensus::reply_window::Decision;
+                    let mut windows = self.0.windows.lock().expect("finality windows");
+                    let (window, owner, replies) = if let Some(epoch) = windows.epoch(&request_id) {
+                        let Some(replies) = windows.replies.get_mut(&request_id) else {
+                            return Ok(true);
+                        };
+                        (
+                            QueryWindow {
+                                from_epoch: epoch,
+                                max_epochs: 1,
+                            },
+                            None,
+                            replies,
+                        )
+                    } else if let Some(slot) = windows.range.as_mut().filter(|s| s.id == request_id)
+                    {
+                        (slot.window, Some(slot.owner.clone()), &mut slot.replies)
+                    } else {
+                        return Ok(true);
+                    };
+                    match replies.take(crate::query_work::now(), &peer.hello().node_id) {
+                        Decision::Read => (window, owner, replies.deadline),
+                        Decision::UnexpectedPeer => {
+                            self.0.swarm.report_peer(peer, b"unexpected_catchup_peer");
+                            return Ok(true);
+                        }
+                        Decision::Expired | Decision::Repeated => return Ok(true),
+                    }
                 };
-                let Some((window, owner)) = request else {
-                    return Ok(true);
-                };
+                let (window, owner, deadline) = request;
+                let response = CatchupResponse::decode_bounded(
+                    &frame.payload,
+                    v2,
+                    window.max_epochs.max(0) as usize,
+                )?;
                 let epoch = window.from_epoch;
                 if !window.contains_records(&response.records) {
                     return Ok(true);
@@ -385,6 +458,25 @@ impl<H: Host> Finality<H> {
                     .host
                     .validators(response.records.last().map_or(epoch, |r| r.epoch_id))
                     .await?;
+                {
+                    let windows = self.0.windows.lock().expect("finality windows");
+                    let current = if let Some(owner) = &owner {
+                        windows
+                            .range
+                            .as_ref()
+                            .filter(|s| s.id == request_id && Arc::ptr_eq(&s.owner, owner))
+                            .map(|s| &s.replies)
+                    } else {
+                        windows.replies.get(&request_id)
+                    };
+                    if current.is_none_or(|r| {
+                        r.deadline != deadline
+                            || crate::query_work::now() >= deadline
+                            || !r.consumed.contains(&peer.hello().node_id)
+                    }) {
+                        return Ok(true);
+                    }
+                }
                 let Some(public) = set.public_key(&response.responder_addr) else {
                     return Ok(true);
                 };

@@ -5,7 +5,6 @@ use octra_node_protocol::{
     consensus::{hash, profile::Settings},
     network::swarm::Activation,
     program_trust::Keys,
-    rules,
 };
 use std::collections::BTreeMap;
 pub struct Profile {
@@ -59,7 +58,7 @@ impl Profile {
         .into_bytes())
     }
     pub fn transitions(&self, chain: &[u8]) -> Result<Vec<Activation>> {
-        rules::profile_epochs(chain)
+        octra_node_protocol::consensus::profile::epochs(chain)
             .into_iter()
             .map(|epoch| {
                 Ok(Activation {

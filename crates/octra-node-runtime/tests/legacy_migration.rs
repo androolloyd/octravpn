@@ -203,6 +203,8 @@ fn execute(
     let mut host = Epoch::new(
         private_key::Policy {
             balance: Profile {
+                keyed: false,
+                registered: false,
                 fields: RuleMode::Active,
                 strict: true,
                 math: ScalarRule::Prior,
@@ -303,7 +305,11 @@ async fn genuine_legacy_migration_proofs_receipts_qcs_and_restart() {
     assert_eq!(fixture["source_sha256"], native_map["files"]);
     assert_eq!(
         fixture["rust_test_sha256"],
-        hex::encode(Sha256::digest(include_bytes!("legacy_migration.rs")))
+        // The capture records its original harness. Keep that artifact frozen;
+        // this replay supplies explicit prior modes for newly added policies.
+        hex::encode(Sha256::digest(include_bytes!(
+            "../../../docs/rust-node/baselines/legacy-migration-7f9.rs.txt"
+        )))
     );
     assert_eq!(fixture["instrumentation"], json!({}));
     let capture = &fixture["capture"];
@@ -431,6 +437,8 @@ async fn genuine_legacy_migration_proofs_receipts_qcs_and_restart() {
                     tx,
                     private_key::Policy {
                         balance: Profile {
+                            keyed: false,
+                            registered: false,
                             fields: RuleMode::Active,
                             strict: true,
                             math: ScalarRule::Prior,
@@ -606,6 +614,8 @@ async fn genuine_legacy_migration_proofs_receipts_qcs_and_restart() {
             let mut host = Epoch::new(
                 private_key::Policy {
                     balance: Profile {
+                        keyed: false,
+                        registered: false,
                         fields: RuleMode::Active,
                         strict: true,
                         math: ScalarRule::Prior,

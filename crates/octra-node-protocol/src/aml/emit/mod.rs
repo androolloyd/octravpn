@@ -27,6 +27,7 @@ enum Backend {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
     Failure(Vec<u8>),
+    EmissionLimit,
     Invalid {
         message: Vec<u8>,
         line: usize,
@@ -37,6 +38,7 @@ pub enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::EmissionLimit => f.write_str("program instruction count exceeds capacity"),
             Self::Failure(reason) => write!(
                 f,
                 "{}",
@@ -80,6 +82,7 @@ pub struct Emitter {
     pub next_reg: u32,
     pub next_label: u32,
     code: Vec<I>,
+    capacity: usize,
 }
 impl Emitter {
     pub fn new(syntax: Syntax) -> Self {
@@ -93,6 +96,7 @@ impl Emitter {
             next_reg: 1,
             next_label: 10_000,
             code: vec![],
+            capacity: usize::MAX,
         }
     }
     pub(crate) fn protocol(checked: bool) -> Self {
@@ -176,7 +180,19 @@ impl Emitter {
             .ok_or(Error::Unavailable("compiler label transport exhausted"))?;
         Ok(label)
     }
+    pub(crate) fn meter(&mut self, program: bool, enabled: bool) {
+        self.capacity = if !enabled {
+            usize::MAX
+        } else if program {
+            super::limits::INSTRUCTIONS
+        } else {
+            crate::octb::MAX_INSTRUCTIONS
+        };
+    }
     pub fn emit(&mut self, instruction: I) -> Result<()> {
+        if self.code.len() >= self.capacity {
+            return Err(Error::EmissionLimit);
+        }
         self.code
             .try_reserve(1)
             .map_err(|_| Error::Unavailable("compiler instruction allocation failed"))?;

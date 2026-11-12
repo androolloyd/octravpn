@@ -54,6 +54,7 @@ struct Inner<H> {
     host: H,
     swarm: Swarm,
     queries: Mutex<RootQueries<Response>>,
+    work: crate::query_work::Service,
 }
 pub struct EpochRoots<H>(Arc<Inner<H>>);
 impl<H> Clone for EpochRoots<H> {
@@ -76,7 +77,23 @@ impl<H> Drop for Reader<H> {
 }
 impl<H: Host> EpochRoots<H> {
     pub fn new(chain: Bytes, address: Bytes, host: H, swarm: Swarm) -> Self {
+        Self::with_work(
+            chain,
+            address,
+            host,
+            swarm,
+            crate::query_work::Service::default(),
+        )
+    }
+    pub fn with_work(
+        chain: Bytes,
+        address: Bytes,
+        host: H,
+        swarm: Swarm,
+        work: crate::query_work::Service,
+    ) -> Self {
         Self(Arc::new(Inner {
+            work,
             chain,
             address,
             host,
@@ -97,6 +114,18 @@ impl<H: Host> EpochRoots<H> {
                 if !state.active.is_validator(&self.0.address) {
                     return Ok(true);
                 }
+                let Some(permit) = self
+                    .0
+                    .work
+                    .start(
+                        peer,
+                        crate::query_work::Service::validator(&state.active, peer),
+                        1,
+                    )
+                    .await
+                else {
+                    return Ok(true);
+                };
                 let mut response = EpochRootResponse {
                     chain_id: self.0.chain.clone(),
                     epoch_id: q.epoch_id,
@@ -109,11 +138,15 @@ impl<H: Host> EpochRoots<H> {
                     .0
                     .host
                     .sign(&hash::epoch_root_response_sign_bytes(&response)?)?;
-                peer.enqueue_wait(Frame {
-                    message: 0x35,
-                    payload: response.encode()?,
-                })
-                .await;
+                permit
+                    .send(
+                        Frame {
+                            message: 0x35,
+                            payload: response.encode()?,
+                        },
+                        1,
+                    )
+                    .await;
                 Ok(true)
             }
             0x35 => {

@@ -87,7 +87,7 @@ fn claim(
     prefix: &[u8],
 ) -> Result<()> {
     check(
-        crypto::verify_claim_profile(
+        crypto::verify_claim_profile_keyed(
             public,
             cipher,
             proof,
@@ -95,6 +95,7 @@ fn claim(
             policy.balance.strict,
             policy.balance.math,
             kind,
+            policy.balance.keyed,
         ),
         "key_switch_rejected",
         prefix,
@@ -109,7 +110,7 @@ fn amount(
     prefix: &[u8],
 ) -> Result<()> {
     check(
-        crypto::verify_amount(
+        crypto::verify_amount_keyed(
             public,
             value,
             &crypto::AmountProof {
@@ -120,6 +121,7 @@ fn amount(
             },
             policy.balance.strict,
             policy.balance.math,
+            policy.balance.keyed,
         ),
         "key_switch_rejected",
         prefix,
@@ -275,13 +277,14 @@ pub(super) fn prepare(
                 b"old encrypted balance proof failed: ",
             )?;
             check(
-                crypto::verify_range_bound(
+                crypto::verify_range_bound_keyed(
                     public,
                     cipher,
                     new_proof,
                     commitment,
                     true,
                     policy.balance.math,
+                    policy.balance.keyed,
                 ),
                 "key_switch_rejected",
                 b"new encrypted balance range proof failed: ",
@@ -358,7 +361,12 @@ pub(super) fn prepare(
             if !wrapped(cipher, cap)? { return Err(rejected("new encrypted balance must be a wrapped scalar")); }
             if verify {
                 let old = check(crypto::load_pubkey(old), "key_switch_rejected", b"old encrypted balance proof failed: ", None)?;
-                claim(&old, source, old_proof, commitment, policy, BoundProfile::KeySwitchRefresh, b"old encrypted balance proof failed: ")?;
+                if policy.balance.keyed {
+                    check(crypto::verify_stored_claim(&old, source, old_proof, commitment, policy.balance.strict, policy.balance.math),
+                        "key_switch_rejected", b"old encrypted balance proof failed: ", None)?;
+                } else {
+                    claim(&old, source, old_proof, commitment, policy, BoundProfile::KeySwitchRefresh, b"old encrypted balance proof failed: ")?;
+                }
                 claim(public, cipher, new_proof, commitment, policy, BoundProfile::Standard, b"new encrypted balance proof failed: ")?;
             }
             Ok(Some(cipher.clone()))

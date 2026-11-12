@@ -376,20 +376,23 @@ impl Network {
             compute,
         }));
         let started = Instant::now();
-        let finality = Finality::new(
+        let work = octra_node_runtime::query_work::Service::default();
+        let finality = Finality::with_work(
             chain.clone(),
             address.clone(),
             authority.clone(),
             swarm.clone(),
-            Arc::new(move || i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX)),
+            Arc::new(move || i64::try_from(started.elapsed().as_nanos()).unwrap_or(i64::MAX)),
+            work.clone(),
         );
-        let roots = EpochRoots::new(
+        let roots = EpochRoots::with_work(
             chain.clone(),
             address.clone(),
             authority.clone(),
             swarm.clone(),
+            work.clone(),
         );
-        let bundles = Bundles::new(chain, address, authority.clone(), swarm.clone());
+        let bundles = Bundles::with_work(chain, address, authority.clone(), swarm.clone(), work);
         Ok(Self {
             authority,
             swarm,

@@ -91,6 +91,8 @@ impl CacheBinding {
         tx.hash().ok() == Some(self.transaction)
             && self.profile.strict == profile.strict
             && self.profile.math == profile.math
+            && self.profile.keyed == profile.keyed
+            && self.profile.registered == profile.registered
             && self.profile.fields == profile.fields
             && self.profile.result == profile.result
             && self.key_sha256 == <[u8; 32]>::from(sha2::Sha256::digest(blob))

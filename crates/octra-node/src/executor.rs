@@ -287,6 +287,7 @@ impl Native {
         );
         let mode = |rule| rules::at(&header.chain_id, rule, header.epoch_id);
         Ok(Rules {
+            signing: octra_node_protocol::tx_signature::at(&header.chain_id, header.epoch_id),
             payload: self.config.payload,
             crypto_active: receipts.crypto_active,
             stealth_minimum: receipts.stealth_minimum.clone(),

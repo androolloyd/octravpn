@@ -156,6 +156,7 @@ pub struct ValidatorSetProof {
     pub quorum_weight: BigInt,
     pub weighted: bool,
     pub validators: Vec<Validator>,
+    pub authors: Option<(i64, Vec<Validator>)>,
     pub scheduled: Option<Scheduled>,
     pub program_trust_hash: Option<Vec<u8>>,
     pub runtime_profile_hash: Option<Vec<u8>>,
@@ -187,6 +188,32 @@ fn rebuild(weighted: bool, values: &[Validator]) -> Result<ValidatorSet, Error> 
     }
 }
 impl ValidatorSetProof {
+    fn validator_set(&self) -> Result<ValidatorSet, Error> {
+        use consensus::codec::Wire;
+        let mut set = rebuild(self.weighted, &self.validators)?;
+        if let Some((height, authors)) = &self.authors {
+            set.authors = Some((
+                *height,
+                authors
+                    .iter()
+                    .map(|v| {
+                        (
+                            consensus::Validator {
+                                address: v.address.clone(),
+                                pubkey: v.pubkey.clone(),
+                            },
+                            v.weight.clone(),
+                        )
+                    })
+                    .collect(),
+            ));
+            // Native author membership must pass canonical codec checks, including
+            // unique positive weights and no overlap with the voting committee.
+            set = ValidatorSet::decode(&set.encode()?)
+                .map_err(|_| Error::from("validator author context is invalid"))?;
+        }
+        Ok(set)
+    }
     pub fn of_set(
         chain_id: Vec<u8>,
         config_hash: Vec<u8>,
@@ -206,6 +233,19 @@ impl ValidatorSetProof {
             quorum_weight: set.quorum_weight.clone(),
             weighted: set.weighted,
             validators: members(set),
+            authors: set.authors.as_ref().map(|(height, entries)| {
+                (
+                    *height,
+                    entries
+                        .iter()
+                        .map(|(v, weight)| Validator {
+                            address: v.address.clone(),
+                            pubkey: v.pubkey.clone(),
+                            weight: weight.clone(),
+                        })
+                        .collect(),
+                )
+            }),
             scheduled: scheduled.map(|(activate_epoch, set)| Scheduled {
                 activate_epoch,
                 validators: members(set),
@@ -216,7 +256,7 @@ impl ValidatorSetProof {
         })
     }
     pub fn recomputed_config_hash(&self) -> Result<[u8; 32], Error> {
-        let set = rebuild(self.weighted, &self.validators)?;
+        let set = self.validator_set()?;
         let scheduled = self
             .scheduled
             .as_ref()
@@ -231,7 +271,7 @@ impl ValidatorSetProof {
         )
     }
     pub fn verify(&self) -> Result<bool, Error> {
-        let Ok(set) = rebuild(self.weighted, &self.validators) else {
+        let Ok(set) = self.validator_set() else {
             return Ok(false);
         };
         if self.chain_id.is_empty()
@@ -243,6 +283,10 @@ impl ValidatorSetProof {
             || self.total_weight != set.total_weight
             || self.quorum_weight != set.quorum_weight
             || self.validator_set_hash != consensus::hash::validator_set_hash(&set)?
+            || self.authors.as_ref().is_some_and(|(height, _)| {
+                consensus::policy::quorum_rule(&self.chain_id, *height)
+                    != consensus::policy::Rule::Stake
+            })
             || self
                 .program_trust_hash
                 .as_ref()
@@ -320,6 +364,15 @@ impl ValidatorSetProof {
                 ("total_weight", string(self.total_weight.to_string())),
                 ("quorum_weight", string(self.quorum_weight.to_string())),
             ]);
+        }
+        if let Some((height, entries)) = &self.authors {
+            fields.push((
+                "authors",
+                object(&[
+                    ("height", string(height.to_string())),
+                    ("validators", validators(true, entries)),
+                ]),
+            ));
         }
         object(&fields)
     }

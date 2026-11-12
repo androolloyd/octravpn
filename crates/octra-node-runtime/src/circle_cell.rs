@@ -284,6 +284,9 @@ impl Prepared {
         &self.raw_cipher
     }
     pub fn verify(&self, strict: bool, math: ScalarRule) -> Result<()> {
+        self.verify_keyed(strict, math, false)
+    }
+    pub fn verify_keyed(&self, strict: bool, math: ScalarRule, keyed: bool) -> Result<()> {
         private_crypto::verify_cell(
             &self.public,
             &self.cipher,
@@ -293,6 +296,7 @@ impl Prepared {
             &self.amount,
             strict,
             math,
+            keyed,
         )
         .map_err(Error::from)
     }
@@ -372,8 +376,20 @@ pub fn preverify(
     strict: bool,
     math: ScalarRule,
 ) -> Result<Prepared> {
+    preverify_keyed(runtime, tx, ledger, state, epoch, strict, math, false)
+}
+pub fn preverify_keyed(
+    runtime: &CircleRuntime,
+    tx: &Transaction,
+    ledger: &Ledger,
+    state: &Snapshot,
+    epoch: i64,
+    strict: bool,
+    math: ScalarRule,
+    keyed: bool,
+) -> Result<Prepared> {
     let plan = prepare(runtime, tx, state, epoch)?;
-    plan.verify(strict, math)?;
+    plan.verify_keyed(strict, math, keyed)?;
     let mut preview_ledger =
         Ledger::from_accounts(ledger.accounts().clone()).map_err(operational)?;
     let mut preview_state = StateBatch::from_snapshot(state.clone());
@@ -387,6 +403,7 @@ pub fn preverify(
         Some(plan.transition.as_bytes()),
         strict,
         math,
+        keyed,
     )
     .map_err(Error::Unavailable)?;
     match completion {
@@ -406,6 +423,7 @@ pub(crate) fn execute(
     expected: Option<&[u8]>,
     reverify: bool,
     math: ScalarRule,
+    keyed: bool,
 ) -> std::result::Result<execution::Completion, execution::Error> {
     let result = (|| {
         let expected =
@@ -415,7 +433,7 @@ pub(crate) fn execute(
             return Err(rejected(b"circle cell transition hash mismatch"));
         }
         if reverify {
-            plan.verify(true, math)?;
+            plan.verify_keyed(true, math, keyed)?;
         }
         Ok(plan)
     })();
