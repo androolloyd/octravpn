@@ -39,6 +39,11 @@ jobs:
           cache: "false"
       - run: cargo fmt -- --check
       - run: python3 scripts/node-port/check-native-sources.py --vendored-only
+      # Cheap consistency checks that need no build: the Foundry and
+      # Headscale revisions agree everywhere they are written down, and the
+      # generated checkpoint index matches the records.
+      - run: python3 scripts/ci/check-pins.py
+      - run: python3 scripts/node-port/checkpoint-index.py --check
 
   clippy:
     name: cargo clippy
