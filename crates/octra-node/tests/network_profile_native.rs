@@ -7,18 +7,19 @@ use std::collections::BTreeMap;
 
 #[test]
 fn node_profile_uses_native_crypto_engine_and_epoch_commitments() {
-    let raw = include_bytes!("../../octra-node-protocol/tests/fixtures/consensus-profile-c49.json");
+    let raw =
+        include_bytes!("../../octra-node-protocol/tests/fixtures/consensus-profile-candidate.json");
     assert_eq!(
         hex::encode(Sha256::digest(raw)),
-        "9129961d1c0a326ed3625e748e94e37f8eb91ca8daef168c31ec30af79b72fc2"
+        "e6ab9fba654e39f3ee32039be5dbdbdc759dd26e673b499ffd9a721b3018ed2e"
     );
     let fixture: Value = serde_json::from_slice(raw).unwrap();
     assert_eq!(
         fixture["native_pin"],
-        "c49de45cf49ebbc2e5c0697eb956cbcada5845e7"
+        "8f785a93a4e7392a0f3e65674f9de89854d33dbc"
     );
     let provenance_bytes = include_bytes!(
-        "../../octra-node-protocol/tests/fixtures/consensus-profile-c49-provenance.json"
+        "../../octra-node-protocol/tests/fixtures/consensus-profile-candidate-provenance.json"
     );
     assert_eq!(
         fixture["build_provenance_sha256"],
@@ -37,7 +38,7 @@ fn node_profile_uses_native_crypto_engine_and_epoch_commitments() {
         if path == "lib/vm/dune" {
             assert_eq!(
                 hash.as_str(),
-                Some("8d8fafa8e566621c1e9920aecee4557a6feaeb90ab281bf7ae5cd97aebcaf1e4")
+                Some("829928193d9d76dd7cd0bb25b2b011566dda30059e2257612964bb35f3009e07")
             );
         } else {
             assert_eq!(&sources["files"][path], hash, "candidate source {path}");
@@ -103,5 +104,5 @@ fn node_profile_uses_native_crypto_engine_and_epoch_commitments() {
         }
     }
     assert_eq!(valid, 57);
-    assert_eq!(epochs, 1491);
+    assert_eq!(epochs, 1656);
 }

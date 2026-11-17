@@ -370,12 +370,22 @@ impl Settings {
             }
         }
         if rules::at(chain, Rule::ProgramRecords, epoch) == RuleMode::Active {
-            let id = if policy.round_wait(epoch) {
+            let id = if !policy.round_wait(epoch) {
+                crate::program_record::released_id()
+            } else if rules::at(chain, Rule::ScalarWork, epoch) == RuleMode::Active {
                 crate::program_record::consensus_id()
             } else {
-                crate::program_record::released_id()
+                crate::program_record::prior_id()
             };
             component(&mut w, "program_records", &id)?;
+        }
+        if rules::at(chain, Rule::Seatless, epoch) == RuleMode::Active {
+            component(&mut w, "execution_profile", b"octra:execution_profile:1")?;
+            component(&mut w, "slash_reward", b"burn_source_share")?;
+            component(&mut w, "slash_set", b"exact_source_next")?;
+        }
+        if rules::at(chain, Rule::ScalarWork, epoch) == RuleMode::Active {
+            component(&mut w, "scalar_work", SCALAR_WORK_ID)?;
         }
         if rules::at(chain, Rule::ProofKey, epoch) == RuleMode::Active {
             for (name,value) in [
@@ -439,6 +449,9 @@ fn component(w: &mut Writer, name: &str, value: &[u8]) -> Result<()> {
     w.put_bytes(name.as_bytes())?;
     w.put_bytes(value)
 }
+/// `Scalar_work.consensus_id`: the limits and cost shapes of metered
+/// big-integer work.
+pub const SCALAR_WORK_ID: &[u8] = b"scalar_work:bits_65536:parse_chars_65536:scan_32:parse_square:decimal_square:load_16:minimum_1000000:wasm_integer:receipt_decimal";
 const STANDARD_COMPONENTS: &[(&str, &[u8])] = &[
     ("reward", b"reward:18198732:10000:7:10"),
     ("reward_source", b"reward_source:finalized_parent"),
@@ -462,6 +475,8 @@ const ACTIVATED_COMPONENTS:&[(Rule,&str,&[u8])]=&[
     (Rule::SetPlan,"set_plan",b"retain_until_activation"),(Rule::Math,"math",b"scalar65_field_signed_cipher_zero_q16"),
     (Rule::Exit,"validator_exit",b"8192:4096"),(Rule::ReadyExecution,"ready_reference",b"proposal_delay2_inclusion_first"),
     (Rule::ProgramSource,"program_source",b"aml_source:oct_gen_count:source_abi:checked_address:option_values:scalar_equality:shape_limits:overlap_64"),
+    (Rule::SourceCreate,"source_create",b"signed_package:preview:non_key_parent:one_child:shared_work:source_record:nested_undo"),
+    (Rule::ProgramResult,"program_result",b"program_exec_failed:circle_call_failed:signed_fee:nonce:undo:replay"),
     (Rule::FheWork,"fhe_work",b"fhe_projected_storage_sampling_traversal_child_budget:65536:4096:1048576:16:8:10000:4:8:32:1024:4096:128:fhe_retained_volume:536870912:16:8:270336:65536:64:key_io:64:500:500:10000:1000:1000:500:500:100:200"),
     (Rule::WasmFloat,"wasm_float",b"wasm_float:arith_nan_7fc00000_7ff8000000000000:operand_calls:metered_helpers:v1"),
     (Rule::TxEnvelope,"transaction_envelope",b"sender_key32_signature64_base64_scalar_unique_nonce"),

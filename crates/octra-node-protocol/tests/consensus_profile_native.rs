@@ -21,9 +21,9 @@ use std::{
     path::PathBuf,
 };
 
-const NATIVE_PIN: &str = "c49de45cf49ebbc2e5c0697eb956cbcada5845e7";
-const NATIVE_SOURCES_SHA: &str = "528abda003447af13945e0313c7d82707b484bbbae3e461995fb8f883dbeddf0";
-const ORACLE_SHA: &str = "efec28c25ef4133112fbb3fa42b93558e225fb33ac9b977816bcc6f237030667";
+const NATIVE_PIN: &str = "8f785a93a4e7392a0f3e65674f9de89854d33dbc";
+const NATIVE_SOURCES_SHA: &str = "15b37433a47ead7a90e83a35e61aa2a1f0927cc9cf3bf47a72a98ba5f94df771";
+const ORACLE_SHA: &str = "ecc34078da24f848faac8d95e7d23fe49991eb40f8b16df60d1d99f096cf56b0";
 const INPUTS_SHA: &str = "998eeabecce66b4c3660dc539d9b63333d3b5e7a5894b5ff0c19652ef61c6a23";
 const SELECTOR_SCOPE: &str =
     "epoch-only compatibility profile; not authenticated execution-rule activation";
@@ -374,7 +374,7 @@ fn current_native_settings_profiles_and_hashes() {
     let path = std::env::var_os("OCTRA_NATIVE_PROFILE_FIXTURE").map_or_else(
         || {
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/fixtures/consensus-profile-c49.json")
+                .join("tests/fixtures/consensus-profile-candidate.json")
         },
         PathBuf::from,
     );
@@ -393,7 +393,7 @@ fn current_native_settings_profiles_and_hashes() {
     assert_eq!(fixture.native_sources_sha256, NATIVE_SOURCES_SHA);
     assert_eq!(fixture.oracle_source_sha256, ORACLE_SHA);
     assert_eq!(fixture.case_inputs_sha256, INPUTS_SHA);
-    let provenance_bytes = include_bytes!("fixtures/consensus-profile-c49-provenance.json");
+    let provenance_bytes = include_bytes!("fixtures/consensus-profile-candidate-provenance.json");
     assert_eq!(
         hex::encode(Sha256::digest(provenance_bytes)),
         fixture.build_provenance_sha256
@@ -411,7 +411,7 @@ fn current_native_settings_profiles_and_hashes() {
         if path == "lib/vm/dune" {
             assert_eq!(
                 hash.as_str(),
-                Some("8d8fafa8e566621c1e9920aecee4557a6feaeb90ab281bf7ae5cd97aebcaf1e4")
+                Some("829928193d9d76dd7cd0bb25b2b011566dda30059e2257612964bb35f3009e07")
             );
         } else {
             assert_eq!(&inventory["files"][path], hash, "candidate source {path}");
