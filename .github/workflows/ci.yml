@@ -66,6 +66,13 @@ jobs:
       # mesh tests + bench require it. Run a second clippy pass with
       # the feature on so the test cfg gets lint-coverage too.
       - run: cargo clippy --locked --workspace --tests --features test-helpers -- -D warnings
+      # The native node embeds octravpn-node's services without the
+      # standalone operator (Hub, CLI, v1.1/v2 chain layers, relay keepers).
+      # A workspace build cannot see a violation — feature unification turns
+      # `standalone` back on — so build the two packages the way a release
+      # build of the node does.
+      - run: cargo check --locked -p octravpn-node --no-default-features --lib
+      - run: cargo check --locked -p octra-node
 
   test:
     # One runner needs ~88 minutes for this suite (~20 building, ~65 in

@@ -7,9 +7,20 @@ authors.workspace = true
 rust-version.workspace = true
 description = "OctraVPN node daemon: WireGuard + chain registration + onion forwarding."
 
+[features]
+default = ["standalone"]
+# The standalone operator: the Hub daemon, its command line, the v1.1 and v2
+# chain layers, the relay keepers and key sealing — about a quarter of this
+# crate. `octra-node` embeds the services in this crate without it
+# (`default-features = false`), which makes "the native node does not depend
+# on the standalone operator" something the compiler checks rather than
+# something we believe: CI builds the library with this feature off.
+standalone = []
+
 [[bin]]
 name = "octravpn-node"
 path = "src/main.rs"
+required-features = ["standalone"]
 
 [dependencies]
 octravpn-core = { path = "../octravpn-core" }

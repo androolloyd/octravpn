@@ -14,7 +14,7 @@ octra-browser = { path = "../octra-browser" }
 octra-exex = { path = "../octra-exex" }
 octra-hfhe = { path = "../octra-hfhe" }
 octra-private-payments-experimental = { path = "../../experimental/private-payments", optional = true }
-octravpn-node = { path = "../octravpn-node" }
+octravpn-node = { path = "../octravpn-node", default-features = false }
 octravpn-core = { path = "../octravpn-core" }
 octravpn-client = { path = "../octravpn-client", optional = true }
 ark-bn254 = { version = "=0.5.0", optional = true }

@@ -55,6 +55,7 @@ use crate::chain_v3::ChainCtxV3;
 use crate::circle_update::{self, SealedAssetCreds, SealedRead};
 use crate::config::NodeConfig;
 use crate::control::enroll_circle::{KEY_ID, MEMBERS_PATH};
+#[cfg(feature = "standalone")]
 use crate::hub::Hub;
 
 /// The anchored member set reduced to what the wire needs: the two
@@ -454,6 +455,7 @@ impl SyncState {
 /// standalone one built from `[chain]` for `mesh serve` (the wire surface
 /// stock `tailscale up` can actually reach — the Hub has no TLS listener).
 pub(crate) enum ChainHandle {
+    #[cfg(feature = "standalone")]
     Hub(Arc<Hub>),
     Owned(Arc<ChainCtxV3>),
 }
@@ -461,6 +463,7 @@ pub(crate) enum ChainHandle {
 impl ChainHandle {
     fn ctx(&self) -> &ChainCtxV3 {
         match self {
+            #[cfg(feature = "standalone")]
             Self::Hub(hub) => &hub.chain_v3,
             Self::Owned(ctx) => ctx,
         }
@@ -496,6 +499,7 @@ fn require_personal_owner_binding(tailnet_id: Option<u64>, owner: Option<&str>) 
 
 impl MembersPolicySync {
     /// Hub boot path (`octravpn-node run`): `[control.members_policy]`.
+    #[cfg(feature = "standalone")]
     pub(crate) fn from_hub(hub: &Arc<Hub>) -> Result<Self> {
         let cfg = &hub.cfg.control.members_policy;
         let circle_id = cfg
@@ -527,6 +531,11 @@ impl MembersPolicySync {
     /// the `--config` file's `[chain]` table (RPC, program, wallet), the
     /// sealed passphrase from `OCTRAVPN_SEALED_PASSPHRASE` or
     /// `[chain].sealed_passphrase`.
+    ///
+    /// Operator-only: both constructors live with the standalone operator.
+    /// The native node's mesh passes no members policy — there, registration
+    /// is an identity and a canonical purchase is what admits traffic.
+    #[cfg(feature = "standalone")]
     pub(crate) fn from_config(
         cfg: &NodeConfig,
         circle_override: Option<String>,
