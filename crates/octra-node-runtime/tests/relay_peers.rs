@@ -173,7 +173,8 @@ async fn vote_guard_requires_durable_local_vote_before_peer_publication() {
         vote.epoch_id,
         Protocol::default(),
         TimeoutConfig::default(),
-    );
+    )
+    .unwrap();
     let context = Context {
         chain_id: &vote.chain_id,
         validator_set: &set,

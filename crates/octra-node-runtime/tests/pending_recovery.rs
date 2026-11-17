@@ -296,7 +296,8 @@ fn host_syncs_before_persisting_and_restores_authenticated_bundle() {
         pending.epoch_id,
         Protocol::default(),
         TimeoutConfig::default(),
-    );
+    )
+    .unwrap();
     let mut cached = false;
     assert_eq!(
         recovery::restore(&context, &stored[0], false, &mut engine, |r| {

@@ -96,6 +96,25 @@ enum LocalVote {
 pub type Signer<'a> = dyn FnMut(&[u8]) -> Result<Bytes, Error> + 'a;
 /// Execution must validate the full proposal against the host's canonical state.
 pub type Execute<'a> = dyn FnMut(&Proposal) -> Result<bool, Error> + 'a;
+/// Whether a round-evidence request is still waiting to be sent, has been
+/// handed to the driver, or is known to have reached a peer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Delivery {
+    Waiting,
+    Offered,
+    Delivered,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PolcRequest {
+    /// Round in which the request was last emitted; -1 before the first.
+    asked: i64,
+    /// Serial of that emission, so a late delivery report cannot be
+    /// credited to a newer one.
+    stamp: i64,
+    delivery: Delivery,
+    /// Re-requested by the sweep over evicted rounds rather than asked fresh.
+    returned: bool,
+}
 pub struct Engine {
     chain_id: Bytes,
     policy: policy::QuorumPolicy,
@@ -112,7 +131,14 @@ pub struct Engine {
     cache: BTreeMap<Bytes, CachedProposal>,
     messages: BTreeMap<(Bytes, i64), Proposal>,
     polc: BTreeMap<i64, Bytes>,
-    requests: BTreeMap<i64, i64>,
+    requests: BTreeMap<i64, PolcRequest>,
+    polc_serial: i64,
+    /// Cursor and limit of the sweep that re-requests evicted rounds.
+    polc_sweep: Option<(i64, i64)>,
+    /// Valid rounds named by proposals, newest first.
+    polc_named: Vec<i64>,
+    polc_named_round: i64,
+    polc_priority: Option<i64>,
     higher_rounds: BTreeMap<Bytes, i64>,
     outputs: Vec<Output>,
     finalized_height: i64,
@@ -132,7 +158,7 @@ impl Engine {
         start_height: i64,
         protocol: Protocol,
         timeouts: TimeoutConfig,
-    ) -> Self {
+    ) -> Result<Self, Error> {
         let policy = policy::QuorumPolicy::for_chain(&chain_id);
         Self::new_for_policy(
             policy,
@@ -152,8 +178,9 @@ impl Engine {
         start_height: i64,
         protocol: Protocol,
         timeouts: TimeoutConfig,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, Error> {
+        check_voting_set(policy, start_height, &validators)?;
+        Ok(Self {
             chain_id,
             policy,
             my_addr,
@@ -173,6 +200,11 @@ impl Engine {
             messages: BTreeMap::new(),
             polc: BTreeMap::new(),
             requests: BTreeMap::new(),
+            polc_serial: 0,
+            polc_sweep: None,
+            polc_named: Vec::new(),
+            polc_named_round: -1,
+            polc_priority: None,
             higher_rounds: BTreeMap::new(),
             outputs: Vec::new(),
             finalized_height: start_height.wrapping_sub(1),
@@ -180,7 +212,7 @@ impl Engine {
             generation: 0,
             can_vote: false,
             round_skip_ready: true,
-        }
+        })
     }
     pub const fn state(&self) -> &EngineState {
         &self.state
@@ -216,13 +248,15 @@ impl Engine {
     pub fn set_round_skip_ready(&mut self, ready: bool) {
         self.round_skip_ready = ready;
     }
-    pub fn replace_validator_set(&mut self, validators: ValidatorSet) {
+    pub fn replace_validator_set(&mut self, validators: ValidatorSet) -> Result<(), Error> {
+        check_voting_set(self.policy, self.state.height, &validators)?;
         if self.validators != validators {
             self.project_state(&validators);
-            self.requests.clear();
+            self.renew_requests();
             self.higher_rounds.clear();
         }
         self.validators = validators;
+        Ok(())
     }
     pub fn quorum_policy(&self) -> policy::QuorumPolicy {
         self.policy
@@ -562,10 +596,57 @@ impl Engine {
             || self.requests.contains_key(&round)
             || self.proof_search == Some(round)
     }
-    fn remember_request(&mut self, round: i64) -> bool {
+    fn round_referenced(&self, round: i64) -> bool {
+        round == self.state.locked_round
+            || round == self.state.valid_round
+            || self.proof_search == Some(round)
+            || (round >= self.state.locked_round && self.polc_named.contains(&round))
+    }
+    /// Record the valid round a newer proposal names. Only the first
+    /// proposal seen for a round names one.
+    fn name_request(&mut self, proposal: &Proposal) -> bool {
+        if proposal.round <= self.polc_named_round {
+            return false;
+        }
+        self.polc_named_round = proposal.round;
+        self.polc_priority = proposal.valid_round;
+        if let Some(round) = proposal.valid_round {
+            self.polc_named.retain(|prior| *prior != round);
+            self.polc_named.insert(0, round);
+            self.polc_named.truncate((ROUND_HISTORY_LIMIT / 2) as usize);
+        }
+        true
+    }
+    /// The request to drop first: never asked before asked, then by round.
+    /// Rounds the engine still refers to go last, and only for a priority ask.
+    fn oldest_request(&self, returned: Option<bool>, priority: bool) -> Option<i64> {
+        let oldest = |except: &dyn Fn(i64) -> bool| {
+            self.requests
+                .iter()
+                .filter(|(round, query)| {
+                    !except(**round) && returned.is_none_or(|keep| keep == query.returned)
+                })
+                .min_by_key(|(round, query)| {
+                    (query.asked, query.delivery == Delivery::Waiting, **round)
+                })
+                .map(|(round, _)| *round)
+        };
+        oldest(&|round| self.round_referenced(round)).or_else(|| {
+            priority
+                .then(|| {
+                    oldest(&|round| {
+                        round == self.state.locked_round
+                            || round == self.state.valid_round
+                            || self.proof_search == Some(round)
+                    })
+                })
+                .flatten()
+        })
+    }
+    fn remember_request(&mut self, round: i64, priority: bool, returned: bool) -> bool {
         if round < 0
             || round >= self.state.round
-            || round <= self.state.locked_round
+            || round < self.state.locked_round
             || self.polc.contains_key(&round)
         {
             return false;
@@ -573,43 +654,168 @@ impl Engine {
         if self.requests.contains_key(&round) {
             return true;
         }
-        if self.requests.len() >= ROUND_HISTORY_LIMIT as usize {
-            self.requests.pop_first();
+        let full = ROUND_HISTORY_LIMIT as usize;
+        if self.polc_sweep.is_none() && self.requests.len() >= full {
+            self.polc_sweep = Some((0, self.state.round - 1));
         }
-        self.requests.insert(round, -1);
+        // Once rounds have been evicted, a quarter of the table is kept
+        // for asking them again.
+        let limit = if self.polc_sweep.is_none() {
+            full
+        } else if returned {
+            full / 4
+        } else {
+            3 * full / 4
+        };
+        let count = |requests: &BTreeMap<i64, PolcRequest>| {
+            requests
+                .values()
+                .filter(|query| query.returned == returned)
+                .count()
+        };
+        while count(&self.requests) >= limit {
+            let Some(old) = self.oldest_request(Some(returned), priority) else {
+                break;
+            };
+            self.requests.remove(&old);
+        }
+        if self.requests.len() >= full || count(&self.requests) >= limit {
+            return false;
+        }
+        self.requests.insert(
+            round,
+            PolcRequest {
+                asked: -1,
+                stamp: 0,
+                delivery: Delivery::Waiting,
+                returned,
+            },
+        );
         true
     }
-    fn request_polc(&mut self, round: i64) {
-        if self.remember_request(round)
-            && self
-                .requests
-                .get(&round)
-                .is_some_and(|last| *last < self.state.round)
-        {
-            self.requests.insert(round, self.state.round);
-            self.emit(Output::RequestRoundEvidence(round));
+    fn emit_request(&mut self, round: i64) {
+        self.polc_serial = int63_add(self.polc_serial, 1);
+        if let Some(query) = self.requests.get_mut(&round) {
+            query.asked = self.state.round;
+            query.stamp = self.polc_serial;
+            query.delivery = Delivery::Offered;
+        }
+        self.emit(Output::RequestRoundEvidence(round));
+    }
+    /// Serial of the latest emission for `round`, to pass back to
+    /// [`Self::report_polc_request`].
+    pub fn polc_request_stamp(&self, round: i64) -> Option<i64> {
+        self.requests.get(&round).map(|query| query.stamp)
+    }
+    /// The driver reports whether the emission it was handed reached a peer;
+    /// an unsent one is asked again without waiting for the next round.
+    pub fn report_polc_request(
+        &mut self,
+        height: i64,
+        generation: i64,
+        round: i64,
+        stamp: Option<i64>,
+        sent: bool,
+    ) {
+        if height != self.state.height || generation != self.generation {
+            return;
+        }
+        if let Some(query) = self.requests.get_mut(&round) {
+            if Some(query.stamp) == stamp {
+                query.delivery = if sent {
+                    Delivery::Delivered
+                } else {
+                    Delivery::Waiting
+                };
+            }
         }
     }
+    /// Keep the still-needed requests across a round or set change and
+    /// mark each one unsent.
+    fn renew_requests(&mut self) {
+        let locked = self.state.locked_round;
+        let polc = &self.polc;
+        self.requests.retain(|round, query| {
+            query.delivery = Delivery::Waiting;
+            *round >= locked && !polc.contains_key(round)
+        });
+    }
+    fn request_polc_as(&mut self, round: i64, priority: bool, returned: bool) {
+        if self.remember_request(round, priority, returned)
+            && self.requests.get(&round).is_some_and(|query| {
+                query.asked < self.state.round || query.delivery == Delivery::Waiting
+            })
+        {
+            self.emit_request(round);
+        }
+    }
+    fn request_polc(&mut self, round: i64) {
+        self.request_polc_as(round, false, false);
+    }
     fn retry_request(&mut self, except: Option<i64>) {
-        if let Some((&round, _)) = self
+        if let Some(round) = self
             .requests
             .iter()
-            .filter(|(r, s)| Some(**r) != except && **s < self.state.round)
-            .min_by(|(ra, sa), (rb, sb)| sa.cmp(sb).then_with(|| rb.cmp(ra)))
+            .filter(|(round, query)| {
+                Some(**round) != except
+                    && !(query.asked >= self.state.round && query.delivery != Delivery::Waiting)
+            })
+            .min_by_key(|(round, query)| {
+                (
+                    query.delivery != Delivery::Waiting,
+                    query.asked,
+                    std::cmp::Reverse(**round),
+                )
+            })
+            .map(|(round, _)| *round)
         {
-            self.requests.insert(round, self.state.round);
-            self.emit(Output::RequestRoundEvidence(round));
+            self.emit_request(round);
+        }
+    }
+    /// Two steps of the sweep that asks again for rounds evicted earlier.
+    fn return_requests(&mut self) {
+        for _ in 0..2 {
+            let Some((cursor, limit)) = self.polc_sweep else {
+                return;
+            };
+            self.polc_sweep = Some(if cursor >= limit {
+                (0, self.state.round - 1)
+            } else {
+                (cursor + 1, limit)
+            });
+            if !self.requests.contains_key(&cursor) {
+                self.request_polc_as(cursor, true, true);
+            }
+        }
+    }
+    fn renew_named_requests(&mut self) {
+        let rounds: Vec<_> = self
+            .polc_named
+            .iter()
+            .filter(|round| {
+                self.requests
+                    .get(round)
+                    .is_none_or(|query| query.delivery == Delivery::Waiting)
+            })
+            .take(4)
+            .copied()
+            .collect();
+        for round in rounds {
+            self.request_polc(round);
         }
     }
     pub fn start_round(&mut self, round: i64) {
         self.vote_timers.clear();
         self.state.round = round;
         self.state.step = RoundStep::Propose;
+        self.polc_priority = None;
         let previous = (round > 0).then_some(round - 1);
         if let Some(p) = previous {
             self.request_polc(p);
         }
         self.retry_request(previous);
+        self.return_requests();
+        self.renew_named_requests();
         self.prevotes.insert(round, VoteSet::default());
         self.precommits.insert(round, VoteSet::default());
         let floor = (round - ROUND_HISTORY_LIMIT).max(0);
@@ -632,10 +838,12 @@ impl Engine {
             return Err("consensus round must advance".into());
         }
         self.generation = int63_add(self.generation, 1);
+        self.renew_requests();
         self.start_round(round);
         Ok(())
     }
-    pub fn start_height(&mut self, height: i64) {
+    pub fn start_height(&mut self, height: i64) -> Result<(), Error> {
+        check_voting_set(self.policy, height, &self.validators)?;
         let same = height == self.state.height;
         let round = if same {
             self.prevotes
@@ -663,15 +871,32 @@ impl Engine {
             self.source_prevotes.clear();
             self.precommits.clear();
         }
-        self.requests.clear();
+        if same {
+            self.renew_requests();
+        } else {
+            self.requests.clear();
+            self.polc_serial = 0;
+            self.polc_sweep = None;
+            self.polc_named.clear();
+            self.polc_named_round = -1;
+            self.polc_priority = None;
+        }
         self.higher_rounds.clear();
         self.start_round(round);
+        Ok(())
     }
     pub fn polc_matches(&self, round: i64, pid: &[u8]) -> bool {
         self.polc.get(&round).is_some_and(|p| p == pid)
     }
     pub fn polc_request_pending(&self, round: i64) -> bool {
-        self.requests.contains_key(&round) || self.proof_search == Some(round)
+        self.requests.contains_key(&round)
+            || self.proof_search == Some(round)
+            || (!self.polc.contains_key(&round)
+                && (round == self.state.locked_round || round == self.state.valid_round))
+    }
+    /// The valid round named by the proposal of the current round, if any.
+    pub const fn polc_priority(&self) -> Option<i64> {
+        self.polc_priority
     }
     pub fn historical_prevote_known(&self, round: i64, validator: &[u8]) -> bool {
         [&self.prevotes, &self.source_prevotes]
@@ -921,6 +1146,7 @@ impl Engine {
         self.state.valid_value = Some(p.header);
         if self.round_wait() {
             self.generation = int63_add(self.generation, 1);
+            self.renew_requests();
             self.start_round(p.round);
             Ok(())
         } else {
@@ -1235,8 +1461,11 @@ impl Engine {
             self.cache_message(p.clone())?;
             if accept {
                 self.current_proposal = Some(p.clone());
-            } else if let Some(round) = p.valid_round {
-                self.request_polc(round);
+            }
+            if self.name_request(&p) {
+                if let Some(round) = p.valid_round {
+                    self.request_polc_as(round, true, false);
+                }
             }
         }
         let finalized = valid
@@ -1605,6 +1834,7 @@ impl Engine {
         round: i64,
         validators: ValidatorSet,
     ) -> Result<(), Error> {
+        check_voting_set(self.policy, self.state.height, &validators)?;
         if round <= self.state.round {
             return Err("consensus reconfiguration round must advance".into());
         }
@@ -1616,7 +1846,7 @@ impl Engine {
         self.validators = validators;
         self.generation = int63_add(self.generation, 1);
         self.outputs.clear();
-        self.requests.clear();
+        self.renew_requests();
         self.higher_rounds.clear();
         if let Some((commit_round, pid)) = finalize {
             if let Some(header) = self.find_header(&pid).cloned() {
@@ -1631,6 +1861,20 @@ impl Engine {
         self.start_round(round);
         Ok(())
     }
+}
+/// Under seatless voting the engine only runs on a well-formed
+/// declared-weight set.
+fn check_voting_set(
+    policy: policy::QuorumPolicy,
+    epoch: i64,
+    validators: &ValidatorSet,
+) -> Result<(), Error> {
+    if policy.seatless(epoch) {
+        validators
+            .structural_for_policy(policy, epoch)
+            .map_err(|error| error.message())?;
+    }
+    Ok(())
 }
 pub fn proof_proposal_valid(
     chain: &[u8],

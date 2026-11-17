@@ -234,7 +234,8 @@ async fn liveness_round_realign_preserves_restored_lock_durable_vote_and_replay(
         1,
         Protocol::default(),
         TimeoutConfig::default(),
-    );
+    )
+    .unwrap();
     replay.restore_precommit_lock(recovered.proposal).unwrap();
     let mut guard = octra_node_runtime::consensus_votes::VoteGuard::new(
         CHAIN.to_vec(),

@@ -483,7 +483,8 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
             1,
             protocol(),
             TimeoutConfig::default(),
-        );
+        )
+        .unwrap();
         engine.realign_round(round).unwrap();
         let executor = ImportExecutor::with_protocol(&authority, &nodes[id], protocol());
         let pending = super::pending::admitted(nodes[id].snapshot().unwrap().state(), &inputs);

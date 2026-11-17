@@ -204,7 +204,8 @@ impl<A: Host> Service<A> {
             height,
             self.config.policy.protocol,
             self.timeouts,
-        );
+        )
+        .unwrap();
         validator.recover(&mut engine).await?;
         validator.set_enabled(self.voting);
         let publication = Canonical::new(

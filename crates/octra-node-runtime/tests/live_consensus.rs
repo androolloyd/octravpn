@@ -388,7 +388,8 @@ async fn node_with_mode(
         1,
         Protocol::default(),
         timeouts,
-    );
+    )
+    .unwrap();
     if let Some(proposal) = restored {
         engine.restore_precommit_lock(proposal).unwrap();
     }

@@ -213,7 +213,8 @@ async fn rejects_forgery_falls_back_and_recovers_the_fetched_bundle() {
         pending.epoch_id,
         Protocol::default(),
         TimeoutConfig::default(),
-    );
+    )
+    .unwrap();
     assert_eq!(
         recovery::restore(&context, &saved[0], false, &mut engine, |recovered| {
             assert_eq!(recovered.bundle.tx_hashes, accepted.tx_hashes);

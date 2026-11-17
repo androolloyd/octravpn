@@ -43,6 +43,7 @@ fn engine(local: u8, height: i64) -> Engine {
         Protocol::default(),
         TimeoutConfig::default(),
     )
+    .unwrap()
 }
 fn proposal(j: &Value) -> Proposal {
     let chain_id = raw(j, "chain");
@@ -142,7 +143,8 @@ async fn trace(j: &Value) -> Vec<Value> {
         integer(j, "height"),
         Protocol::default(),
         TimeoutConfig::default(),
-    );
+    )
+    .unwrap();
     let mut guard = VoteGuard::new(chain, address(local), owner.clone());
     let mut ready = Readiness {
         role_can_vote: true,

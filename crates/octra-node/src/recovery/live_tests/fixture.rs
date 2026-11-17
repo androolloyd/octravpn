@@ -642,7 +642,8 @@ impl Fixture {
             2,
             protocol,
             timeouts,
-        );
+        )
+        .unwrap();
         let publication =
             Canonical::new(node.clone(), network.bundles.clone(), executor.clone(), 1.)
                 .await
