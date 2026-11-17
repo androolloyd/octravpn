@@ -56,8 +56,17 @@ jobs:
       - run: cargo clippy --locked --workspace --tests --features test-helpers -- -D warnings
 
   test:
-    name: cargo test (release)
+    # One runner needs ~88 minutes for this suite (~20 building, ~65 in
+    # tests, nearly all of it in three packages), which is too slow to be a
+    # merge gate. The shards are package-level and defined in one place,
+    # scripts/ci/test-shard.sh, so a shard is reproducible by hand and
+    # `test-shard.sh all` is still the whole suite.
+    name: cargo test (${{ matrix.shard }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [node, runtime, runtime-circle, crypto, rest]
     defaults:
       run:
         working-directory: octra
@@ -70,12 +79,10 @@ jobs:
         with: { repository: androolloyd/headscale-rs, ref: 570fa5a60c8ed792b643a301b5e91d3b668ba614, path: headscale-rs }
       - uses: ./octra/.github/actions/setup-rust
       - uses: ./octra/.github/actions/prepare-native-tests
-      # Preserve native process/view deadlines with optimized qualification code.
-      - run: cargo test --locked --release --workspace --all-targets --all-features
-      # Extra explicit run with the mesh test-helpers feature so a
-      # change that builds under --all-features but breaks the
-      # feature-isolated build fails CI here. Matches scripts/test-all.sh.
-      - run: cargo test --locked --release -p octravpn-mesh --all-targets --features test-helpers
+      # Release profile: preserves native process/view deadlines with
+      # optimized qualification code. The `rest` shard also runs the
+      # feature-isolated mesh build that scripts/test-all.sh runs.
+      - run: scripts/ci/test-shard.sh ${{ matrix.shard }}
 
   bench-regression:
     # Compares a fresh octravpn-core bench run against the committed
@@ -271,31 +278,8 @@ jobs:
       - name: Full tailnet happy-path
         run: cd octra && ./docker/e2e-tailnet.sh
 
-  coverage:
-    name: cargo tarpaulin (release coverage)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: octra
-    steps:
-      - uses: actions/checkout@v4
-        with: { path: octra }
-      - uses: actions/checkout@v4
-        with: { repository: androolloyd/octra-foundry, ref: c9011f1f4dfeee3c7c726feb4b4cd337477f866a, path: octra-foundry }
-      - uses: actions/checkout@v4
-        with: { repository: androolloyd/headscale-rs, ref: 570fa5a60c8ed792b643a301b5e91d3b668ba614, path: headscale-rs }
-      - uses: ./octra/.github/actions/setup-rust
-      - uses: ./octra/.github/actions/prepare-native-tests
-      # cargo-tarpaulin's recent releases lock a dependency tree that
-      # needs rustc 1.91 (cargo-platform 0.3.3), so `cargo install`
-      # fails on the repo's pinned 1.88. Pull a prebuilt binary instead
-      # — no compile, no MSRV coupling. coverage.sh's `cargo tarpaulin
-      # --version` guard then skips its own install.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-tarpaulin
-      - name: Run release coverage
-        run: ./scripts/coverage.sh
+  # Coverage lives in .github/workflows/coverage.yml. It used to run here as
+  # well — the same tarpaulin build twice per push, both out of disk.
 
   bench:
     name: criterion smoke
