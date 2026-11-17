@@ -147,7 +147,7 @@ fn native_preview_rule_selection_and_fault_precedence() {
         assert_eq!(fixture[key], hex::encode(Sha256::digest(bytes)), "{key}");
     }
     let current: Value =
-        serde_json::from_str(include_str!("fixtures/execution-rules-c49.json")).unwrap();
+        serde_json::from_str(include_str!("fixtures/execution-rules-candidate.json")).unwrap();
     let candidate: Value = serde_json::from_str(include_str!(
         "../../../docs/rust-node/source-map-candidate.json"
     ))
@@ -187,12 +187,13 @@ fn native_preview_rule_selection_and_fault_precedence() {
     for (index, (old, case)) in old_cases.iter().zip(cases).enumerate() {
         assert_eq!(old["input"], case["input"], "historical input {index}");
         if old["expected"] != case["expected"] {
-            // Current native quorum policy rejects three historical high-epoch
-            // parent certificates. All earlier fault controls remain identical.
+            // Three historical cases sit at the highest epoch, now under
+            // seatless voting, where a parent set without declared weights
+            // cannot vote. All earlier fault controls remain identical.
             assert!(old["expected"]["error"].is_null());
             assert_eq!(
                 case["expected"],
-                json!({"error":"validator duty commit is invalid: quorum"})
+                json!({"error":"validator duty commit is invalid: validator_set: validator weights are not declared"})
             );
             reauthenticated += 1;
         }

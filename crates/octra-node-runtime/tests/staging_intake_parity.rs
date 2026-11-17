@@ -113,7 +113,7 @@ fn num(v: &Value) -> Nonce {
 #[test]
 fn current_native_rpc_and_peer_intake_match_normalization_replacement_and_worker_refusal() {
     let fixture: Value =
-        serde_json::from_str(include_str!("fixtures/staging-intake-c49.json")).unwrap();
+        serde_json::from_str(include_str!("fixtures/staging-intake-candidate.json")).unwrap();
     let source: Value = serde_json::from_str(include_str!(
         "../../../docs/rust-node/source-map-candidate.json"
     ))

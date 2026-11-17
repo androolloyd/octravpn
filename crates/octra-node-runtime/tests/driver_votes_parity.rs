@@ -214,7 +214,7 @@ async fn trace(j: &Value) -> Vec<Value> {
 }
 #[tokio::test]
 async fn current_native_local_vote_bootstrap_recovery_and_durability_match() {
-    let raw = include_bytes!("fixtures/driver-votes-c49.json");
+    let raw = include_bytes!("fixtures/driver-votes-candidate.json");
     let fixture: Value = serde_json::from_slice(raw).unwrap();
     let source: Value = serde_json::from_str(include_str!(
         "../../../docs/rust-node/source-map-candidate.json"
