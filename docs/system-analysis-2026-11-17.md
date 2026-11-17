@@ -77,24 +77,38 @@ The parity *method* is good — independent oracles in `scripts/node-port/`, 1,1
 upstream files inventoried, captured fixtures. What is missing is the pipeline
 around it: adoption is a manual, weeks-long event against a weekly upstream.
 
-### 4. Six payment generations share one tree; the product is one of them
+### 4. Several settlement generations share one tree, and two of them are live
 
-Prepaid Octranet channels (`octranet-payments.aml`) are the product. Still present:
+Two rails are in use by the native node: prepaid Octranet channels
+(`octranet-payments.aml`) and receipt settlement on `main-v5.aml` — v4's
+settlement with proof-authorized administration — which
+`octra-node/src/vpn/settlement.rs` submits and the runtime's
+`vpn_settlement_security` and `groth16_parity` tests exercise. The older
+generations are all still wired in rather than dead:
 
-- **Programs:** `main.aml` (v1.1), `operator-circle.aml` (v2),
-  `operator-circle-v3.aml` (referenced by nothing), `main-v4.aml` +
-  `v4-relay-htlc.aml`, `main-v5.aml`.
-- **Operator:** `chain.rs`, `chain_v2.rs` (no callers), `chain_v3.rs` (2,479
-  lines — the largest file in the repo), the Hub, relay claimer/sweeper, PVAC,
-  onion. Config still selects `protocol_version = v1.1 | v2 | v3`.
+- **Programs:** `main.aml` (v1.1), `operator-circle.aml` (v2), `main-v4.aml` +
+  `v4-relay-htlc.aml` (superseded by v5), and `operator-circle-v3.aml`, which no
+  code, test or script references (only docs and checkpoint records do).
+- **Standalone operator:** the Hub selects `protocol_version = v1.1 | v2 | v3`
+  and drives `chain.rs`, `chain_v2.rs` and `chain_v3.rs` (2,479 lines — the
+  largest file in the repo), plus the relay claimer/sweeper, PVAC and onion.
+  CI's docker e2e and most demo tapes run this binary.
 - **Client:** `discover.rs`, `discover_v2.rs`, `v2_cache`, `v2_runner`,
   `v3_runner`, `chain_v3`, `settler`, `settle_state` beside the prepaid modules.
 - **Around them:** 55 `allow(dead_code)` in `octravpn-node` and 34 in the client;
-  the two permanently failing scheduled jobs; v2/v3 adversarial drills in
-  `test-all.sh`; Lean libraries for V1–V4 and a TLA+ spec for relay settlement.
+  a weekly v4 devnet job that cannot pass (its secret is not configured); v2/v3
+  adversarial drills in `test-all.sh`; Lean libraries for V1–V4 and a TLA+ spec
+  for relay settlement.
 
-Each generation was right when written. Together they are most of the audit
-surface for a launch that uses none of them.
+Each generation was right when written. v1.1 and v2 are the clear candidates
+for removal, but they are reachable through the Hub's version switch, so
+removing them is a decision about what the standalone operator still supports,
+not a dead-code cleanup.
+
+*Corrected after first writing:* an earlier draft said `chain_v2.rs` had no
+callers and that the launch used none of these generations. Both were wrong —
+the first was a search that missed nested imports, the second overlooked v5 in
+the native node.
 
 ### 5. Dependencies point the wrong way
 
@@ -110,12 +124,13 @@ surface for a launch that uses none of them.
   real edge is: from the seven modules `octra-node` imports, 26 of the crate's
   33 top-level modules (38k of 48k lines) are reachable, because `control`
   reaches `hub`, `chain_v3`, `pvac` and `audit`, and `mesh_control` reaches
-  `members_policy`, which reaches `hub` and `v3_cli`. Only the CLI layer and
-  `chain_v2` (9.7k lines) are provably outside it. Extracting a service crate
-  is therefore an interface redesign, not a file move.
+  `members_policy`, which reaches `hub` and `v3_cli`. That count is a lower
+  bound (it does not see nested imports). Extracting a service crate is
+  therefore an interface redesign, not a file move.
 - `octra-foundry` is a sibling **path** dependency pinned only by a commit hash
   in README prose, while `headscale-rs` is a git dependency with a `rev`. A clean
-  clone does not build, and the Docker e2e fails inside its `cargo build`.
+  clone does not build without it. (The Docker e2e failure turned out to be a
+  different missing input: the builder image never copied `experimental/`.)
 - Two config dialects (JSON for `octra-node`, TOML for the other two binaries).
 
 ### 6. Qualification is narrated, and the reference docs describe the old system
@@ -168,10 +183,12 @@ artefact we have is for the thing we ship; most of the rest is for things we don
    that merges. Add a "rule ahead" check: the upstream chain config's scheduled
    rule IDs versus the set this build implements, with the activation epoch. The
    node should stop paid admission, not guess, when a rule it lacks activates.
-4. **Subtract.** Extract what the native node uses into a small `octravpn-service`
-   crate so `octra-node` and the client stop depending on the legacy operator;
-   move v1.1–v5 code, programs, drills and proofs out of the default workspace at
-   a tag. Make `octra-foundry` a pinned git dependency.
+4. **Subtract.** Stop `octra-node` linking the standalone operator (Hub, CLI,
+   v1.1/v2 chain layers, relay keepers) — first behind a feature, later as a
+   separate crate. Decide whether the standalone operator still supports v1.1
+   and v2; if not, remove them with their programs, drills and proofs at a tag.
+   v5 stays: the native node settles on it. Make `octra-foundry` a pinned git
+   dependency.
 5. **Generate the status page; rewrite `security.md` for prepaid.** One table —
    gate × candidate × result × date — built from the checkpoint JSON, with the
    narrative left in the checkpoints.
@@ -185,8 +202,10 @@ artefact we have is for the thing we ship; most of the rest is for things we don
    exit does not require voting, and the public node has only ever run non-voting.
    Declaring observer-only for alpha lets parity work target verification paths
    first. Recommended.
-2. **Legacy: archive or keep.** Tag and remove from `main` (recommended), or keep
-   in a non-default workspace. The payment-tier spec says "existing v5 deployments
-   … remain separate" — if anything live still depends on v5, that changes this.
+2. **Which generations the standalone operator still supports.** v5 is live in
+   the native node and stays. v1.1 and v2 are reachable only through the Hub's
+   `protocol_version` switch, and CI's docker e2e registers endpoints through
+   the v1.1 path. Dropping them means deciding the standalone operator is
+   v3/v5-only (or retiring it in favour of `octra-node`) and rewriting that e2e.
 3. **Whether to pause feature work** until steps 1–2 hold. The last month added
    capability on top of a red gate and a down deployment; I would pause.
