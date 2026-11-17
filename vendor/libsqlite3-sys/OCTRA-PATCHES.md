@@ -21,3 +21,27 @@ Sources:
 
 This affects local database durability only. It does not change consensus,
 Irmin hashing, schema, transaction execution or application protocol rules.
+
+## WAL page-size read (CVE-2026-119375, RUSTSEC-2026-0459)
+
+Both amalgamations also carry upstream SQLite commit
+`e5bf119821f25be1d7f10ef0a2edbe175289166e` (Fossil
+`f9b4ee369557c36c606666bd7e6d8dc4685d87531993d3ce4e7a718aa814a5ac`), applied
+verbatim to `sqlite3WalReadFrame`: when the WAL page size is smaller than the
+database page size, the rest of the output buffer is zeroed instead of being
+left as it was. Without it, a database opened beside a crafted `-wal` returns
+recycled page-cache memory through ordinary queries.
+
+The node opens SQLite files it did not write when an operator adopts a
+retained-state directory, so this input is reachable. The crate still reports
+version 0.30.1 and SQLite 3.46.0, which is why the advisory is listed as
+reviewed in `.cargo/audit.toml` and `deny.toml` rather than cleared by a
+version bump; upstream's fixed crate (0.39) needs a newer `sqlx`.
+
+`crates/octra-node-runtime/tests/sqlite_wal_page_size.rs` builds that file
+pair and fails against the unpatched source (3,006 leaked bytes when this was
+written). Re-vendoring must keep it green.
+
+Sources:
+- https://github.com/sqlite/sqlite/commit/e5bf119821f25be1d7f10ef0a2edbe175289166e
+- https://rustsec.org/advisories/RUSTSEC-2026-0459
