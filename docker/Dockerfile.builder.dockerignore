@@ -14,6 +14,8 @@
 !octra/program/**
 !octra/pvac-sidecar/
 !octra/pvac-sidecar/**
+!octra/experimental/
+!octra/experimental/**
 !octra-foundry/
 !octra-foundry/**
 !headscale-rs/

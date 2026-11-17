@@ -54,15 +54,30 @@ wait_rpc_ready() {
   return 1
 }
 
+# Quiet when it works, loud when it does not. `--quiet` alone hid the
+# compiler's error for a month: CI showed only "failed to solve" and the
+# Dockerfile line, never why the build failed.
+compose_build() {
+    local log
+    log=$(mktemp)
+    if ! docker compose build "$@" >"$log" 2>&1; then
+        echo "[e2e] docker compose build $* failed; last 80 lines:" >&2
+        tail -n 80 "$log" >&2
+        rm -f "$log"
+        return 1
+    fi
+    rm -f "$log"
+}
+
 echo "[e2e] Building images..."
 # Build the `builder` stage first so the downstream Dockerfiles can
 # `FROM octravpn-builder:latest`. `docker compose build` runs services
 # in parallel and does not respect FROM-image dependencies, so node /
 # client / mock-rpc would otherwise race and try to pull the (non-
 # existent) `octravpn-builder` image from docker.io.
-docker compose build --quiet builder
-docker compose build --quiet
-docker compose build --quiet client
+compose_build builder
+compose_build
+compose_build client
 
 echo "[e2e] Starting mock-rpc..."
 docker compose up -d mock-rpc
