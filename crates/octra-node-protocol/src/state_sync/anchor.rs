@@ -297,7 +297,7 @@ pub fn raw_validator_set(set: &ValidatorSet) -> Result<ValidatorSet> {
         ..set.clone()
     }
     .validate_shape()
-    .map_err(|error| error.message().into())
+    .map_err(|error| error.message())
 }
 pub fn encoded_validator_set(set: &ValidatorSet) -> Result<ValidatorSet> {
     let mut result = set.clone();
@@ -338,7 +338,7 @@ fn same_voters(a: &ValidatorSet, b: &ValidatorSet) -> Result<bool> {
 }
 fn structural_set(policy: QuorumPolicy, epoch: i64, set: &ValidatorSet) -> Result<ValidatorSet> {
     set.structural_for_policy(policy, epoch)
-        .map_err(|error| error.message().into())
+        .map_err(|error| error.message())
 }
 /// The set a pending eviction leaves, if its witness is the set that
 /// voted at `epoch` and the update is exactly that removal.
@@ -363,7 +363,7 @@ fn eviction_set(
     let source = witness
         .source
         .validate_shape()
-        .map_err(|error| Error::from(error.message()))?;
+        .map_err(|error| error.message())?;
     require(
         same_voters(&source, &current)?,
         "validator eviction source set differs",

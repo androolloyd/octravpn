@@ -37,16 +37,17 @@ python3 scripts/node-port/candidate-<name>-oracle.py \
 | Epoch rule selection order | `set_rule` | `validator_epoch/mod.rs` | 978 preview inputs |
 | Local vote persistence | `c_driver` (vote log) | unchanged | 184 traces / 2,718 steps, unchanged upstream |
 | Compiler and publication, VM roots | `lib/vm` | unchanged | 101 + 22 + 56 cases, unchanged upstream for these inputs |
+| Eviction witness on validator updates | `validator_set_update` | `control_payload.rs`, `validator/update.rs` | 80 constructions, 540 stored forms |
+| Sync anchor steps with an eviction; checkpoint voting-set check | `sync_anchor`, `state_sync_checkpoint` | `state_sync/anchor.rs`, `checkpoint.rs` | historical state-sync vectors pass; the eviction step's parts are captured, its composition is not |
 
 ## Not ported yet
 
 In the order an observer needs them to follow devnet past epoch 1,845,000:
 
-1. **Bootstrap.** Sync anchor eviction witness and size limits
-   (`sync_anchor` +158), state-sync verification and checkpoint
-   (`state_sync_verify`, `state_sync_checkpoint`), parent-commit check
-   (`consensus_parent_commit`). Depends on the eviction record in
-   `validator_set_update` (+197) and `validator_entry`.
+1. **Bootstrap, remainder.** A restored state must carry the execution
+   marker for its epoch (`state_sync_verify`), which execution writes —
+   see 2. The validator source set at the durable head
+   (`consensus_parent_commit.set_at_head`) belongs with the driver.
 2. **Execution** — everything that changes a state root:
    scalar-work metering (`scalar_work`, `contract_vm` +208, `contract`,
    `code_check`, `program_type_flow`, `bytecode`, `program_package`);

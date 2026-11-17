@@ -69,6 +69,7 @@ fn fixture() -> Value {
     }
     fixture
 }
+#[allow(clippy::needless_pass_by_value)] // Callers hand over owned error text.
 fn failed(reason: impl ToString) -> Value {
     json!({"error": reason.to_string()})
 }
