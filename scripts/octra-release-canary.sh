@@ -30,21 +30,35 @@
 # after the re-verification checklist in the drift issue is done.
 #
 # Usage:
-#   scripts/octra-release-canary.sh                       # default baseline
-#   scripts/octra-release-canary.sh --baseline FILE \
+#   scripts/octra-release-canary.sh                       # defaults
+#   scripts/octra-release-canary.sh --pin FILE --baseline FILE \
 #       --marker-out /tmp/marker.json                     # CI invocation
 #   OCTRA_RELEASE_URL=... scripts/octra-release-canary.sh # test override
 #
+# "In sync" means the signed marker's `public_commit` is the lite_node commit
+# our Rust node implements — `commit` in docs/rust-node/candidate.json. The
+# comparison used to be against a hand-seeded copy of an old marker, which
+# nobody re-seeded: it sat at sequence 12 while devnet reached 42. Tying it
+# to the pin means adopting an upstream commit is what clears the drift.
+#
+# The baseline file is kept for one job only: refusing a marker whose
+# sequence rolls back or is reused with different contents.
+#
+# An expired marker is still evidence. Upstream signs for 72 hours and does
+# not always refresh in time; the signature proves the release existed, so
+# an expired marker is compared and reported with `marker_fresh=false`
+# rather than treated as "the canary is blind" (which is how this job spent
+# most of October and November red).
+#
 # Outputs: key=value lines appended to $GITHUB_OUTPUT when set (else stdout):
-#   outcome, sequence, action, notice_code, source_commit,
-#   consensus_rules_id, consensus_profile, issued_at, expires_at,
-#   baseline_sequence, baseline_source_commit, baseline_consensus_rules_id,
-#   changed_fields (csv, drift only)
+#   outcome (in_sync | drift | unseeded), sequence, action, notice_code,
+#   public_commit, source_commit, consensus_rules_id, consensus_profile,
+#   runtime_profile_hash, issued_at, expires_at, marker_fresh, pin_commit
 #
 # Exit codes:
-#   0  — marker verified; source_commit and consensus_rules_id match baseline
-#   10 — marker verified; DRIFT from baseline (fixtures need re-verification),
-#        or no baseline is committed yet (outcome=unseeded)
+#   0  — marker verified; its public_commit is our pin
+#   10 — marker verified; DRIFT from our pin, or no pin is recorded
+#        (outcome=unseeded)
 #   2  — fetch / verification / environment failure (fail the CI job)
 #
 set -euo pipefail
@@ -57,11 +71,13 @@ octra_root="$(cd "${script_dir}/.." && pwd)"
 
 URL="${OCTRA_RELEASE_URL:-https://releases.octra.network/v1/devnet/latest.json}"
 baseline="${octra_root}/docs/audit/octra-release-baseline.json"
+pin="${octra_root}/docs/rust-node/candidate.json"
 marker_out=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --baseline)   baseline="$2";   shift 2 ;;
+    --pin)        pin="$2";        shift 2 ;;
     --marker-out) marker_out="$2"; shift 2 ;;
     *) err "unknown argument: $1"; exit 2 ;;
   esac
@@ -103,11 +119,11 @@ fi
 # behavior is easy to spot when they revise their tooling.
 out_kv="$tmp/outputs.kv"
 set +e
-python3 - "$tmp/marker.raw" "$baseline" "$out_kv" "${marker_out:-}" <<'PYEOF'
+python3 - "$tmp/marker.raw" "$baseline" "$out_kv" "${marker_out:-}" "$pin" <<'PYEOF'
 import base64, binascii, datetime, json, re, subprocess, sys, tempfile
 from pathlib import Path
 
-raw_path, baseline_path, out_kv, marker_out = sys.argv[1:5]
+raw_path, baseline_path, out_kv, marker_out, pin_path = sys.argv[1:6]
 
 KEY_ID = "devnet-release-f912b4891be62acc"
 CHAIN = "octra-devnet-9871-cluster"
@@ -255,8 +271,26 @@ def emit(handle, **fields):
         handle.write(f"{key}={value}\n")
 
 
+def pinned_commit(path):
+    """The lite_node commit our node implements, or None if unrecorded."""
+    if not Path(path).exists():
+        return None
+    try:
+        commit = json.loads(Path(path).read_text(encoding="utf-8")).get("commit")
+    except (ValueError, AttributeError) as error:
+        raise ValidatorError("pin file is not valid JSON") from error
+    if not isinstance(commit, str) or not HEX40.fullmatch(commit):
+        raise ValidatorError("pin file has no 40-hex `commit`")
+    return commit
+
+
 try:
-    marker = decode(Path(raw_path).read_bytes(), fresh=True)
+    # Signature, schema and time range are always enforced. Expiry is not a
+    # refusal here: see the header.
+    marker = decode(Path(raw_path).read_bytes(), fresh=False)
+    marker_fresh = release_time(marker["expires_at"]) > datetime.datetime.now(
+        datetime.timezone.utc
+    )
 
     # The baseline is the last marker we accepted. It is normally past its
     # own 72h expiry, so validate with fresh=False — exactly how release.py
@@ -276,24 +310,16 @@ try:
             encoding="utf-8",
         )
 
-    # The two fields our frozen fixtures actually depend on. Anything else
-    # (network_sha256, runtime_profile_hash, ...) matters to node OPERATORS,
-    # not to RPC/consensus-contract consumers like us — but they still ride
-    # along in the outputs for the issue body.
-    watched = ("source_commit", "consensus_rules_id")
-    changed = [
-        field for field in watched
-        if baseline is not None and marker[field] != baseline[field]
-    ]
-    if changed:
-        outcome = "drift"
-    elif baseline is None:
-        # Verified fine, but there is no committed baseline to compare
-        # against. Reported as its own outcome (and exits like drift) so
-        # the missing seed cannot be mistaken for a green result.
+    pin_commit = pinned_commit(pin_path)
+    if pin_commit is None:
+        # Verified fine, but nothing records what we implement. Its own
+        # outcome (and exits like drift) so a missing pin cannot pass for
+        # a green result.
         outcome = "unseeded"
-    else:
+    elif marker["public_commit"] == pin_commit:
         outcome = "in_sync"
+    else:
+        outcome = "drift"
 
     with open(out_kv, "w", encoding="utf-8") as handle:
         emit(
@@ -305,12 +331,11 @@ try:
             source_commit=marker["source_commit"],
             consensus_rules_id=marker["consensus_rules_id"],
             consensus_profile=marker["consensus_profile"],
+            runtime_profile_hash=marker["runtime_profile_hash"],
             issued_at=marker["issued_at"],
             expires_at=marker["expires_at"],
-            baseline_sequence=baseline["sequence"] if baseline else "none",
-            baseline_source_commit=baseline["source_commit"] if baseline else "none",
-            baseline_consensus_rules_id=baseline["consensus_rules_id"] if baseline else "none",
-            changed_fields=",".join(changed),
+            marker_fresh="true" if marker_fresh else "false",
+            pin_commit=pin_commit or "none",
             outcome=outcome,
         )
 
@@ -335,11 +360,11 @@ cat "$out_kv"
 
 if [[ $rc -eq 10 ]]; then
   if grep -q '^outcome=unseeded$' "$out_kv"; then
-    err "no baseline committed at ${baseline} — seed it from this verified marker"
+    err "no pin recorded at ${pin} — nothing says which upstream commit we implement"
   else
-    err "DRIFT: baseline no longer matches the signed release marker"
+    err "DRIFT: the signed release is not the commit recorded in $(basename "$pin")"
   fi
   exit 10
 fi
-log "in sync with baseline ($(basename "$baseline"))"
+log "in sync: the signed release is the commit recorded in $(basename "$pin")"
 exit 0

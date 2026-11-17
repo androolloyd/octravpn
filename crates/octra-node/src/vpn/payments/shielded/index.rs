@@ -6,9 +6,9 @@ mod retained;
 mod seed;
 use super::{pool, storage::Disk, Pool, State, PLAN_MAX_AGE};
 use anyhow::{ensure, Context, Result};
-pub use handle::Handle;
 #[cfg(test)]
 pub(crate) use handle::qualification;
+pub use handle::Handle;
 use hints::Delta;
 use octra_node_runtime::canonical::Head;
 use octra_private_payments_experimental::pool::PoolIndex;

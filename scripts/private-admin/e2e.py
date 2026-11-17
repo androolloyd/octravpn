@@ -10,6 +10,7 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -263,6 +264,18 @@ def main():
                     except subprocess.TimeoutExpired:
                         host.terminate(); host.wait(timeout=10)
                 args.evidence.write_text(json.dumps(evidence, indent=2)+'\n')
+                # The native host runs as root in its container and owns what
+                # it wrote under /state. On Linux those files stay root-owned
+                # on the bind mount, so the unprivileged caller could not
+                # delete them and TemporaryDirectory's cleanup raised
+                # PermissionError — after every check had passed, which made
+                # the job fail on a green run. Hand ownership back first.
+                # (Docker Desktop and OrbStack remap ownership, which is why
+                # this only ever failed in CI.)
+                subprocess.run(['docker', 'run', '--rm', '--network', 'none', '--user', '0',
+                                '-v', f'{state}:/state', '--entrypoint', 'chown', args.image,
+                                '-R', f'{os.getuid()}:{os.getgid()}', '/state'],
+                               check=False, capture_output=True)
     print(f"PASS: {len(records)} checks; evidence: {args.evidence}")
 
 

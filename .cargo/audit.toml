@@ -18,5 +18,16 @@ ignore = [
   # Removed from the companion headscale-rs audit branch by switching
   # to rustls-pki-types' built-in PEM parser.
   "RUSTSEC-2025-0134",
+  # SQLite CVE-2026-119375. The fix is backported into the vendored
+  # amalgamations (vendor/libsqlite3-sys/OCTRA-PATCHES.md) and held by
+  # crates/octra-node-runtime/tests/sqlite_wal_page_size.rs; the advisory
+  # keys on the crate version, which the backport does not change. Drop
+  # this once sqlx moves to libsqlite3-sys >= 0.39.
+  "RUSTSEC-2026-0459",
+  # chrono is unmaintained (2026-09-14): a notice, not a vulnerability,
+  # with no patched release. It is reached through headscale-rs and
+  # sqlx as well as our own crates, so it cannot be dropped in one step.
+  # Reviewed 2026-11-17; migrate to `jiff` or `time` with headscale-rs.
+  "RUSTSEC-2026-0543",
 ]
 informational_warnings = ["unmaintained", "unsound"]

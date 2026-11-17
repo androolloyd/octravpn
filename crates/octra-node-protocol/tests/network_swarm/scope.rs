@@ -114,7 +114,7 @@ async fn device_scope_reconnects_authenticated_native_frames_without_physical_fa
         .await;
     let scope = TransportScope::Interface {
         name: "lo".into(),
-        pins: Default::default(),
+        pins: std::collections::BTreeMap::default(),
         mark: 0x4f43_544e,
     };
     let bound = swarm.change_scope(scope).await.unwrap();

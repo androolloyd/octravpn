@@ -41,6 +41,13 @@ COPY octra/program ./octra/program
 # We only need the manifest + the (tiny) src/ for cargo to be happy
 # — the binaries this builder produces don't link it.
 COPY octra/pvac-sidecar ./octra/pvac-sidecar
+# `octra-node` has an optional path dependency on the experimental
+# private-payments crate. Cargo loads every path dependency's manifest to
+# resolve the workspace — optional or not, selected or not — so without
+# this the build stops before compiling anything ("failed to read
+# experimental/private-payments/Cargo.toml"). The crate is not built
+# unless `private-payments-experimental` is enabled.
+COPY octra/experimental ./octra/experimental
 
 WORKDIR /work/octra
 # The mock is a dev-only path dependency, so release builds select it via

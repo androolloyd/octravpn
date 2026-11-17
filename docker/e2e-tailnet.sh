@@ -9,7 +9,21 @@ fi
 cleanup() { docker compose down -v --remove-orphans >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-docker compose build --quiet builder
-docker compose build --quiet
+# Quiet when it works, loud when it does not. `--quiet` alone hid the
+# compiler's error for a month: CI showed only "failed to solve" and the
+# Dockerfile line, never why the build failed.
+compose_build() {
+    local log
+    log=$(mktemp)
+    if ! docker compose build "$@" >"$log" 2>&1; then
+        echo "[e2e] docker compose build $* failed; last 80 lines:" >&2
+        tail -n 80 "$log" >&2
+        rm -f "$log"
+        return 1
+    fi
+    rm -f "$log"
+}
+compose_build builder
+compose_build
 docker compose up -d mock-rpc
 python3 docker/e2e-tailnet.py

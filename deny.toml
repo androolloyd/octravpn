@@ -14,6 +14,14 @@ ignore = [
   # via getset -> neli -> local-ip-address -> headscale-cli. Not in the runtime
   # binary; no fixed upstream yet. Revisit if neli/getset drop it.
   "RUSTSEC-2026-0173",
+  # SQLite CVE-2026-119375: fixed by backport in vendor/libsqlite3-sys (see
+  # OCTRA-PATCHES.md), regression-tested in octra-node-runtime. The crate
+  # version is unchanged, so the advisory still matches. Same entry as
+  # .cargo/audit.toml; remove when sqlx takes libsqlite3-sys >= 0.39.
+  "RUSTSEC-2026-0459",
+  # chrono unmaintained notice (no patched release). Reviewed 2026-11-17;
+  # shared with headscale-rs and sqlx, migrate together.
+  "RUSTSEC-2026-0543",
 ]
 
 [licenses]

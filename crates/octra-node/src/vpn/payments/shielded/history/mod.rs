@@ -245,9 +245,7 @@ impl Proof {
         let lease = crate::SnapshotLease::capture(source.directory.shared.clone())?;
         lease.with_current(PLAN_MAX_AGE, || Ok(()))?;
         ensure!(
-            anchor <= lease.committed().head().cursor.epoch.0
-                && epoch > 0
-                && epoch <= anchor,
+            anchor <= lease.committed().head().cursor.epoch.0 && epoch > 0 && epoch <= anchor,
             "portable capture is not published"
         );
         let result = if epoch > source.directory.history.anchor().epoch.0 {

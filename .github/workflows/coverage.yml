@@ -1,9 +1,12 @@
 name: Coverage
 
+# Coverage is a measurement, not a merge gate: an instrumented release build
+# of the whole workspace takes over half an hour and its only assertion is a
+# 20% floor. It runs on main and on demand; pull requests are gated by the
+# CI workflow's fmt, clippy, audit and test shards.
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
 
 env:
@@ -24,7 +27,24 @@ jobs:
         with: { repository: androolloyd/octra-foundry, ref: c9011f1f4dfeee3c7c726feb4b4cd337477f866a, path: octra-foundry }
       - uses: actions/checkout@v4
         with: { repository: androolloyd/headscale-rs, ref: 570fa5a60c8ed792b643a301b5e91d3b668ba614, path: headscale-rs }
+      # The instrumented build ran the hosted runner out of disk ("No space
+      # left on device", then the linker died with SIGBUS) on every push from
+      # mid-October. The preinstalled toolchains below are ~30 GB this job
+      # never uses.
+      - name: Free runner disk
+        working-directory: .
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          df -h / | tail -1
       - uses: ./octra/.github/actions/setup-rust
       - uses: ./octra/.github/actions/prepare-native-tests
+      # Prebuilt binary: no compile, no extra target directory on a job
+      # whose constraint is disk. coverage.sh's `cargo tarpaulin --version`
+      # guard then skips its own `cargo install`.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-tarpaulin
       - name: Run release coverage
         run: ./scripts/coverage.sh
