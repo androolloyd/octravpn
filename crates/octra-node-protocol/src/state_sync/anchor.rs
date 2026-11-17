@@ -243,15 +243,27 @@ fn verify_finalize(
         finalize.epoch_id == finalize.header.epoch_id,
         "finality epoch mismatch",
     )?;
-    qc::validate_finalize_for_policy(policy, chain, set, finalize, FinalityMode::StrictPersisted)
-        .map_err(|e| Error::from(format!("finality qc {e}")))?;
+    let structural = set
+        .structural_for_policy(policy, finalize.epoch_id)
+        .map_err(|error| error.message())?;
+    qc::validate_finalize_for_policy(
+        policy,
+        chain,
+        &structural,
+        finalize,
+        FinalityMode::Persisted,
+    )
+    .map_err(|e| Error::from(format!("finality qc {e}")))?;
     let vote_set = set.for_policy(policy, finalize.epoch_id)?;
     let signers = finalize
         .precommits
         .iter()
         .map(|v| v.validator.clone())
         .collect::<Vec<_>>();
-    require(vote_set.has_quorum(&signers), "finality qc signer quorum")
+    require(
+        vote_set.pair_for_policy(policy, finalize.epoch_id, &signers),
+        "finality qc signer quorum",
+    )
 }
 impl Step {
     fn verify(
@@ -508,8 +520,15 @@ impl Anchor {
                 link.finalize
                     .precommits
                     .retain(|vote| path.validators.public_key(&vote.validator).is_some());
-                let voters = path.validators.for_policy(policy, step.finalize.epoch_id)?;
-                if !voters.has_quorum(
+                let Ok(voters) = path
+                    .validators
+                    .structural_for_policy(policy, step.finalize.epoch_id)
+                else {
+                    continue;
+                };
+                if !voters.pair_for_policy(
+                    policy,
+                    step.finalize.epoch_id,
                     &link
                         .finalize
                         .precommits

@@ -1,37 +1,66 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
+pub use super::measure::quota as quorum_weight;
+use super::measure::{self, Ask, Space};
 use super::{policy, Bytes, Error, Proposal, Validator, ValidatorSet};
 use crate::oce1::Writer;
 use num_bigint::{BigInt, Sign};
 use num_traits::{One, Zero};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
-pub fn quorum_weight(total: &BigInt) -> BigInt {
-    (total * 2) / 3 + 1
+/// Why a validator set cannot vote at an epoch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SetError {
+    /// The set is not a well-formed declared-weight set.
+    Shape(Error),
+    /// One member alone holds blocking weight under seatless voting.
+    SeatCap,
+}
+impl SetError {
+    pub fn message(&self) -> Error {
+        match self {
+            Self::Shape(reason) => reason.clone(),
+            Self::SeatCap => "validator weight reaches blocking threshold".into(),
+        }
+    }
+}
+impl From<SetError> for Error {
+    fn from(error: SetError) -> Self {
+        error.message()
+    }
+}
+/// What removing offenders does to a set: the reduced set, or the set kept
+/// as it is because the offenders hold blocking weight.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EvictionChoice {
+    Remove(ValidatorSet, BigInt),
+    Retain(BigInt),
+}
+/// Which set votes when a scheduled set is offered at an epoch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SetChoice {
+    Active(ValidatorSet),
+    Pending(ValidatorSet),
 }
 fn build(weighted: bool, mut entries: Vec<(Validator, BigInt)>) -> ValidatorSet {
     entries.sort_by(|a, b| a.0.address.cmp(&b.0.address));
-    let total_weight: BigInt = entries.iter().map(|e| &e.1).sum();
-    let n = entries.len() as i64;
-    let f = (n - 1) / 3;
-    let quorum = if n <= 0 {
-        0
-    } else if n < 4 {
-        n
-    } else {
-        n - f
-    };
+    let measure::Shape {
+        n,
+        f,
+        quorum,
+        total_weight,
+        quorum_weight,
+    } = measure::shape(
+        entries.len() as i64,
+        entries.iter().map(|entry| &entry.1).sum(),
+    );
     ValidatorSet {
         validators: entries.iter().map(|e| e.0.clone()).collect(),
         weights: entries.into_iter().map(|(v, w)| (v.address, w)).collect(),
         n,
         f,
         quorum,
-        quorum_weight: if total_weight > BigInt::zero() {
-            quorum_weight(&total_weight)
-        } else {
-            BigInt::zero()
-        },
+        quorum_weight,
         total_weight,
         weighted,
         authors: None,
@@ -96,7 +125,7 @@ impl ValidatorSet {
         let total: BigInt = weights.iter().sum();
         weights.sort_by(|a, b| b.cmp(a));
         let unavailable: BigInt = weights.iter().take(self.f.max(0) as usize).sum();
-        &total - unavailable >= quorum_weight(&total)
+        measure::live(&total, &unavailable)
     }
     pub fn count_weight_cap(&self) -> Result<BigInt, Error> {
         let entries = self.entries()?;
@@ -152,6 +181,169 @@ impl ValidatorSet {
     pub fn for_epoch(&self, chain_id: &[u8], epoch_id: i64) -> Result<Self, Error> {
         self.for_policy(policy::QuorumPolicy::for_chain(chain_id), epoch_id)
     }
+    /// The set rebuilt from its own members and weights, if it is exactly the
+    /// declared-weight set those members and weights describe.
+    pub fn validate_shape(&self) -> Result<Self, SetError> {
+        if !self.weighted {
+            return Err(SetError::Shape("validator weights are not declared".into()));
+        }
+        let mut members: Vec<_> = self.validators.iter().collect();
+        members.sort_by(|left, right| left.address.cmp(&right.address));
+        let mut weights: Vec<_> = self.weights.iter().collect();
+        weights.sort_by(|left, right| left.0.cmp(&right.0));
+        if members.len() != weights.len()
+            || members
+                .iter()
+                .zip(&weights)
+                .any(|(member, (address, _))| &member.address != address)
+        {
+            return Err(SetError::Shape(
+                "validator weight membership differs".into(),
+            ));
+        }
+        let entries: Vec<_> = members
+            .into_iter()
+            .zip(weights)
+            .map(|(member, (_, weight))| (member.clone(), weight.clone()))
+            .collect();
+        let mut checked = Self::weighted(entries.clone()).map_err(SetError::Shape)?;
+        if self.n != checked.n
+            || self.f != checked.f
+            || self.quorum != checked.quorum
+            || self.total_weight != checked.total_weight
+            || self.quorum_weight != checked.quorum_weight
+        {
+            return Err(SetError::Shape("validator set shape differs".into()));
+        }
+        if let Some((height, authors)) = &self.authors {
+            let authors = Self::weighted(authors.clone())
+                .and_then(|set| set.entries())
+                .map_err(SetError::Shape)?;
+            let mut combined = entries;
+            combined.extend(authors.iter().cloned());
+            Self::weighted(combined).map_err(SetError::Shape)?;
+            checked.authors = Some((*height, authors));
+        }
+        Ok(checked)
+    }
+    /// Same members, keys and weights, ignoring any one-epoch authors.
+    pub fn same_voting_set(&self, other: &Self) -> bool {
+        let voting = |set: &Self| {
+            Self {
+                authors: None,
+                ..set.clone()
+            }
+            .validate_shape()
+        };
+        matches!((voting(self), voting(other)), (Ok(left), Ok(right)) if left == right)
+    }
+    /// The set that votes at `epoch`; under seatless voting it must also be
+    /// a well-formed declared-weight set.
+    pub fn structural_for_policy(
+        &self,
+        policy: policy::QuorumPolicy,
+        epoch: i64,
+    ) -> Result<Self, SetError> {
+        let effective = self.for_policy(policy, epoch).map_err(SetError::Shape)?;
+        if !policy.seatless(epoch) {
+            return Ok(effective);
+        }
+        self.validate_shape()?;
+        effective.validate_shape()
+    }
+    pub fn structural_for_epoch(&self, chain: &[u8], epoch: i64) -> Result<Self, SetError> {
+        self.structural_for_policy(policy::QuorumPolicy::for_chain(chain), epoch)
+    }
+    /// [`Self::structural_for_policy`], and under seatless voting no single
+    /// member may hold blocking weight.
+    pub fn validate_for_policy(
+        &self,
+        policy: policy::QuorumPolicy,
+        epoch: i64,
+    ) -> Result<Self, SetError> {
+        let checked = self.structural_for_policy(policy, epoch)?;
+        if !policy.seatless(epoch) {
+            return Ok(checked);
+        }
+        let limit = measure::minority(&measure::shape(checked.n, checked.total_weight.clone()));
+        if checked.weights.iter().any(|(_, weight)| weight >= &limit) {
+            return Err(SetError::SeatCap);
+        }
+        Ok(checked)
+    }
+    pub fn checked_for_policy(
+        &self,
+        policy: policy::QuorumPolicy,
+        epoch: i64,
+    ) -> Result<Self, Error> {
+        self.validate_for_policy(policy, epoch)
+            .map_err(|error| error.message())
+    }
+    pub fn checked_for_epoch(&self, chain: &[u8], epoch: i64) -> Result<Self, Error> {
+        self.checked_for_policy(policy::QuorumPolicy::for_chain(chain), epoch)
+    }
+    pub fn plan_eviction(&self, offenders: &[Bytes]) -> Result<EvictionChoice, Error> {
+        let checked = self.validate_shape().map_err(|error| error.message())?;
+        let unique: BTreeSet<_> = offenders.iter().collect();
+        if unique.is_empty() {
+            return Err("validator eviction requires offenders".into());
+        }
+        if unique.len() != offenders.len() {
+            return Err("duplicate eviction offender".into());
+        }
+        if unique
+            .iter()
+            .any(|address| checked.weight(address).is_none())
+        {
+            return Err("eviction offender is not an active validator".into());
+        }
+        let (removed, remaining): (Vec<_>, Vec<_>) = checked
+            .entries()?
+            .into_iter()
+            .partition(|(member, _)| unique.contains(&member.address));
+        let weight: BigInt = removed.iter().map(|(_, weight)| weight).sum();
+        if !measure::live(&checked.total_weight, &weight) {
+            return Ok(EvictionChoice::Retain(weight));
+        }
+        Ok(EvictionChoice::Remove(Self::weighted(remaining)?, weight))
+    }
+    pub fn evict(&self, offenders: &[Bytes]) -> Result<(Self, BigInt), Error> {
+        match self.plan_eviction(offenders)? {
+            EvictionChoice::Remove(next, weight) => Ok((next, weight)),
+            EvictionChoice::Retain(_) => Err("evicted weight reaches blocking threshold".into()),
+        }
+    }
+    /// The set that votes when `self` is scheduled for `epoch`: itself, or —
+    /// when it would hand one member blocking weight — the still-active set.
+    pub fn pending_for_policy(
+        &self,
+        policy: policy::QuorumPolicy,
+        epoch: i64,
+        active: Option<&Self>,
+    ) -> Result<SetChoice, SetError> {
+        let active = match active {
+            Some(active) if policy.seatless(epoch) => {
+                Some(active.structural_for_policy(policy, epoch)?)
+            }
+            _ => None,
+        };
+        match self.validate_for_policy(policy, epoch) {
+            Ok(set) => Ok(SetChoice::Pending(set)),
+            Err(SetError::SeatCap) => active
+                .map(SetChoice::Active)
+                .ok_or_else(|| SetError::Shape("active validator set is missing".into())),
+            Err(error) => Err(error),
+        }
+    }
+    pub fn space_for_rule(&self, rule: policy::Rule) -> Space {
+        measure::ruled(rule, self.weighted, &self.weights)
+    }
+    pub fn space(&self, policy: policy::QuorumPolicy, epoch: i64) -> Space {
+        measure::space(policy, epoch, self.weighted, &self.weights)
+    }
+    pub fn space_at(&self, chain: &[u8], epoch: i64) -> Space {
+        self.space(policy::QuorumPolicy::for_chain(chain), epoch)
+    }
     pub fn author_entry(
         &self,
         chain: &[u8],
@@ -181,7 +373,7 @@ impl ValidatorSet {
         Self::weighted(entries).ok()
     }
     pub fn weights_valid(&self, rule: policy::Rule) -> bool {
-        rule != policy::Rule::Stake || self.weighted
+        self.space_for_rule(rule).valid()
     }
     pub fn signed_weight(&self, signers: &[Bytes]) -> Option<BigInt> {
         let mut seen = BTreeSet::new();
@@ -193,20 +385,8 @@ impl ValidatorSet {
         }
         Some(total)
     }
-    pub fn has_weight_quorum(&self, signers: &[Bytes]) -> bool {
-        self.signed_weight(signers)
-            .is_some_and(|weight| weight >= self.quorum_weight)
-    }
-    pub fn has_quorum_values(&self, count: i64, weight: &BigInt) -> bool {
-        count >= self.quorum && weight >= &self.quorum_weight
-    }
-    pub fn has_quorum(&self, signers: &[Bytes]) -> bool {
-        self.signed_weight(signers).is_some_and(|weight| {
-            self.has_quorum_values(
-                signers.iter().collect::<BTreeSet<_>>().len() as i64,
-                &weight,
-            )
-        })
+    fn unique_signers(signers: &[Bytes]) -> i64 {
+        signers.iter().collect::<BTreeSet<_>>().len() as i64
     }
     pub fn has_quorum_at(
         &self,
@@ -222,13 +402,50 @@ impl ValidatorSet {
         epoch: i64,
         signers: &[Bytes],
     ) -> Result<bool, Error> {
-        let rule = policy.select(epoch);
-        let effective = self.for_rule(rule)?;
-        Ok(self.weights_valid(rule)
-            && match rule {
-                policy::Rule::Prior => effective.has_weight_quorum(signers),
-                _ => effective.has_quorum(signers),
-            })
+        let effective = self.for_rule(policy.select(epoch))?;
+        Ok(effective.signed_weight(signers).is_some_and(|weight| {
+            effective.space(policy, epoch).meets(
+                Ask::Quorum,
+                Self::unique_signers(signers),
+                &weight,
+            )
+        }))
+    }
+    /// Signers of this exact set that both finality and the next set's
+    /// authority can rest on.
+    pub fn pair_for_policy(
+        &self,
+        policy: policy::QuorumPolicy,
+        epoch: i64,
+        signers: &[Bytes],
+    ) -> bool {
+        self.signed_weight(signers).is_some_and(|weight| {
+            self.space(policy, epoch)
+                .meets(Ask::Pair, Self::unique_signers(signers), &weight)
+        })
+    }
+    pub fn pair_at(&self, chain: &[u8], epoch: i64, signers: &[Bytes]) -> bool {
+        self.pair_for_policy(policy::QuorumPolicy::for_chain(chain), epoch, signers)
+    }
+    /// Whether enough peers answered to promise the local vote floor. Unknown
+    /// responders count as seats but carry no weight, as upstream counts them.
+    pub fn promise_for_policy(
+        &self,
+        policy: policy::QuorumPolicy,
+        epoch: i64,
+        responders: &[Bytes],
+    ) -> bool {
+        let weight: BigInt = responders
+            .iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .filter_map(|address| self.weight(address))
+            .sum();
+        self.space(policy, epoch)
+            .meets(Ask::Promise, responders.len() as i64, &weight)
+    }
+    pub fn promise_at(&self, chain: &[u8], epoch: i64, responders: &[Bytes]) -> bool {
+        self.promise_for_policy(policy::QuorumPolicy::for_chain(chain), epoch, responders)
     }
     pub fn quorum_reached_at(&self, chain: &[u8], epoch: i64, count: i64, weight: &BigInt) -> bool {
         self.quorum_reached_for_policy(policy::QuorumPolicy::for_chain(chain), epoch, count, weight)
@@ -240,13 +457,10 @@ impl ValidatorSet {
         count: i64,
         weight: &BigInt,
     ) -> bool {
-        let rule = policy.select(epoch);
-        self.weights_valid(rule)
-            && weight >= &self.quorum_weight
-            && (rule == policy::Rule::Prior || count >= self.quorum)
+        self.space(policy, epoch).meets(Ask::Quorum, count, weight)
     }
     pub fn round_skip_weight(&self) -> BigInt {
-        &self.total_weight - &self.quorum_weight + 1
+        measure::minority(&measure::shape(self.n, self.total_weight.clone()))
     }
     pub fn round_skip_reached_at(
         &self,
@@ -269,10 +483,7 @@ impl ValidatorSet {
         count: i64,
         weight: &BigInt,
     ) -> bool {
-        let rule = policy.select(epoch);
-        self.weights_valid(rule)
-            && weight >= &self.round_skip_weight()
-            && (rule == policy::Rule::Prior || count > self.f)
+        self.space(policy, epoch).meets(Ask::Skip, count, weight)
     }
     pub fn leader(&self, epoch_id: i64, round: i64) -> Result<&Validator, Error> {
         if self.n <= 0 {

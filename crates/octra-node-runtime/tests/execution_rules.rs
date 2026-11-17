@@ -41,7 +41,7 @@ fn candidate_rules() -> &'static Value {
     static FIXTURE: OnceLock<Value> = OnceLock::new();
     FIXTURE.get_or_init(|| {
         let fixture: Value = serde_json::from_str(include_str!(
-            "../../octra-node-protocol/tests/fixtures/consensus-staged-c49.json"
+            "../../octra-node-protocol/tests/fixtures/consensus-candidate.json"
         ))
         .unwrap();
         let candidate: Value = serde_json::from_str(include_str!(

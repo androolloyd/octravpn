@@ -64,7 +64,7 @@ fn execute(value: &Value) -> Result<Value, Error> {
             let x = CommitCertificate::decode(&wire)?;
             output(
                 x.encode()?,
-                json!({"valid":verdict(qc::validate_certificate(&chain,&validators,&x,false)),"strict":verdict(qc::validate_certificate(&chain,&validators,&x,true))}),
+                json!({"valid":verdict(qc::validate_certificate(&chain,&validators,&x))}),
             )
         }
         "parent" => {
@@ -85,7 +85,7 @@ fn execute(value: &Value) -> Result<Value, Error> {
             let x = Finalize::decode(&wire)?;
             output(
                 x.encode()?,
-                json!({"live":verdict(qc::validate_finalize(&chain,&validators,&x,qc::FinalityMode::Live(Protocol::default()))),"persisted":verdict(qc::validate_finalize(&chain,&validators,&x,qc::FinalityMode::Persisted)),"strict":verdict(qc::validate_finalize(&chain,&validators,&x,qc::FinalityMode::StrictPersisted))}),
+                json!({"live":verdict(qc::validate_finalize(&chain,&validators,&x,qc::FinalityMode::Live(Protocol::default()))),"persisted":verdict(qc::validate_finalize(&chain,&validators,&x,qc::FinalityMode::Persisted))}),
             )
         }
         "root_query" => {
@@ -159,9 +159,15 @@ fn native_consensus_messages_hashes_certificates_and_evidence() {
         assert_eq!(*hash, manifest["files"][path]);
     }
     for (index, case) in fixture["cases"].as_array().unwrap().iter().enumerate() {
+        // Upstream removed the separate strict-quorum mode with seatless
+        // voting; the historical vectors still carry its verdict.
+        let mut expected = case["expected"].clone();
+        if let Some(fields) = expected.as_object_mut() {
+            fields.remove("strict");
+        }
         assert_eq!(
             caught(execute(&case["input"])),
-            case["expected"],
+            expected,
             "case {index} {}",
             case["input"]["kind"]
         );

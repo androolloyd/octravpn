@@ -1,7 +1,7 @@
 use ed25519_dalek::{Signer, SigningKey};
 use octra_node_protocol::consensus::{
-    codec::Wire, finality_query as f, hash, policy::Protocol, relief as r, root_query::RootQueries,
-    Error, RoundStep, RoundSync, Validator, ValidatorSet,
+    codec::Wire, finality_query as f, hash, policy, policy::Protocol, relief as r,
+    root_query::RootQueries, Error, RoundStep, RoundSync, Validator, ValidatorSet,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -210,10 +210,10 @@ fn execute(j: &Value) -> Result<Value, Error> {
                 Value::Null
             };
             let proof = caught(
-                r::check_proof(&chain, plan.height, &current, &proof)
+                r::check_proof(None, &chain, plan.height, &current, &proof)
                     .and_then(|(round, proof)| Ok(json!({"round":round,"proof":wires(&proof)?}))),
             );
-            json!({"set":verdict(r::check_set(&current,&target)),"plan":verdict(plan.check()),"proof":proof,"decision":match decision {r::Decision::Wait=>json!("wait"),r::Decision::Refuse(e)=>json!({"refuse":e.to_string()}),r::Decision::Apply(m)=>mark(&m)?},"restore":restore})
+            json!({"set":verdict(r::check_set(None,&chain,plan.height,&current,&target)),"plan":verdict(plan.check()),"proof":proof,"decision":match decision {r::Decision::Wait=>json!("wait"),r::Decision::Refuse(e)=>json!({"refuse":e.to_string()}),r::Decision::Apply(m)=>mark(&m)?},"restore":restore})
         }
         op => panic!("unexpected recovery operation {op}"),
     })
@@ -234,8 +234,22 @@ fn native_relief_marker_recovery_finality_retries_and_query_leases_match() {
     );
     let mut applied = 0;
     let mut restored = 0;
+    let mut seatless = 0;
     for (index, case) in fixture["cases"].as_array().unwrap().iter().enumerate() {
         let actual = caught(execute(&case["input"]));
+        // These vectors predate seatless voting. A relief case placed at or
+        // after its devnet activation is now decided by weight alone, which
+        // the candidate oracle covers; the count pins which cases those are.
+        let input = &case["input"];
+        if input["op"] == "relief"
+            && input["chain"] == hex::encode(policy::DEVNET)
+            && input["height"]
+                .as_str()
+                .is_some_and(|height| height.parse::<i64>().unwrap() >= policy::SEATLESS_ACTIVATION)
+        {
+            seatless += 1;
+            continue;
+        }
         assert_eq!(
             actual, case["expected"],
             "native recovery case {index}: {}",
@@ -248,6 +262,7 @@ fn native_relief_marker_recovery_finality_retries_and_query_leases_match() {
             restored += 1;
         }
     }
+    assert_eq!(seatless, 1);
     assert!(
         applied > 0 && restored > 0,
         "oracle must exercise successful authenticated recovery"

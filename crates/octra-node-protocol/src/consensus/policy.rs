@@ -6,6 +6,12 @@ pub const DEVNET: &[u8] = b"octra-devnet-9871-cluster";
 pub const QUORUM_ACTIVATION: i64 = 1_306_547;
 pub const STAKE_ACTIVATION: i64 = 1_737_333;
 pub const ROUND_ACTIVATION: i64 = 1_740_000;
+/// Seatless (weight-only) voting: anchored at `SEATLESS_ANCHOR_EPOCH` with
+/// `SEATLESS_ANCHOR_ROOT`, in force from `SEATLESS_ACTIVATION`.
+pub const SEATLESS_ANCHOR_EPOCH: i64 = 1_829_338;
+pub const SEATLESS_ANCHOR_ROOT: &str =
+    "621bc1164a85fc654cc8aeb34e8b23e8146edbc8448c4fbba5e8f9debcdd70af";
+pub const SEATLESS_ACTIVATION: i64 = 1_845_000;
 pub const ROUND_WAIT_ID: &str = "quorum_timers:stored_vote_resume:durable_past_votes:checked_relief_limit:quorum_phase:signed_progress_retry:stalled_signed_step:past_precommits";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rule {
@@ -18,6 +24,8 @@ pub struct QuorumPolicy {
     pub count_epoch: i64,
     pub stake_epoch: Option<i64>,
     pub round_epoch: Option<i64>,
+    /// First epoch of seatless voting; only meaningful with `stake_epoch`.
+    pub seatless_epoch: Option<i64>,
 }
 impl QuorumPolicy {
     pub fn new(
@@ -35,15 +43,41 @@ impl QuorumPolicy {
             count_epoch,
             stake_epoch,
             round_epoch,
+            seatless_epoch: None,
         })
     }
     pub fn with_round_epoch(self, round_epoch: Option<i64>) -> Result<Self, Error> {
-        Self::new(self.count_epoch, self.stake_epoch, round_epoch)
+        if round_epoch.is_some_and(|round| self.stake_epoch.is_none_or(|stake| round < stake)) {
+            return Err("round activation order".into());
+        }
+        Ok(Self {
+            round_epoch,
+            ..self
+        })
+    }
+    pub fn with_seatless_epoch(self, seatless_epoch: Option<i64>) -> Result<Self, Error> {
+        match (self.stake_epoch, seatless_epoch) {
+            (None, None) => Ok(self),
+            (None, Some(_)) => Err("seatless activation requires stake".into()),
+            (Some(stake), Some(epoch)) if epoch < stake => Err("seatless activation order".into()),
+            (Some(_), seatless_epoch) => Ok(Self {
+                seatless_epoch,
+                ..self
+            }),
+        }
     }
     pub fn id_at(self, chain: &[u8], epoch: i64) -> String {
         let prior = quorum_consensus_id(chain);
         match self.stake_epoch {
-            Some(first) if self.select(epoch) == Rule::Stake => format!("{prior}:stake:{first}"),
+            Some(first) if self.select(epoch) == Rule::Stake => {
+                let stake = format!("{prior}:stake:{first}");
+                match self.seatless_epoch {
+                    Some(seatless) if epoch >= seatless => {
+                        format!("{stake}:seatless:{seatless}:single_seat_survival")
+                    }
+                    _ => stake,
+                }
+            }
             _ => prior.to_owned(),
         }
     }
@@ -56,6 +90,7 @@ impl QuorumPolicy {
             },
             stake_epoch: stake_epoch(chain),
             round_epoch: round_epoch(chain),
+            seatless_epoch: seatless_epoch(chain),
         }
     }
     pub fn select(self, epoch: i64) -> Rule {
@@ -67,17 +102,23 @@ impl QuorumPolicy {
             Rule::Capped
         }
     }
+    /// Seatless voting needs the stake rule; without it the epoch is inert.
+    pub fn seatless(self, epoch: i64) -> bool {
+        self.stake_epoch.is_some() && self.seatless_epoch.is_some_and(|first| epoch >= first)
+    }
+    fn seatless_start(self) -> Option<i64> {
+        self.stake_epoch.and(self.seatless_epoch)
+    }
     pub fn round_wait(self, epoch: i64) -> bool {
         self.round_epoch.is_some_and(|first| epoch >= first)
     }
     pub fn rewind_allowed(self, from: i64, to: i64) -> bool {
-        ![Some(self.count_epoch), self.stake_epoch, self.round_epoch]
-            .into_iter()
-            .flatten()
+        !std::iter::once(self.count_epoch)
+            .chain(self.epochs())
             .any(|first| from >= first && to < first)
     }
     pub fn epochs(self) -> Vec<i64> {
-        let mut epochs: Vec<_> = [self.stake_epoch, self.round_epoch]
+        let mut epochs: Vec<_> = [self.stake_epoch, self.seatless_start(), self.round_epoch]
             .into_iter()
             .flatten()
             .collect();
@@ -91,6 +132,9 @@ pub fn stake_epoch(chain: &[u8]) -> Option<i64> {
 }
 pub fn round_epoch(chain: &[u8]) -> Option<i64> {
     (chain == DEVNET).then_some(ROUND_ACTIVATION)
+}
+pub fn seatless_epoch(chain: &[u8]) -> Option<i64> {
+    (chain == DEVNET).then_some(SEATLESS_ACTIVATION)
 }
 pub fn quorum_rule(chain: &[u8], epoch: i64) -> Rule {
     QuorumPolicy::for_chain(chain).select(epoch)

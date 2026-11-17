@@ -13,11 +13,11 @@ from pathlib import Path
 import shutil
 import subprocess
 
-PIN = "c49de45cf49ebbc2e5c0697eb956cbcada5845e7"
+PIN = "8f785a93a4e7392a0f3e65674f9de89854d33dbc"
 SOURCES = [
     "net/oce1.ml", "net/hash_domain.ml", "lib/consensus/c_protocol.ml",
     "lib/consensus/epoch_time.ml", "lib/consensus/c_epoch_time_policy.ml",
-    "lib/consensus/c_quorum_policy.ml", "lib/consensus/c_types.ml",
+    "lib/consensus/c_quorum_policy.ml", "lib/consensus/c_measure.ml", "lib/consensus/c_types.ml",
     "lib/consensus/c_reward_source.ml", "lib/consensus/c_codec.ml",
     "lib/consensus/c_config.ml", "lib/consensus/c_light_validator_set.ml", "lib/core/rule_graph.ml",
 ]
@@ -57,7 +57,7 @@ def main():
     wrapper = Path(__file__).with_suffix(".ml").read_bytes()
     (out / "oracle.ml").write_bytes(wrapper)
     order = ["oce1", "hash_domain", "octra_net", "c_protocol", "epoch_time",
-             "c_epoch_time_policy", "c_quorum_policy", "c_types",
+             "c_epoch_time_policy", "c_quorum_policy", "c_measure", "c_types",
              "c_reward_source", "c_codec", "c_config", "c_light_validator_set", "octra_consensus",
              "rule_graph", "oracle"]
     command = [find, "ocamlopt", "-package", "digestif.c,zarith,yojson,base64",
@@ -70,7 +70,7 @@ def main():
     observations = json.loads(subprocess.check_output([str(out / "oracle")], env=env))
     result = {
         "upstream_commit": PIN,
-        "scope": "unchanged native quorum policy, validator authors codec/hash and anchored rule graph; not complete node/runtime qualification",
+        "scope": "unchanged native quorum policy and measure, validator-set shape/eviction/pending checks, authors codec/hash and anchored rule graph; not complete node/runtime qualification",
         "source_sha256": hashes,
         "oracle_sha256": hashlib.sha256(wrapper).hexdigest(),
         "aliases_sha256": {k: hashlib.sha256(v.encode()).hexdigest() for k, v in aliases.items()},
@@ -79,9 +79,10 @@ def main():
         **observations,
     }
     args.fixture.parent.mkdir(parents=True, exist_ok=True)
-    args.fixture.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    args.fixture.write_text(json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n")
     print(json.dumps({"fixture": str(args.fixture), "policy_cases": len(result["policy"]),
-                      "graph_cases": len(result["graph"]), "commit": PIN}))
+                      "graph_cases": len(result["graph"]), "measure_cases": len(result["measure"]),
+                      "set_cases": len(result["sets"]), "commit": PIN}))
 
 
 if __name__ == "__main__":

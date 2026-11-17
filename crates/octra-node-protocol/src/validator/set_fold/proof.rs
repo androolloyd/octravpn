@@ -4,7 +4,7 @@ use super::{Config, Error, Final, ParentEvidence, Proof, State};
 use crate::consensus::{hash, qc, ParentCommit, Vote, VoteType};
 use std::collections::BTreeSet;
 fn verify_commit(chain: &[u8], commit: &ParentCommit) -> Result<(), Error> {
-    qc::validate_certificate(chain, &commit.validator_set, &commit.certificate, false)
+    qc::validate_certificate(chain, &commit.validator_set, &commit.certificate)
         .map_err(|e| format!("validator duty commit is invalid: {e}").into())
 }
 fn verify_vote(

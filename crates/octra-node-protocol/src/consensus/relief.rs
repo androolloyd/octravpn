@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 //! Authenticated scheduled validator-set relief with native overlap thresholds.
-use super::{hash, policy::DEVNET, Bytes, Error, RoundSync, ValidatorSet};
+use super::measure::Gap;
+use super::policy::{QuorumPolicy, DEVNET};
+use super::{hash, Bytes, Error, RoundSync, ValidatorSet};
 use num_bigint::BigInt;
 use num_traits::Zero;
 
@@ -48,27 +50,38 @@ pub fn same_plan(left: &Mark, right: &Mark) -> bool {
         && left.target_hash == right.target_hash
         && left.fingerprint == right.fingerprint
 }
-pub fn lowest_weight(count: i64, target: &ValidatorSet) -> BigInt {
-    let mut weights: Vec<_> = target.weights.iter().map(|(_, w)| w).collect();
-    weights.sort_unstable();
-    weights.into_iter().take(count.max(0) as usize).sum()
+fn policy_for(policy: Option<QuorumPolicy>, chain_id: &[u8]) -> QuorumPolicy {
+    policy.unwrap_or_else(|| QuorumPolicy::for_chain(chain_id))
 }
-pub fn check_intersection(current: &ValidatorSet, target: &ValidatorSet) -> Result<(), Error> {
-    let shared = current.quorum + target.quorum - current.n;
-    if shared <= current.f {
-        return Err("validator relief count intersection is unsafe".into());
-    }
-    let by_count = lowest_weight(shared, target);
-    let by_weight = &current.quorum_weight + &target.quorum_weight - &current.total_weight;
-    let overlap = by_count.max(by_weight);
-    let faults = &current.total_weight - &current.quorum_weight;
-    if overlap <= faults {
-        Err("validator relief weight intersection is unsafe".into())
-    } else {
-        Ok(())
-    }
+pub fn check_intersection(
+    policy: Option<QuorumPolicy>,
+    chain_id: &[u8],
+    height: i64,
+    current: &ValidatorSet,
+    target: &ValidatorSet,
+) -> Result<(), Error> {
+    current
+        .space(policy_for(policy, chain_id), height)
+        .overlap(&target.weights)
+        .map_err(|gap| {
+            match gap {
+                Gap::FewSeats => "validator relief count intersection is unsafe",
+                Gap::LowWeight => "validator relief weight intersection is unsafe",
+                Gap::NoProof => "validator relief has no weight-only intersection proof",
+            }
+            .into()
+        })
 }
-pub fn check_set(current: &ValidatorSet, target: &ValidatorSet) -> Result<(), Error> {
+pub fn check_set(
+    policy: Option<QuorumPolicy>,
+    chain_id: &[u8],
+    height: i64,
+    current: &ValidatorSet,
+    target: &ValidatorSet,
+) -> Result<(), Error> {
+    let quorum = policy_for(policy, chain_id);
+    current.checked_for_policy(quorum, height)?;
+    target.checked_for_policy(quorum, height)?;
     if !current.weighted || !target.weighted {
         Err("validator relief requires weighted sets".into())
     } else if current.n < 4 || target.n < 4 {
@@ -83,10 +96,11 @@ pub fn check_set(current: &ValidatorSet, target: &ValidatorSet) -> Result<(), Er
     }) {
         Err("validator relief target changes a retained member".into())
     } else {
-        check_intersection(current, target)
+        check_intersection(policy, chain_id, height, current, target)
     }
 }
 pub fn check_proof(
+    policy: Option<QuorumPolicy>,
     chain_id: &[u8],
     height: i64,
     current: &ValidatorSet,
@@ -127,13 +141,21 @@ pub fn check_proof(
             .weight(&sync.validator)
             .ok_or("validator relief proof weight is invalid")?;
     }
-    if !current.round_skip_reached_at(chain_id, height, sorted.len() as i64, &weight) {
+    if !current.round_skip_reached_for_policy(
+        policy_for(policy, chain_id),
+        height,
+        sorted.len() as i64,
+        &weight,
+    ) {
         return Err("validator relief proof is below threshold".into());
     }
     Ok((round, sorted))
 }
 impl Plan<'_> {
     pub fn check(&self) -> Result<(), Error> {
+        self.check_for_policy(None)
+    }
+    pub fn check_for_policy(&self, policy: Option<QuorumPolicy>) -> Result<(), Error> {
         let lead = self.activate_epoch.wrapping_sub(self.height);
         if lead <= 0 {
             Err("validator relief plan is not ahead".into())
@@ -142,14 +164,27 @@ impl Plan<'_> {
         } else if !valid_fingerprint(self.fingerprint) {
             Err("validator relief fingerprint is invalid".into())
         } else {
-            check_set(self.current, self.target)
+            check_set(
+                policy,
+                self.chain_id,
+                self.height,
+                self.current,
+                self.target,
+            )
         }
     }
     pub fn clock_limit(&self) -> Option<i64> {
         (active(self.chain_id, self.height) && self.check().is_ok()).then_some(MIN_ROUND)
     }
     pub fn restore_with_authors(&self, mark: &Mark) -> Result<Option<ValidatorSet>, Error> {
-        let Some(target) = self.restore(mark)? else {
+        self.restore_with_authors_for_policy(None, mark)
+    }
+    pub fn restore_with_authors_for_policy(
+        &self,
+        policy: Option<QuorumPolicy>,
+        mark: &Mark,
+    ) -> Result<Option<ValidatorSet>, Error> {
+        let Some(target) = self.restore_for_policy(policy, mark)? else {
             return Ok(None);
         };
         let mut target = target.clone();
@@ -177,7 +212,7 @@ impl Plan<'_> {
         if proof.is_empty() {
             return Ok(Decision::Wait);
         }
-        match check_proof(self.chain_id, self.height, self.current, proof) {
+        match check_proof(None, self.chain_id, self.height, self.current, proof) {
             Err(error) => Ok(Decision::Refuse(error)),
             Ok((round, proof)) => Ok(Decision::Apply(Mark {
                 height: self.height,
@@ -191,6 +226,18 @@ impl Plan<'_> {
         }
     }
     pub fn restore(&self, mark: &Mark) -> Result<Option<&ValidatorSet>, Error> {
+        self.restore_for_policy(None, mark)
+    }
+    pub fn restore_for_policy(
+        &self,
+        policy: Option<QuorumPolicy>,
+        mark: &Mark,
+    ) -> Result<Option<&ValidatorSet>, Error> {
+        let quorum = policy_for(policy, self.chain_id);
+        for set in [self.current, self.target] {
+            set.structural_for_policy(quorum, self.height)
+                .map_err(|error| error.message())?;
+        }
         if self.height >= mark.activate_epoch {
             return Ok(None);
         }
@@ -206,18 +253,33 @@ impl Plan<'_> {
         if self.fingerprint != mark.fingerprint {
             return Err("validator relief fingerprint differs".into());
         }
-        if hash::validator_set_hash(self.current)?.as_slice() != mark.source_hash {
-            return Err("validator relief source set differs".into());
-        }
         if hash::validator_set_hash(self.target)?.as_slice() != mark.target_hash {
             return Err("validator relief target set differs".into());
+        }
+        if hash::validator_set_hash(self.current)?.as_slice() != mark.source_hash {
+            // Once the scheduled set is the voting set, the marker's source
+            // no longer has to be the local one.
+            return if self.height > mark.height
+                && quorum.seatless(self.height)
+                && self.current.same_voting_set(self.target)
+            {
+                Ok(None)
+            } else {
+                Err("validator relief source set differs".into())
+            };
         }
         Self {
             height: mark.height,
             ..*self
         }
-        .check()?;
-        let (round, _) = check_proof(self.chain_id, mark.height, self.current, &mark.proof)?;
+        .check_for_policy(policy)?;
+        let (round, _) = check_proof(
+            policy,
+            self.chain_id,
+            mark.height,
+            self.current,
+            &mark.proof,
+        )?;
         if round != mark.round {
             return Err("validator relief marker round differs".into());
         }

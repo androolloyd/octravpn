@@ -157,18 +157,21 @@ async fn bridge<A: Host>(
         restricted
             .precommits
             .retain(|vote| prior.set.is_validator(&vote.validator));
-        let effective = prior.set.for_epoch(&restricted.chain_id, epoch)?;
+        let quorum = policy::QuorumPolicy::for_chain(&restricted.chain_id);
+        let Ok(voters) = prior.set.structural_for_policy(quorum, epoch) else {
+            continue;
+        };
         let signers = restricted
             .precommits
             .iter()
             .map(|vote| vote.validator.clone())
             .collect::<Vec<_>>();
-        if !effective.has_quorum(&signers)
+        if !voters.pair_for_policy(quorum, epoch, &signers)
             || qc::validate_finalize(
                 &restricted.chain_id,
                 &prior.set,
                 &restricted,
-                qc::FinalityMode::StrictPersisted,
+                qc::FinalityMode::Persisted,
             )
             .is_err()
         {
