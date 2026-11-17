@@ -121,6 +121,40 @@ private gateway bridge before tester browser access can move with it. Until
 that bridge passes, keep the current tailnet-only gateway and do not advertise
 the new observer as ready for testers.
 
+## Supervision
+
+`octra-node run-network` exits when it cannot reach serving state — a missing
+current-head attestation, for example. That is deliberate: it would rather
+stop than serve from a head it cannot vouch for. It assumes something
+restarts it.
+
+On October 21 nothing did. The observer exited with `awaiting current-head
+attestation`, its container had restart policy `no`, and the public site
+answered 502 for four weeks
+([record](../../docs/rust-node/checkpoints/2026-11-17/public-outage.md)).
+Run the node container and every helper that shares its namespace with a
+restart policy, so an exit is followed by a retry:
+
+```sh
+docker run --restart unless-stopped --memory 48g --name octra-observer ...
+docker update --restart unless-stopped <existing-container>   # without recreating it
+```
+
+Three things keep that from becoming a restart loop that hides a real fault:
+
+- **A memory ceiling the workload fits under.** The measured full-node
+  workload is roughly 43 GiB. The October 21 OOM kill happened while funded
+  test matrices ran on the same host; give the observer a host, or a
+  reservation, that qualification runs do not share.
+- **An outside view.** `.github/workflows/public-probe.yml` probes the front
+  door every 30 minutes and keeps one issue open while it is not serving.
+  `503 Node is synchronizing` after a restart is expected for as long as the
+  cold restore takes; the same answer for days means the node cannot follow
+  the chain.
+- **Knowing when it cannot follow.** If the network activates a release the
+  node does not implement, restarting will never help. The `release-canary`
+  issue says so on the day the release is signed.
+
 ## Native host through a local TCP relay
 
 The public BFT launcher also accepts `"p2p_proxy":"127.0.0.1:21080"` in
