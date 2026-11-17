@@ -57,7 +57,7 @@ fn pending(state: &StateBatch) -> Result<Option<ValidatorUpdate>, Error> {
         .map(|raw| {
             tagged(
                 "pending validator set corrupt",
-                ValidatorUpdate::parse(Some(raw)),
+                ValidatorUpdate::of_string(raw),
             )
         })
         .transpose()

@@ -179,7 +179,7 @@ impl Membership {
         }
         let read = |v: Option<&[u8]>| -> Result<Option<ValidatorUpdate>, crate::oce1::Error> {
             let Some(v) = v else { return Ok(None) };
-            let update = ValidatorUpdate::parse(Some(v))
+            let update = ValidatorUpdate::of_string(v)
                 .map_err(|e| crate::oce1::Error::from(e.to_string()))?;
             if update.activate_epoch < 0 || update.source_epoch.is_some_and(|e| e > head_epoch) {
                 return Err("validator set epoch exceeds committed view".into());

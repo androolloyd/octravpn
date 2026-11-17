@@ -259,7 +259,7 @@ impl<F: EpochFold> Host<'_, F> {
         let pending = state
             .get(&[b"meta", update::PENDING_KEY])
             .ok_or_else(|| rejected(TAG, "no pending validator set update"))?;
-        let pending = checked(TAG, ValidatorUpdate::parse(Some(pending)))?;
+        let pending = checked(TAG, ValidatorUpdate::of_string(pending))?;
         if !pending.validators.iter().any(|v| v.address == tx.from) {
             return Err(rejected(TAG, "sender is not in pending validator set"));
         }
