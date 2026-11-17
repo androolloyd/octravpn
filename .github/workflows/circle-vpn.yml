@@ -43,6 +43,15 @@ jobs:
         run: |
           cargo clippy --locked -p octra-hfhe -p octra-node-runtime -p octra-pvac -p octra-node-protocol -p octra-exex -p octravpn-circle-registry --all-targets --all-features -- -D warnings
           cargo clippy --locked -p octravpn-circle-registry --target wasm32-unknown-unknown --lib -- -D warnings
+      # The inventory also compares each revision recorded as source-equivalent
+      # to the pin; the checkouts above hold one commit each.
+      - name: Fetch the source-equivalent upstream revisions
+        working-directory: octra
+        run: |
+          python3 -c 'import json; print("\n".join(json.load(open("docs/rust-node/upstream.json")).get("source_equivalent_commits", [])))' |
+            while IFS= read -r commit; do
+              [ -z "$commit" ] || git -C ../lite-node fetch --quiet --depth 1 origin "$commit"
+            done
       - name: Pinned native host ABI and unsigned package
         working-directory: octra
         run: |
