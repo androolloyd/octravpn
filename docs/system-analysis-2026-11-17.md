@@ -166,7 +166,13 @@ artefact we have is for the thing we ship; most of the rest is for things we don
   `protocol/network`, 33 in `consensus`, 4 in `rpc`; 7 TODO/FIXME in the workspace.
 - **Shielded payments** (18.8k of the 25.3k lines in `vpn/payments/`) are behind
   `private-payments-experimental`, off by default.
-- **Membership admission** from September is still wired through `mesh_control`.
+- **The registration gate** from September is in use: the native node's mesh
+  refuses registration while the host is not serving authenticated state, and
+  refuses the operator's own virtual key. The chain-anchored *member set*,
+  though, is consulted only by the standalone operator — the native node passes
+  no members policy, because there registration is an identity and a canonical
+  purchase is what admits traffic. (An earlier draft said membership admission
+  was "still wired in" without that distinction.)
 
 ## Proposed order of work
 
