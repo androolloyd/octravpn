@@ -3,7 +3,11 @@
 //! Native validator-control payload parsing. Parsing is separate from epoch,
 //! bond, authority and signature checks performed by execution.
 use crate::{
-    consensus::{codec::Wire, evidence::VoteConflict, Validator, ValidatorSet},
+    consensus::{
+        codec::{Wire, MAX_VALIDATORS},
+        evidence::VoteConflict,
+        Eviction, Validator, ValidatorSet,
+    },
     native_json::{Document, Value},
     transaction::{self, OpType},
 };
@@ -35,6 +39,91 @@ pub struct ValidatorUpdate {
     pub validators: Vec<ValidatorEntry>,
     pub weighted: bool,
     pub fingerprint: String,
+    /// Present only on an update produced by evicting slashed validators.
+    /// A transaction message never carries one; stored updates may.
+    pub eviction: Option<Eviction>,
+}
+/// Largest encoded validator set an eviction witness may carry.
+pub const EVICTION_SOURCE_LIMIT: usize = 5 + MAX_VALIDATORS * (12 + 128 + 32 + 256);
+pub fn weighted_fingerprint(source: i64, activate: i64, validators: &[ValidatorEntry]) -> String {
+    let mut preimage = Vec::new();
+    let mut put = |raw: &[u8]| {
+        preimage.extend_from_slice(raw.len().to_string().as_bytes());
+        preimage.push(b':');
+        preimage.extend_from_slice(raw);
+    };
+    put(b"octra:validator_set_update:bonded");
+    put(source.to_string().as_bytes());
+    put(activate.to_string().as_bytes());
+    for v in validators {
+        put(&v.address);
+        put(&v.public_key);
+        put(v.weight.to_string().as_bytes());
+    }
+    hex::encode(Sha256::digest(preimage))
+}
+fn decode_eviction_source(encoded: &[u8]) -> Result<ValidatorSet, Error> {
+    if encoded.len() > 4 * EVICTION_SOURCE_LIMIT.div_ceil(3) {
+        return Err(error("validator eviction source exceeds size limit"));
+    }
+    let invalid = || error("validator eviction source is invalid");
+    let raw = STANDARD.decode(encoded).map_err(|_| invalid())?;
+    if raw.len() > EVICTION_SOURCE_LIMIT || STANDARD.encode(&raw).as_bytes() != encoded {
+        return Err(error("validator eviction source encoding differs"));
+    }
+    let source = ValidatorSet::decode(&raw).map_err(|_| invalid())?;
+    let source = source
+        .validate_shape()
+        .map_err(|e| error(e.message().to_string()))?;
+    if source.authors.is_some() {
+        return Err(error("validator eviction source has authors"));
+    }
+    Ok(source)
+}
+fn ordered_unique(offenders: &[Vec<u8>]) -> bool {
+    offenders.windows(2).all(|pair| pair[0] < pair[1])
+}
+fn eviction_from(doc: &Document, value: &Value) -> Result<Eviction, Error> {
+    let Value::Object(fields) = value else {
+        return Err(error("validator eviction must be object"));
+    };
+    let mut fields: Vec<_> = fields
+        .iter()
+        .map(|(name, index)| (name.as_slice(), doc.get(*index).expect("document child")))
+        .collect();
+    fields.sort_by(|left, right| left.0.cmp(right.0));
+    let [(b"epoch", Value::String(raw)), (b"offenders", Value::List(items)), (b"source", Value::String(encoded))] =
+        fields.as_slice()
+    else {
+        return Err(error("validator eviction fields differ"));
+    };
+    let epoch =
+        transaction::parse_native_int64(raw).ok_or_else(|| error("invalid eviction epoch"))?;
+    if epoch < 0 || epoch == i64::MAX || epoch.to_string().as_bytes() != raw.as_slice() {
+        return Err(error("validator eviction epoch is invalid"));
+    }
+    if items.is_empty() || items.len() > MAX_VALIDATORS {
+        return Err(error("validator eviction offender count is invalid"));
+    }
+    let offenders = items
+        .iter()
+        .map(|index| match doc.get(*index) {
+            Some(Value::String(address)) if transaction::is_valid_address(address) => {
+                Ok(address.clone())
+            }
+            _ => Err(error("validator eviction offender is invalid")),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if !ordered_unique(&offenders) {
+        return Err(error(
+            "validator eviction offenders are not ordered and unique",
+        ));
+    }
+    Ok(Eviction {
+        epoch,
+        source: decode_eviction_source(encoded)?,
+        offenders,
+    })
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LegacyReady {
@@ -95,11 +184,91 @@ fn document(message: Option<&[u8]>, missing: &str) -> Result<Document, Error> {
     Document::parse(message.ok_or_else(|| error(missing))?).map_err(Into::into)
 }
 impl ValidatorUpdate {
+    /// A transaction message: the update alone, never an eviction witness.
     pub fn parse(message: Option<&[u8]>) -> Result<Self, Error> {
         Self::from_document(&document(
             message,
             "validator_set_update requires message payload",
         )?)
+    }
+    /// A stored update. One that carries an eviction witness must be the
+    /// exact removal the witness describes, in its canonical encoding.
+    pub fn of_string(raw: &[u8]) -> Result<Self, Error> {
+        let doc = Document::parse(raw)?;
+        let mut update = Self::from_document(&doc)?;
+        let Value::Object(fields) = doc.root() else {
+            return Err(error("validator_set_update payload must be object"));
+        };
+        let mut witnesses = fields.iter().filter(|(name, _)| name == b"eviction");
+        let Some((_, index)) = witnesses.next() else {
+            return Ok(update);
+        };
+        if witnesses.next().is_some() {
+            return Err(error("duplicate validator eviction field"));
+        }
+        let eviction = eviction_from(&doc, doc.get(*index).expect("document child"))?;
+        update.eviction = Some(eviction);
+        update.validate_eviction()?;
+        if update.to_bytes() != raw {
+            return Err(error("validator eviction update encoding differs"));
+        }
+        Ok(update)
+    }
+    /// The set left after the witnessed removal and the weight removed,
+    /// if this update is exactly that removal.
+    pub fn validate_eviction(&self) -> Result<(ValidatorSet, BigInt), Error> {
+        let eviction = self
+            .eviction
+            .as_ref()
+            .ok_or_else(|| error("validator eviction witness is missing"))?;
+        let consensus = |e: crate::consensus::Error| error(e.to_string());
+        let source = eviction
+            .source
+            .validate_shape()
+            .map_err(|e| consensus(e.message()))?;
+        if source != eviction.source || source.authors.is_some() {
+            return Err(error("validator eviction source is not exact"));
+        }
+        if eviction.epoch < 0
+            || eviction.epoch == i64::MAX
+            || self.source_epoch != Some(eviction.epoch)
+            || self.activate_epoch != eviction.epoch + 1
+            || !self.weighted
+        {
+            return Err(error(
+                "validator eviction epoch or weight declaration differs",
+            ));
+        }
+        if !ordered_unique(&eviction.offenders) {
+            return Err(error(
+                "validator eviction offenders are not ordered and unique",
+            ));
+        }
+        if eviction.offenders.len() > MAX_VALIDATORS {
+            return Err(error("validator eviction offender count is invalid"));
+        }
+        let encoded = STANDARD.encode(source.encode().map_err(consensus)?);
+        if decode_eviction_source(encoded.as_bytes())? != source {
+            return Err(error("validator eviction source encoding differs"));
+        }
+        let (next, weight) = source.evict(&eviction.offenders).map_err(consensus)?;
+        let expected: Vec<_> = next
+            .entries()
+            .map_err(consensus)?
+            .into_iter()
+            .map(|(member, weight)| ValidatorEntry {
+                address: member.address,
+                public_key: STANDARD.encode(member.pubkey).into_bytes(),
+                weight,
+            })
+            .collect();
+        if self.validators != expected
+            || self.fingerprint
+                != weighted_fingerprint(eviction.epoch, self.activate_epoch, &expected)
+        {
+            return Err(error("validator eviction differs from exact removal"));
+        }
+        Ok((next, weight))
     }
     fn from_document(doc: &Document) -> Result<Self, Error> {
         if !matches!(doc.root(), Value::Object(_)) {
@@ -190,22 +359,10 @@ impl ValidatorUpdate {
                 return Err(error("duplicate validator public key"));
             }
         }
-        let mut preimage = Vec::new();
-        if let Some(source) = source_epoch {
-            let mut put = |raw: &[u8]| {
-                preimage.extend_from_slice(raw.len().to_string().as_bytes());
-                preimage.push(b':');
-                preimage.extend_from_slice(raw);
-            };
-            put(b"octra:validator_set_update:bonded");
-            put(source.to_string().as_bytes());
-            put(activate_epoch.to_string().as_bytes());
-            for v in &validators {
-                put(&v.address);
-                put(&v.public_key);
-                put(v.weight.to_string().as_bytes());
-            }
+        let fingerprint = if let Some(source) = source_epoch {
+            weighted_fingerprint(source, activate_epoch, &validators)
         } else {
+            let mut preimage = Vec::new();
             for (index, v) in validators.iter().enumerate() {
                 if index != 0 {
                     preimage.push(b',');
@@ -214,8 +371,8 @@ impl ValidatorUpdate {
                 preimage.push(b':');
                 preimage.extend_from_slice(&v.public_key);
             }
-        }
-        let fingerprint = hex::encode(Sha256::digest(preimage));
+            hex::encode(Sha256::digest(preimage))
+        };
         if source_epoch.is_some_and(|source| source >= activate_epoch) {
             return Err(error(
                 "weighted validator source epoch must precede activation",
@@ -232,6 +389,7 @@ impl ValidatorUpdate {
             validators,
             weighted,
             fingerprint,
+            eviction: None,
         })
     }
     pub fn validator_set(&self) -> Result<ValidatorSet, crate::consensus::Error> {
