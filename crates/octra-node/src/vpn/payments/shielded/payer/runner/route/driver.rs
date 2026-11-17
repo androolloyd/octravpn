@@ -108,9 +108,19 @@ impl<A: Host> Hop<A> {
         loop {
             self.route.check().await?;
             let result = async {
-                let index = self.resources.index.get().await.context("resume route pool index")?;
+                let index = self
+                    .resources
+                    .index
+                    .get()
+                    .await
+                    .context("resume route pool index")?;
                 let _purchases = purchase.payer.0.purchases.lock().await;
-                if index.sync(128).await.context("sync route pool index")?.complete {
+                if index
+                    .sync(128)
+                    .await
+                    .context("sync route pool index")?
+                    .complete
+                {
                     let view = index.view().await?;
                     let (_, now) = purchase.payer.current(view.index()).await?;
                     let (binding, _) = purchase.open_at(now, &self.control).await?;
