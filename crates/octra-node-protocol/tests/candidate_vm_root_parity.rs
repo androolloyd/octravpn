@@ -3,7 +3,7 @@ use octra_node_protocol::{contract, transaction::json_string};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 #[test]
-fn c49_vm_root_and_json_bytes_match_native() {
+fn candidate_vm_root_and_json_bytes_match_native() {
     let report: Value =
         serde_json::from_str(include_str!("fixtures/candidate-vm-root.json")).unwrap();
     let candidate: Value = serde_json::from_str(include_str!(

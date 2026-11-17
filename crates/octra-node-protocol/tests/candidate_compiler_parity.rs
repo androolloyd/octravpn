@@ -98,12 +98,12 @@ fn run(input: &Value) -> Value {
     }
 }
 #[test]
-fn c49_compiler_bytes_metadata_metering_and_source_publication_match_native() {
+fn candidate_compiler_bytes_metadata_metering_and_source_publication_match_native() {
     let report: Value =
         serde_json::from_str(include_str!("fixtures/candidate-compiler.json")).unwrap();
     assert_eq!(
         report["upstream_commit"],
-        "c49de45cf49ebbc2e5c0697eb956cbcada5845e7"
+        "8f785a93a4e7392a0f3e65674f9de89854d33dbc"
     );
     let candidate: Value = serde_json::from_str(include_str!(
         "../../../docs/rust-node/source-map-candidate.json"
@@ -135,7 +135,7 @@ fn c49_compiler_bytes_metadata_metering_and_source_publication_match_native() {
         report["source_stamp"].as_str().unwrap().as_bytes(),
         octra_node_protocol::program_record::SOURCE_STAMP
     );
-    assert_eq!(report["compiled_modules"].as_array().unwrap().len(), 100);
+    assert_eq!(report["compiled_modules"].as_array().unwrap().len(), 101);
     let cases = report["cases"].as_array().unwrap();
     assert_eq!(cases.len(), 101);
     for (index, case) in cases.iter().enumerate() {

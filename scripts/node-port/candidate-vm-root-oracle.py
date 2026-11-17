@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 import subprocess
 
-PIN = 'c49de45cf49ebbc2e5c0697eb956cbcada5845e7'
+PIN = '8f785a93a4e7392a0f3e65674f9de89854d33dbc'
 ROOT = Path(__file__).resolve().parents[2]
 HISTORICAL = ['circle-octb-execution.json', 'circle-octb-journal.json']
 SOURCES = ['node_runtime/consensus_vm_transition.ml', 'node_runtime/consensus_epoch_vm_shell.ml',
