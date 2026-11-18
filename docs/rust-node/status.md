@@ -1,5 +1,24 @@
 # Rust node qualification status
 
+## Where things stand — 2026-11-17
+
+| Gate | State | Evidence |
+| --- | --- | --- |
+| Shared CI on `main` | Failed on every push from October 17 to November 12 (formatting, a Linux-only lint, advisories, the builder image, runner disk). Repaired November 17. | [#1186](https://github.com/androolloyd/octravpn/pull/1186) |
+| Candidate `c49de45` passes local core qualification | Yes — 1,219 tests, November 12 | [upstream adoption](checkpoints/2026-11-12/upstream-adoption.md) |
+| Candidate is the release devnet requires | **No.** Devnet's signed release is `8f785a93` (sequence 42, `required`, issued November 14) — four upstream commits ahead, the first a quorum-rule change | the open `release-canary` issue; `scripts/octra-release-canary.sh` |
+| Public node at head | **Down since October 21.** The deployed build also predates the candidate, so a restart cannot restore service | [outage record](checkpoints/2026-11-17/public-outage.md); the `public-probe` issue |
+| Funded private two-hop matrices | Passed October 21 on that day's build; not rerun on the candidate | [audit-cache candidate](checkpoints/2026-10-21/audit-record-cache.json) |
+| Funded public canary | Never run | — |
+| Mainnet | Not qualified | — |
+
+The order that follows from this table: adopt the required upstream release,
+redeploy the public node under supervision, hold sustained sync at head, then
+run the funded public canary.
+
+Everything below is the dated record, newest first. Every record is listed in
+the [checkpoint index](checkpoints/README.md).
+
 ## November 12 upstream adoption candidate
 
 The current implementation targets lite_node

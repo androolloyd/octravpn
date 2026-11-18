@@ -1,0 +1,133 @@
+name: public probe
+
+# Is https://octra.to serving, and if not, which layer is down?
+#
+# The public node stopped on October 21 and the front door answered 502 for
+# four weeks before anyone looked. Nothing was watching from outside. This
+# job is that outside view: scripts/public-probe.sh classifies the response
+# (serving / synchronizing / origin_down / unreachable / unexpected), and
+# this workflow keeps ONE issue, labelled `public-probe`, open for as long
+# as the site is not serving and closes it when it is.
+#
+# The job stays green whatever the site's state — an outage is a result,
+# recorded in the issue, and a job that is red for a month teaches people
+# to ignore it. It fails only if the probe itself cannot run.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: public-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: probe the public front door
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe
+        id: probe
+        run: ./scripts/public-probe.sh
+
+      - name: Workflow summary
+        run: |
+          {
+            echo "# public probe — ${{ steps.probe.outputs.checked_at }}"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| state | \`${{ steps.probe.outputs.state }}\` (HTTP ${{ steps.probe.outputs.http_code }}) |"
+            echo "| meaning | ${{ steps.probe.outputs.detail }} |"
+            echo "| certificate | ${{ steps.probe.outputs.tls_days_left }} days left |"
+            echo "| devnet head | epoch ${{ steps.probe.outputs.devnet_epoch }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Track the outage in one issue
+        uses: actions/github-script@v7
+        env:
+          STATE: ${{ steps.probe.outputs.state }}
+          HTTP_CODE: ${{ steps.probe.outputs.http_code }}
+          DETAIL: ${{ steps.probe.outputs.detail }}
+          TLS_DAYS: ${{ steps.probe.outputs.tls_days_left }}
+          DEVNET_EPOCH: ${{ steps.probe.outputs.devnet_epoch }}
+          CHECKED_AT: ${{ steps.probe.outputs.checked_at }}
+        with:
+          script: |
+            const env = process.env;
+            const { owner, repo } = context.repo;
+            const label = 'public-probe';
+            try {
+              await github.rest.issues.createLabel({
+                owner, repo, name: label, color: 'b60205',
+                description: 'The public front door is not serving (maintained by public-probe.yml)',
+              });
+            } catch (error) {
+              if (error.status !== 422) throw error; // 422: the label already exists
+            }
+            const open = (await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', labels: label, per_page: 10,
+            })).data.filter(issue => !issue.pull_request);
+            const current = open[0];
+            const field = (body, name) => (new RegExp(`<!-- ${name}=([^ ]+) -->`).exec(body || '') || [])[1];
+
+            if (env.STATE === 'serving') {
+              if (current) {
+                const since = field(current.body, 'first_seen');
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: current.number,
+                  body: `Recovered: the gateway answered at ${env.CHECKED_AT}${since ? ` (not serving since ${since})` : ''}.`,
+                });
+                await github.rest.issues.update({ owner, repo, issue_number: current.number, state: 'closed' });
+              }
+              return;
+            }
+
+            const firstSeen = (current && field(current.body, 'first_seen')) || env.CHECKED_AT;
+            const previous = current && field(current.body, 'state');
+            const title = `octra.to is not serving: ${env.STATE}`;
+            const body = [
+              `<!-- first_seen=${firstSeen} -->`,
+              `<!-- state=${env.STATE} -->`,
+              `The public front door is not serving.`,
+              '',
+              '| | |',
+              '|---|---|',
+              `| state | \`${env.STATE}\` (HTTP ${env.HTTP_CODE}) |`,
+              `| meaning | ${env.DETAIL} |`,
+              `| first seen | ${firstSeen} |`,
+              `| last checked | ${env.CHECKED_AT} |`,
+              `| certificate | ${env.TLS_DAYS} days left |`,
+              `| devnet head | epoch ${env.DEVNET_EPOCH} |`,
+              '',
+              'Reading the state:',
+              '',
+              '- `origin_down` — the relay and its certificate are fine; the node, its gateway, or the tunnel between them is not answering. Start with the node process and its helpers on the host.',
+              '- `synchronizing` — the node is running but not at head, so it refuses to serve. Expected for a while after a restart; persistent means it cannot follow the chain (check the `release-canary` issue for an upstream release it does not implement).',
+              '- `unreachable` — DNS, TLS, or the relay host itself.',
+              '',
+              'This issue is edited in place on every probe and closes itself when the gateway answers.',
+              '',
+              '(maintained by `.github/workflows/public-probe.yml`)',
+            ].join('\n');
+
+            if (!current) {
+              const created = await github.rest.issues.create({ owner, repo, title, body, labels: [label] });
+              core.info(`opened ${created.data.html_url}`);
+              return;
+            }
+            await github.rest.issues.update({ owner, repo, issue_number: current.number, title, body });
+            if (previous && previous !== env.STATE) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: current.number,
+                body: `State changed at ${env.CHECKED_AT}: \`${previous}\` → \`${env.STATE}\` (${env.DETAIL}).`,
+              });
+            }

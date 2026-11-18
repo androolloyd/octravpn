@@ -10,7 +10,7 @@ path = "src/lib.rs"
 
 [dependencies]
 octravpn-core = { path = "../../crates/octravpn-core" }
-octra-mock-rpc = { path = "../../../octra-foundry/crates/octra-mock-rpc" }
+octra-mock-rpc = { git = "https://github.com/androolloyd/octra-foundry", rev = "c9011f1f4dfeee3c7c726feb4b4cd337477f866a" }
 
 anyhow = { workspace = true }
 curve25519-dalek = { workspace = true }

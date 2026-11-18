@@ -1,5 +1,30 @@
 # OctraVPN — Security Model
 
+> **Scope: this document describes the May 2026 system** — the v1.1 and v2
+> AML substrates and the standalone operator. It was last revised on
+> 2026-05-21 and has not been updated for anything built since: the v3–v5
+> settlement programs, the Rust Octra node, prepaid Octranet channels,
+> shielded payments, stock Tailscale exits or nested routes. Read it for
+> those two substrates and the shared Rust crypto stack, not as the security
+> model of the current release.
+>
+> For the current system, the trust rules live with each design:
+>
+> | Area | Where its assumptions and limits are stated |
+> | --- | --- |
+> | Prepaid custody, purchases, withdrawals, slashing | [architecture/octranet-payment-tier.md](architecture/octranet-payment-tier.md) |
+> | Circle-custody variant | [architecture/circle-prepaid.md](architecture/circle-prepaid.md) |
+> | Shielded payments (experimental, single-party test setup) | [architecture/shielded-circle-payments.md](architecture/shielded-circle-payments.md) |
+> | Stock Tailscale exits: what registration does and does not grant | [architecture/stock-paid-exit.md](architecture/stock-paid-exit.md) |
+> | Nested routes: per-hop purchases, pinning, no refunds across hops | [architecture/nested-paid-exits.md](architecture/nested-paid-exits.md) |
+> | What the node has and has not been qualified to do | [rust-node/status.md](rust-node/status.md) |
+>
+> Three limits hold across all of them and are easy to lose in the detail:
+> an exit operator can observe destinations; buying bytes does not prove
+> that arbitrary Internet traffic was delivered; and standard prepaid
+> settlement exposes payment metadata on chain. A single security model for
+> the current system has not been written yet.
+
 This is the load-bearing security overview. For the **live-substrate
 crypto + dep-risk register** see `docs/v2-threat-model.md` (canonical,
 current state). For **Rust crypto / log-leak audit** see

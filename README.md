@@ -63,23 +63,26 @@ shielded settlement has separate setup and security requirements. See the
 ## Build from source
 
 Install Rust through [rustup](https://rustup.rs), a C/C++ build toolchain and
-`protoc`. The repository selects Rust **1.96.0**. Clone Foundry beside this
-checkout at the revision used by CI:
+`protoc`. The repository selects Rust **1.96.0**.
 
 ```sh
-mkdir octravpn-workspace
-cd octravpn-workspace
 git clone https://github.com/androolloyd/octravpn.git octra
-git clone https://github.com/androolloyd/octra-foundry.git
-git -C octra-foundry checkout c9011f1f4dfeee3c7c726feb4b4cd337477f866a
 cd octra
 cargo build --locked --release -p octra-node -p octravpn-client -p octravpn-node
 ```
 
 This builds `octra-node`, the `octravpn` client and the standalone
-`octravpn-node` operator. Cargo fetches `headscale-rs` at its pinned revision;
-a separate Headscale checkout is optional. See
-[dependency strategy](docs/architecture/headscale-dep-strategy.md).
+`octravpn-node` operator. Cargo fetches `octra-foundry` and `headscale-rs` at
+the revisions pinned in the manifests; no other checkout is needed to build.
+See [dependency strategy](docs/architecture/headscale-dep-strategy.md).
+
+The Docker harnesses and the Foundry CLI (`octra forge`, `octra cast`) do
+need Foundry beside this checkout, at the same revision the manifests pin:
+
+```sh
+git clone https://github.com/androolloyd/octra-foundry.git ../octra-foundry
+git -C ../octra-foundry checkout c9011f1f4dfeee3c7c726feb4b4cd337477f866a
+```
 
 Start an isolated four-validator development chain:
 

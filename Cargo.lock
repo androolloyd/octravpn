@@ -3451,6 +3451,7 @@ dependencies = [
 [[package]]
 name = "octra-core"
 version = "0.1.0"
+source = "git+https://github.com/androolloyd/octra-foundry?rev=c9011f1f4dfeee3c7c726feb4b4cd337477f866a#c9011f1f4dfeee3c7c726feb4b4cd337477f866a"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3516,6 +3517,7 @@ dependencies = [
 [[package]]
 name = "octra-mock-rpc"
 version = "0.1.0"
+source = "git+https://github.com/androolloyd/octra-foundry?rev=c9011f1f4dfeee3c7c726feb4b4cd337477f866a#c9011f1f4dfeee3c7c726feb4b4cd337477f866a"
 dependencies = [
  "anyhow",
  "axum 0.7.9",

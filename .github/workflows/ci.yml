@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+# A new push to a pull request supersedes the run already in progress —
+# with five test shards that is real runner time. Runs on main are never
+# cancelled: every commit there keeps its own verdict.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -32,6 +39,11 @@ jobs:
           cache: "false"
       - run: cargo fmt -- --check
       - run: python3 scripts/node-port/check-native-sources.py --vendored-only
+      # Cheap consistency checks that need no build: the Foundry and
+      # Headscale revisions agree everywhere they are written down, and the
+      # generated checkpoint index matches the records.
+      - run: python3 scripts/ci/check-pins.py
+      - run: python3 scripts/node-port/checkpoint-index.py --check
 
   clippy:
     name: cargo clippy
@@ -54,6 +66,13 @@ jobs:
       # mesh tests + bench require it. Run a second clippy pass with
       # the feature on so the test cfg gets lint-coverage too.
       - run: cargo clippy --locked --workspace --tests --features test-helpers -- -D warnings
+      # The native node embeds octravpn-node's services without the
+      # standalone operator (Hub, CLI, v1.1/v2 chain layers, relay keepers).
+      # A workspace build cannot see a violation — feature unification turns
+      # `standalone` back on — so build the two packages the way a release
+      # build of the node does.
+      - run: cargo check --locked -p octravpn-node --no-default-features --lib
+      - run: cargo check --locked -p octra-node
 
   test:
     # One runner needs ~88 minutes for this suite (~20 building, ~65 in

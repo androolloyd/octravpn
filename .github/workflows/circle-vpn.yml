@@ -31,12 +31,27 @@ jobs:
         with: { repository: androolloyd/headscale-rs, ref: 570fa5a60c8ed792b643a301b5e91d3b668ba614, path: headscale-rs }
       - uses: ./octra/.github/actions/setup-rust
       - uses: ./octra/.github/actions/prepare-native-tests
-      - name: Circle application and durable ExEx delivery (release tests)
+      # The release tests of these packages run in ci.yml's `test` shards
+      # (runtime, runtime-circle, crypto, rest) on every pull request. This
+      # job used to repeat them under its 30-minute limit and so never once
+      # finished — the runtime package alone is ~50 minutes — which also
+      # meant the step after it never ran. It keeps what only it checks:
+      # Clippy with every feature on, the registry linted for wasm32, and
+      # the native host ABI with the unsigned package.
+      - name: Circle crates lint with every feature; registry lints for wasm32
         working-directory: octra
         run: |
-          cargo test --locked --release -p octra-hfhe -p octra-node-runtime -p octra-pvac -p octra-node-protocol -p octra-exex -p octravpn-circle-registry --all-features
           cargo clippy --locked -p octra-hfhe -p octra-node-runtime -p octra-pvac -p octra-node-protocol -p octra-exex -p octravpn-circle-registry --all-targets --all-features -- -D warnings
           cargo clippy --locked -p octravpn-circle-registry --target wasm32-unknown-unknown --lib -- -D warnings
+      # The inventory also compares each revision recorded as source-equivalent
+      # to the pin; the checkouts above hold one commit each.
+      - name: Fetch the source-equivalent upstream revisions
+        working-directory: octra
+        run: |
+          python3 -c 'import json; print("\n".join(json.load(open("docs/rust-node/upstream.json")).get("source_equivalent_commits", [])))' |
+            while IFS= read -r commit; do
+              [ -z "$commit" ] || git -C ../lite-node fetch --quiet --depth 1 origin "$commit"
+            done
       - name: Pinned native host ABI and unsigned package
         working-directory: octra
         run: |

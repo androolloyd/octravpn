@@ -8,7 +8,12 @@ rust-version.workspace = true
 description = "Shared types, Octra JSON-RPC client, crypto, and receipt formats for OctraVPN."
 
 [dependencies]
-octra-core  = { path = "../../../octra-foundry/crates/octra-core" }
+# Pinned by revision, like headscale-rs: a clean clone builds without a
+# sibling checkout, and the lockfile — not README prose — says which
+# Foundry this workspace was built against. To work on both repositories
+# at once, add `[patch."https://github.com/androolloyd/octra-foundry"]`
+# entries pointing at your checkout in a local `.cargo/config.toml`.
+octra-core  = { git = "https://github.com/androolloyd/octra-foundry", rev = "c9011f1f4dfeee3c7c726feb4b4cd337477f866a" }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }

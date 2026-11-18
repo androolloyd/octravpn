@@ -8,7 +8,12 @@
 # the daemons actually settle a relay session on-chain.
 #
 # NOT a per-PR gate: it needs docker, live devnet, ~15 min (the builder compiles
-# the daemons), and a funded wallet. It runs weekly + on demand.
+# the daemons), and a funded wallet. It runs on demand.
+#
+# It used to run weekly as well. The repository has no
+# OCTRA_DEVNET_DEPLOYER_KEY secret, so every scheduled run failed at the
+# secret gate — five of five — which tested nothing and added a standing red
+# job. Restore the schedule only together with the secret.
 #
 # REQUIRED SECRET: OCTRA_DEVNET_DEPLOYER_KEY — a devnet wallet secret (the 64-hex
 # or raw-bytes contents of a deployer.key) funded with enough OCT to deploy
@@ -19,9 +24,6 @@ name: v4-relay-devnet-e2e
 
 on:
   workflow_dispatch: {}
-  schedule:
-    # Mondays 07:00 UTC — weekly heartbeat over the daemon settlement path.
-    - cron: "0 7 * * 1"
 
 concurrency:
   group: v4-relay-devnet-e2e
