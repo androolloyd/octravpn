@@ -149,6 +149,7 @@ async fn finalized_mixed_import_uses_bound_key_files_and_survives_restart() {
             .unwrap(),
     );
     let config = Config {
+        profile_hash: std::sync::Arc::new(|_: &[u8], _: i64| Err("no profile".to_string())),
         graph: Graph::new(chain.chain_id.as_bytes().to_vec(), None),
         protocol: Protocol::new(2).unwrap(),
         profile: Profile {
@@ -258,6 +259,7 @@ async fn finalized_mixed_import_uses_bound_key_files_and_survives_restart() {
     epoch_footer::apply(
         &emission(),
         &epoch_footer::Request {
+            execution: &octra_node_runtime::epoch_footer::Execution::default(),
             epoch: 1,
             reward: &common::reward(1),
             validator_keys: &[],

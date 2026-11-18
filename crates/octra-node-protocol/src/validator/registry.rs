@@ -253,10 +253,30 @@ impl Registry {
         window: i64,
         evidence: &Verified,
     ) -> Result<(Self, BigInt), Error> {
+        self.apply_slash_retaining(epoch, window, evidence, false, &[])
+    }
+    /// Native `apply_slash ~retain_rewards ~retain_offenders`: under seatless,
+    /// records still needed to exclude rewards (applied this or the previous
+    /// epoch) or naming a current voter are kept past the evidence window.
+    pub fn apply_slash_retaining(
+        &self,
+        epoch: i64,
+        window: i64,
+        evidence: &Verified,
+        retain_rewards: bool,
+        retain_offenders: &[Vec<u8>],
+    ) -> Result<(Self, BigInt), Error> {
         let mut retained: Vec<_> = self
             .slashes
             .iter()
-            .filter(|s| s.evidence_epoch <= epoch && epoch.wrapping_sub(s.evidence_epoch) < window)
+            .filter(|s| {
+                (s.evidence_epoch <= epoch && epoch.wrapping_sub(s.evidence_epoch) < window)
+                    || retain_offenders.contains(&s.offender)
+                    || (retain_rewards
+                        && epoch > 0
+                        && s.applied_epoch <= epoch
+                        && s.applied_epoch >= epoch - 1)
+            })
             .cloned()
             .collect();
         if retained.iter().any(|r| r.id == evidence.id) {

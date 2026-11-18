@@ -290,7 +290,9 @@ fn finalized_replay_excludes_vm_fees_and_atomically_checks_charged_outcomes() {
         }],
     };
     let request = Request {
+        execution: &octra_node_runtime::epoch_footer::Execution::default(),
         validators: validator_epoch::Request {
+            voting_set: None,
             chain: b"partition-fixture",
             epoch: 1,
             policy: &Policy::Inactive,

@@ -143,7 +143,9 @@ fn native_bft_epoch_effects_roots_keys_rewards_and_atomic_failure() {
         };
         let members = [address(4)];
         let request = Request {
+            execution: &octra_node_runtime::epoch_footer::Execution::default(),
             validators: validator_epoch::Request {
+                voting_set: None,
                 chain,
                 epoch,
                 policy: &policy,

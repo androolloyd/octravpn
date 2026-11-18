@@ -349,6 +349,7 @@ impl Native {
         };
         let request = single_execution::Request {
             validators: validator_epoch::Request {
+                voting_set: None,
                 chain: self.config.graph.chain_id(),
                 epoch,
                 policy: &self.config.validators,

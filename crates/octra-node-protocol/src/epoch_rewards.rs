@@ -15,6 +15,10 @@ pub struct Plan {
     pub fees_burned: BigInt,
     pub fees_rewarded: BigInt,
     pub total_reward: BigInt,
+    /// Reward withheld from slashed validators under seatless and burned.
+    pub reward_burned: BigInt,
+    /// Addresses whose reward is burned, ordered and unique.
+    pub excluded: Vec<Vec<u8>>,
     pub proposer_total: BigInt,
     pub each_validator: BigInt,
     pub remainder: BigInt,
@@ -110,6 +114,8 @@ pub fn build(input: &Input, base_reward: Option<BigInt>) -> Result<Plan, Error> 
         fees_burned,
         fees_rewarded,
         total_reward,
+        reward_burned: BigInt::zero(),
+        excluded: vec![],
         proposer_total,
         each_validator,
         remainder,
@@ -185,10 +191,116 @@ pub fn credits(reward: &Attribution, plan: &Plan) -> Result<Vec<Credit>, Error> 
         .into_values()
         .filter(|c| c.amount.is_positive())
         .collect::<Vec<_>>();
-    if credits.iter().map(|c| &c.amount).sum::<BigInt>() != plan.total_reward {
+    net_credits(plan, credits)
+}
+fn sum(credits: &[Credit]) -> BigInt {
+    credits.iter().map(|c| &c.amount).sum()
+}
+/// Native `net_reward_credits`: the gross distribution covers the paid and
+/// the burned reward; excluded addresses' credits are the burn.
+fn net_credits(plan: &Plan, credits: Vec<Credit>) -> Result<Vec<Credit>, Error> {
+    if plan.total_reward.is_negative() || plan.reward_burned.is_negative() {
+        return Err(error("reward amounts are negative"));
+    }
+    if plan.excluded.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(error("reward exclusions are not ordered and unique"));
+    }
+    if sum(&credits) != &plan.total_reward + &plan.reward_burned {
         return Err(error("reward distribution total mismatch"));
     }
+    let (burned, credits): (Vec<_>, Vec<_>) = credits
+        .into_iter()
+        .partition(|credit| plan.excluded.contains(&credit.address));
+    if sum(&burned) != plan.reward_burned || sum(&credits) != plan.total_reward {
+        return Err(error("reward burn distribution mismatch"));
+    }
     Ok(credits)
+}
+/// The proposer, then every rewarded validator.
+pub fn reward_addresses(reward: &Attribution) -> Vec<Vec<u8>> {
+    std::iter::once(reward.proposer.clone())
+        .chain(reward.validators.iter().map(|v| v.address.clone()))
+        .collect()
+}
+/// Native `reward_exclusions`: under seatless, rewarded addresses with a
+/// slash applied by this epoch, or a recorded penalty, earn nothing.
+pub fn exclusions(
+    seatless: bool,
+    epoch: i64,
+    registry: Option<&[u8]>,
+    reward: &Attribution,
+    penalized: &[Vec<u8>],
+) -> Result<Vec<Vec<u8>>, Error> {
+    if !seatless {
+        return Ok(vec![]);
+    }
+    let registry = match registry {
+        None => crate::validator::registry::Registry::default(),
+        Some(raw) => crate::validator::registry::Registry::from_bytes(raw)
+            .map_err(|e| Error(e.to_string()))?,
+    };
+    let addresses = reward_addresses(reward);
+    let mut excluded: Vec<Vec<u8>> = registry
+        .slashes()
+        .iter()
+        .filter(|record| record.applied_epoch <= epoch && addresses.contains(&record.offender))
+        .map(|record| record.offender.clone())
+        .chain(penalized.iter().filter(|a| addresses.contains(a)).cloned())
+        .collect();
+    excluded.sort();
+    excluded.dedup();
+    Ok(excluded)
+}
+/// Native `prepare_reward_plan`: burn the excluded validators' share.
+pub fn prepare(
+    seatless: bool,
+    epoch: i64,
+    registry: Option<&[u8]>,
+    reward: &Attribution,
+    penalized: &[Vec<u8>],
+    plan: Plan,
+) -> Result<Plan, Error> {
+    if !plan.reward_burned.is_zero() || !plan.excluded.is_empty() {
+        return Err(error("reward plan is already prepared"));
+    }
+    let excluded = exclusions(seatless, epoch, registry, reward, penalized)?;
+    if excluded.is_empty() {
+        return Ok(plan);
+    }
+    let gross = credits(reward, &plan)?;
+    let burned: BigInt = gross
+        .iter()
+        .filter(|credit| excluded.contains(&credit.address))
+        .map(|credit| &credit.amount)
+        .sum();
+    let next = Plan {
+        excluded,
+        total_reward: &plan.total_reward - &burned,
+        new_total_supply: &plan.new_total_supply - &burned,
+        new_supply_retired: &plan.new_supply_retired + &burned,
+        reward_burned: burned,
+        ..plan
+    };
+    if next.new_total_supply.is_negative() {
+        return Err(error("reward burn exceeds total supply"));
+    }
+    credits(reward, &next)?;
+    Ok(next)
+}
+/// Native `reward_credits_at`: the plan's exclusions must be the ones the
+/// state implies.
+pub fn credits_at(
+    seatless: bool,
+    epoch: i64,
+    registry: Option<&[u8]>,
+    reward: &Attribution,
+    penalized: &[Vec<u8>],
+    plan: &Plan,
+) -> Result<Vec<Credit>, Error> {
+    if exclusions(seatless, epoch, registry, reward, penalized)? != plan.excluded {
+        return Err(error("reward exclusions differ from applied slashes"));
+    }
+    credits(reward, plan)
 }
 impl Attribution {
     /// Native proposer priority and ordered fallback key lookup. Existing

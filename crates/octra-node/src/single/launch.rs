@@ -158,6 +158,10 @@ pub async fn open(config: &Config, runtime: CircleRuntime) -> Result<Arc<Node>> 
         Graph::new(config.chain.chain_id.as_bytes().to_vec(), None)
     };
     let config_native = || executor::Config {
+        // Single mode never reaches seatless voting.
+        profile_hash: std::sync::Arc::new(|_: &[u8], _: i64| {
+            Err("single mode has no execution profile".to_string())
+        }),
         graph: graph.clone(),
         protocol: Protocol::default(),
         profile: Profile::from_values(

@@ -85,6 +85,7 @@ impl Native {
         } = request;
         let config = &self.config;
         let epoch = header.epoch_id;
+        let finalizing_set: &ValidatorSet = validators;
         ensure!(
             hex::encode(state.published_root()?) == parent.ledger_root,
             "execution snapshot differs from canonical parent"
@@ -179,9 +180,16 @@ impl Native {
             committed_head: Some(&committed),
             verifier: Some(&mut settlement),
         };
+        let execution = octra_node_runtime::epoch_footer::Execution::at(
+            &header.chain_id,
+            epoch,
+            &config.profile_hash,
+        )
+        .map_err(anyhow::Error::msg)?;
         state.begin()?;
         let request = epoch_execution::Request {
             validators: validator_epoch::Request {
+                voting_set: Some(finalizing_set),
                 chain: &header.chain_id,
                 epoch,
                 policy: &config.validators,
@@ -199,6 +207,7 @@ impl Native {
             emission: &config.emission,
             reward,
             validator_keys: &keys,
+            execution: &execution,
         };
         let executed = epoch_execution::execute(
             &request,

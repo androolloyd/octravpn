@@ -101,6 +101,7 @@ pub fn execute_registered<H: Host>(
         let footer = epoch_footer::apply(
             request.emission,
             &epoch_footer::Request {
+                execution: &epoch_footer::Execution::default(),
                 epoch: request.validators.epoch,
                 reward: request.reward,
                 validator_keys: request.validator_keys,

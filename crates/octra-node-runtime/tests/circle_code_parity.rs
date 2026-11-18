@@ -406,6 +406,7 @@ async fn signed_spawn_publishes_oct_page_and_exex_record_through_restart() {
             legacy_total: None,
         },
         &epoch_footer::Request {
+            execution: &octra_node_runtime::epoch_footer::Execution::default(),
             epoch: 1,
             reward: &finality_host::reward(authority.seed),
             validator_keys: &[],
@@ -972,7 +973,9 @@ fn assert_bft_epochs_projected(fixture: &Value, oracle: &[u8], projection: Optio
         };
         let result = epoch_execution::execute(
             &Request {
+                execution: &octra_node_runtime::epoch_footer::Execution::default(),
                 validators: validator_epoch::Request {
+                    voting_set: None,
                     chain: b"epoch-circle-fixture",
                     epoch,
                     policy: &Policy::Inactive,

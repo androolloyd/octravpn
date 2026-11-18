@@ -375,6 +375,7 @@ async fn signed_counter(octb: bool) {
             legacy_total: None,
         },
         &octra_node_runtime::epoch_footer::Request {
+            execution: &octra_node_runtime::epoch_footer::Execution::default(),
             epoch: 1,
             reward: &finality_host::reward(authority.seed),
             validator_keys: &[],

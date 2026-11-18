@@ -4,7 +4,7 @@
 mod advance;
 mod context;
 use crate::{execution::Error, state_batch::StateBatch, validator_transaction::EpochFold};
-pub use advance::{advance, Advanced, Request};
+pub use advance::{advance, prepare_penalties, Advanced, Request, EVICTION_WAIT_KEY};
 pub use context::Fold;
 use octra_node_protocol::{
     consensus::ParentCommit,

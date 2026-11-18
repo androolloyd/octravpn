@@ -7,7 +7,13 @@ use crate::{
     state_batch::{Snapshot, StateBatch},
     validator_transaction::EpochFold,
 };
+use base64::{engine::general_purpose::STANDARD, Engine};
 use octra_node_protocol::{
+    consensus::{
+        codec::Wire,
+        validators::{EvictionChoice, SetChoice},
+        ValidatorSet,
+    },
     control_payload::ValidatorUpdate,
     transaction::RuleMode,
     validator::{
@@ -25,6 +31,8 @@ pub struct Request<'a> {
     pub legacy_members: &'a [Vec<u8>],
     pub previous_root: &'a [u8],
     pub committed_head: Option<&'a Snapshot>,
+    /// The set that finalized this epoch (`backend.voting_set`).
+    pub voting_set: Option<&'a ValidatorSet>,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Advanced {
@@ -62,19 +70,248 @@ fn pending(state: &StateBatch) -> Result<Option<ValidatorUpdate>, Error> {
         })
         .transpose()
 }
-fn promote(epoch: i64, state: &mut StateBatch) -> Result<Option<Vec<Vec<u8>>>, Error> {
-    match pending(state)? {
-        Some(p) if p.weighted && p.activate_epoch <= epoch => {
+fn seatless(request: &Request<'_>) -> bool {
+    update::seatless_at(request.chain, request.epoch)
+}
+fn remove(state: &mut StateBatch, key: &[u8]) -> Result<(), Error> {
+    state.remove(&[b"meta", key]).map_err(error)
+}
+fn load_registry(state: &StateBatch, tag: &str) -> Result<Registry, Error> {
+    state.get(&[b"meta", registry::META_KEY]).map_or_else(
+        || Ok(Registry::default()),
+        |raw| tagged(tag, Registry::from_bytes(raw)),
+    )
+}
+/// Native `current_voting_set`: the finalizing set, structurally valid for
+/// this epoch, with exactly this epoch's members.
+pub(crate) fn current_voting_set(request: &Request<'_>) -> Result<ValidatorSet, Error> {
+    let set = request
+        .voting_set
+        .ok_or_else(|| error("epoch voting set is missing"))?;
+    let set = set
+        .structural_for_epoch(request.chain, request.epoch)
+        .map_err(|e| error(e.message()))?;
+    let mut members: Vec<_> = set.validators.iter().map(|v| v.address.clone()).collect();
+    members.sort();
+    let mut legacy = request.legacy_members.to_vec();
+    legacy.sort();
+    if members != legacy {
+        return Err(error("epoch voting set members differ"));
+    }
+    Ok(set)
+}
+/// Native `remember_validator_penalties`: once, at the first seatless epoch
+/// that reaches it, every slash applied by then becomes a lasting penalty.
+pub(crate) fn remember_penalties(
+    request: &Request<'_>,
+    registry: &Registry,
+    state: &mut StateBatch,
+) -> Result<(), Error> {
+    use crate::epoch_footer::{penalty_key, PENALTY_EPOCH};
+    if !seatless(request) {
+        return Ok(());
+    }
+    if let Some(raw) = state.get(&[b"meta", PENALTY_EPOCH]) {
+        let applied: i64 = std::str::from_utf8(raw)
+            .ok()
+            .and_then(|text| text.parse().ok())
+            .ok_or_else(|| error("validator penalty epoch is invalid"))?;
+        return if applied < 0 || applied > request.epoch {
+            Err(error("validator penalty epoch differs"))
+        } else {
+            Ok(())
+        };
+    }
+    for record in registry.slashes() {
+        if record.applied_epoch <= request.epoch {
+            let key = penalty_key(&record.offender);
+            if state.get(&[b"meta", &key]).is_none() {
+                set(state, &key, record.id.clone())?;
+            }
+        }
+    }
+    set(state, PENALTY_EPOCH, request.epoch.to_string().into_bytes())
+}
+/// Native `prepare_validator_penalties`, run before an epoch's transactions.
+pub fn prepare_penalties(request: &Request<'_>, state: &mut StateBatch) -> Result<(), Error> {
+    if !seatless(request) {
+        return Ok(());
+    }
+    let registry = load_registry(state, "validator penalty registry corrupt")?;
+    remember_penalties(request, &registry, state)
+}
+/// Native `validator_promotion`.
+fn promotion(
+    request: &Request<'_>,
+    active: Option<&ValidatorSet>,
+    update: &ValidatorUpdate,
+) -> Result<SetChoice, String> {
+    let pending = update.validator_set().map_err(|e| e.to_string())?;
+    if update.eviction.is_some() {
+        update
+            .check_set_at(request.chain, request.epoch)
+            .map_err(|e| e.to_string())?;
+        return Ok(SetChoice::Pending(pending));
+    }
+    pending
+        .pending_for_policy(
+            octra_node_protocol::consensus::policy::QuorumPolicy::for_chain(request.chain),
+            request.epoch,
+            active,
+        )
+        .map_err(|e| e.message().to_string())
+}
+fn promote(request: &Request<'_>, state: &mut StateBatch) -> Result<Option<Vec<Vec<u8>>>, Error> {
+    let Some(p) = pending(state)? else {
+        return Ok(None);
+    };
+    if !p.weighted || p.activate_epoch > request.epoch {
+        return Ok(None);
+    }
+    let decision = if seatless(request) {
+        let active = match request.voting_set {
+            None => None,
+            Some(_) => Some(current_voting_set(request)?),
+        };
+        promotion(request, active.as_ref(), &p)
+    } else {
+        p.validator_set()
+            .map(SetChoice::Pending)
+            .map_err(|e| e.to_string())
+    }
+    .map_err(|reason| error(format!("pending validator set rejected: {reason}")))?;
+    match decision {
+        SetChoice::Active(active) => {
+            remove(state, update::PENDING_KEY)?;
+            Ok(Some(
+                active
+                    .validators
+                    .iter()
+                    .map(|v| v.address.clone())
+                    .collect(),
+            ))
+        }
+        SetChoice::Pending(_) => {
             // Preserve the exact stored bytes, including native accepted field order.
             let raw = state
                 .get(&[b"meta", update::PENDING_KEY])
                 .expect("loaded pending set")
                 .to_vec();
             set(state, update::ACTIVE_KEY, raw)?;
+            if p.eviction.is_some() {
+                remove(state, update::PENDING_KEY)?;
+            }
             Ok(Some(p.validators.into_iter().map(|v| v.address).collect()))
         }
-        _ => Ok(None),
     }
+}
+pub const EVICTION_WAIT_KEY: &[u8] = b"validator_eviction_wait";
+fn write_eviction_wait(
+    state: &mut StateBatch,
+    current: &ValidatorSet,
+    offenders: &[Vec<u8>],
+    weight: &num_bigint::BigInt,
+) -> Result<(), Error> {
+    let mut value = br#"{"source":"#.to_vec();
+    let source = STANDARD.encode(current.encode().map_err(error)?);
+    octra_node_protocol::transaction::json_string(&mut value, source.as_bytes());
+    value.extend_from_slice(br#","offenders":["#);
+    for (index, offender) in offenders.iter().enumerate() {
+        if index > 0 {
+            value.push(b',');
+        }
+        octra_node_protocol::transaction::json_string(&mut value, offender);
+    }
+    value.extend_from_slice(br#"],"weight":""#);
+    value.extend_from_slice(weight.to_string().as_bytes());
+    value.extend_from_slice(br#""}"#);
+    if state.get(&[b"meta", EVICTION_WAIT_KEY]) != Some(value.as_slice()) {
+        set(state, EVICTION_WAIT_KEY, value)?;
+    }
+    remove(state, update::PENDING_KEY)
+}
+fn cancel_penalized_pending(request: &Request<'_>, state: &mut StateBatch) -> Result<bool, Error> {
+    let Some(p) = pending(state)? else {
+        return Ok(false);
+    };
+    if p.activate_epoch <= request.epoch {
+        return Ok(false);
+    }
+    let members: Vec<_> = p.validators.iter().map(|v| v.address.clone()).collect();
+    if crate::epoch_footer::penalties(seatless(request), state, &members).is_empty() {
+        return Ok(false);
+    }
+    remove(state, update::PENDING_KEY)?;
+    Ok(true)
+}
+/// Native `schedule_validator_eviction`: under seatless, a slashed member of
+/// the current voting set is removed for the next epoch, or, while removing
+/// it would leave too little weight, the wait is recorded.
+fn schedule_eviction(request: &Request<'_>, state: &mut StateBatch) -> Result<bool, Error> {
+    if !seatless(request) {
+        return Ok(false);
+    }
+    let registry = load_registry(state, "validator eviction registry corrupt")?;
+    if registry.slashes().is_empty() {
+        return cancel_penalized_pending(request, state);
+    }
+    remember_penalties(request, &registry, state)?;
+    let current = current_voting_set(request)?;
+    let offenders = tagged(
+        "validator eviction source rejected",
+        update::eviction_offenders(request.chain, request.epoch, &registry, &current),
+    )?;
+    if offenders.is_empty() {
+        remove(state, EVICTION_WAIT_KEY)?;
+        return cancel_penalized_pending(request, state);
+    }
+    let offenders_wire: Vec<_> = offenders.iter().map(|o| o.as_slice().into()).collect();
+    match tagged(
+        "validator eviction source rejected",
+        current.plan_eviction(&offenders_wire),
+    )? {
+        EvictionChoice::Retain(weight) => {
+            write_eviction_wait(state, &current, &offenders, &weight)?;
+            Ok(true)
+        }
+        EvictionChoice::Remove(..) => {
+            let (next, _) = tagged(
+                "validator eviction rejected",
+                ValidatorUpdate::make_eviction(
+                    request.epoch,
+                    request.epoch + 1,
+                    &offenders,
+                    &current,
+                ),
+            )?;
+            tagged(
+                "validator eviction state rejected",
+                next.check_eviction_state(request.chain, request.epoch, &registry, &current),
+            )?;
+            set(state, update::PENDING_KEY, next.to_bytes())?;
+            remove(state, EVICTION_WAIT_KEY)?;
+            Ok(true)
+        }
+    }
+}
+/// Registry candidates without a recorded penalty.
+fn unpenalized(
+    request: &Request<'_>,
+    registry: &Registry,
+    state: &StateBatch,
+) -> Vec<admission::Candidate> {
+    let addresses: Vec<_> = registry
+        .candidates()
+        .iter()
+        .map(|c| c.address.clone())
+        .collect();
+    let penalized = crate::epoch_footer::penalties(seatless(request), state, &addresses);
+    registry
+        .candidates()
+        .iter()
+        .filter(|c| !penalized.contains(&c.address))
+        .cloned()
+        .collect()
 }
 struct SnapshotInput {
     parameters: admission::Parameters,
@@ -92,7 +329,7 @@ fn fold_input(
     if ctx.mode == RuleMode::Prior {
         return Ok(SnapshotInput {
             parameters: policy.parameters.clone(),
-            candidates: registry.candidates().to_vec(),
+            candidates: unpenalized(request, registry, state),
             incumbents: vec![],
         });
     }
@@ -113,7 +350,8 @@ fn fold_input(
         }
         fold = next;
     }
-    let (candidates, _) = fold.filter(&cfg, ctx.start(), request.epoch, registry.candidates());
+    let candidates = unpenalized(request, registry, state);
+    let (candidates, _) = fold.filter(&cfg, ctx.start(), request.epoch, &candidates);
     let (max_validators, incumbents) = if ctx.seat_mode == RuleMode::Prior {
         (cfg.max_members, vec![])
     } else {
@@ -196,7 +434,10 @@ fn inner(
             save(state, &next)?;
         }
     }
-    result.promoted = promote(request.epoch, state)?;
+    result.promoted = promote(request, state)?;
+    if schedule_eviction(request, state)? {
+        return Ok(result);
+    }
     let ctx = resolve(state)?;
     let cfg = ctx.config();
     let activate = if ctx.standard_mode == RuleMode::Prior {
@@ -215,10 +456,7 @@ fn inner(
     {
         return Ok(result);
     }
-    let registry = state.get(&[b"meta", registry::META_KEY]).map_or_else(
-        || Ok(Registry::default()),
-        |raw| tagged("validator registry corrupt", Registry::from_bytes(raw)),
-    )?;
+    let registry = load_registry(state, "validator registry corrupt")?;
     let Policy::Bonded(policy) = request.policy else {
         return Ok(result);
     };
@@ -252,6 +490,9 @@ fn inner(
             &snapshot.validators,
         ),
     )?;
+    if update.check_set_at(request.chain, request.epoch).is_err() {
+        return Ok(result);
+    }
     set(state, update::PENDING_KEY, update.to_bytes())?;
     result.scheduled = Some(update);
     Ok(result)

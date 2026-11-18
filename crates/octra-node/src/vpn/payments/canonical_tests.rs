@@ -336,6 +336,7 @@ impl Fixture {
     ) -> executor::Native {
         executor::Native::new(
             executor::Config {
+                profile_hash: std::sync::Arc::new(|_: &[u8], _: i64| Err("no profile".to_string())),
                 graph,
                 protocol,
                 profile: Profile {

@@ -30,6 +30,8 @@ pub struct Request<'a> {
     pub emission: &'a epoch_footer::Policy,
     pub reward: &'a Attribution,
     pub validator_keys: &'a [(Vec<u8>, Vec<u8>)],
+    /// Seatless execution profile rules for this epoch and its parent.
+    pub execution: &'a epoch_footer::Execution,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Refusal {
@@ -147,6 +149,10 @@ pub(crate) fn execute_checked(
     mut process: impl FnMut(&Transaction, &mut Ledger, &mut StateBatch) -> Result<Effect, Error>,
     verify: impl FnOnce(&Executed) -> Result<(), Error>,
 ) -> Result<Executed, Error> {
+    // Native run_core_with: the parent's execution marker is checked before
+    // the transaction envelope.
+    epoch_footer::check_parent(request.validators.epoch, request.execution, state)
+        .map_err(|e| Error(e.0))?;
     let envelope = request.envelope;
     transaction::check_compute(envelope.compute, envelope.settle, transactions)
         .and_then(|()| transaction::check_envelopes(envelope.envelope, transactions))
@@ -185,6 +191,7 @@ pub(crate) fn execute_checked(
         let context = fold
             .resolve(epoch, state)
             .map_err(|e| Error(format!("validator set fold rule rejected: {e}")))?;
+        validator_epoch::prepare_penalties(&request.validators, state)?;
         let mut artifacts = Artifacts {
             transaction_count: transactions.len(),
             ..Artifacts::default()
@@ -240,6 +247,7 @@ pub(crate) fn execute_checked(
         let footer = epoch_footer::apply(
             request.emission,
             &epoch_footer::Request {
+                execution: request.execution,
                 epoch,
                 reward: request.reward,
                 validator_keys: request.validator_keys,

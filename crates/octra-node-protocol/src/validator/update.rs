@@ -115,6 +115,31 @@ impl ValidatorUpdate {
         let next = expected.validator_set().map_err(|e| Error(e.to_string()))?;
         Ok((next, weight))
     }
+    /// Native `check_eviction_state`: a stored eviction must be exactly the
+    /// removal, from the current voting set, of the offenders the registry
+    /// names at this epoch.
+    pub fn check_eviction_state(
+        &self,
+        chain: &[u8],
+        epoch: i64,
+        registry: &super::registry::Registry,
+        current: &ValidatorSet,
+    ) -> Result<(ValidatorSet, BigInt), Error> {
+        if epoch < 0 || epoch == (1 << 62) - 1 || !seatless_at(chain, epoch) {
+            return Err("validator eviction state epoch is not active".into());
+        }
+        let Some(eviction) = &self.eviction else {
+            return Err("validator eviction witness is missing".into());
+        };
+        if eviction.epoch != epoch || !current.same_voting_set(&eviction.source) {
+            return Err("validator eviction source differs from current voting set".into());
+        }
+        let offenders = eviction_offenders(chain, epoch, registry, current)?;
+        if eviction.offenders != offenders {
+            return Err("validator eviction offenders differ from registry".into());
+        }
+        self.check_eviction(epoch, &offenders, current)
+    }
     /// Whether the set this update schedules may vote at `epoch`.
     pub fn check_set_at(&self, chain: &[u8], epoch: i64) -> Result<(), Error> {
         let policy = QuorumPolicy::for_chain(chain);
@@ -232,4 +257,42 @@ impl LegacyReady {
         out.push(b'}');
         out
     }
+}
+
+/// Native `Rule_graph.seatless_at`: the activation alone, by chain.
+pub fn seatless_at(chain: &[u8], epoch: i64) -> bool {
+    crate::consensus::policy::seatless_epoch(chain).is_some_and(|first| epoch >= first)
+}
+/// Native `eviction_offenders`: current voters with a slash applied by this
+/// epoch, ordered and unique; none before seatless.
+pub fn eviction_offenders(
+    chain: &[u8],
+    epoch: i64,
+    registry: &super::registry::Registry,
+    current: &ValidatorSet,
+) -> Result<Vec<Vec<u8>>, Error> {
+    if !seatless_at(chain, epoch) {
+        return Ok(vec![]);
+    }
+    let current = ValidatorSet {
+        authors: None,
+        ..current.clone()
+    }
+    .validate_shape()
+    .map_err(|e| Error(e.message().to_string()))?;
+    let mut offenders: Vec<Vec<u8>> = registry
+        .slashes()
+        .iter()
+        .filter(|record| {
+            record.applied_epoch <= epoch
+                && current
+                    .weights
+                    .iter()
+                    .any(|(address, _)| **address == *record.offender)
+        })
+        .map(|record| record.offender.clone())
+        .collect();
+    offenders.sort();
+    offenders.dedup();
+    Ok(offenders)
 }

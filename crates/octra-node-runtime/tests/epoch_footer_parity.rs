@@ -80,6 +80,7 @@ fn native_epoch_footer_matches_accounts_keys_supply_metadata_and_rollback() {
             .map(|v| (bytes(&v[0]), bytes(&v[1])))
             .collect::<Vec<_>>();
         let request = Request {
+            execution: &octra_node_runtime::epoch_footer::Execution::default(),
             epoch: input["epoch"].as_i64().unwrap(),
             reward: &reward,
             validator_keys: &fallback,

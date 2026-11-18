@@ -216,7 +216,9 @@ impl Node for Host {
         let previous = hex::encode(base.cursor.state_root.0);
         let batch = epoch_execution::execute(
             &epoch_execution::Request {
+                execution: &octra_node_runtime::epoch_footer::Execution::default(),
                 validators: validator_epoch::Request {
+                    voting_set: None,
                     chain: self.store.chain().chain_id.as_bytes(),
                     epoch,
                     policy: &octra_node_protocol::validator::policy::Policy::Inactive,

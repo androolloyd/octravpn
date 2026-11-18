@@ -242,7 +242,9 @@ fn assert_bft_epochs(fixture: &Value) {
         };
         let result = epoch_execution::execute(
             &Request {
+                execution: &octra_node_runtime::epoch_footer::Execution::default(),
                 validators: validator_epoch::Request {
+                    voting_set: None,
                     chain: b"epoch-circle-fixture",
                     epoch,
                     policy: &Policy::Inactive,
