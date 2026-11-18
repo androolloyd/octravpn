@@ -3,8 +3,8 @@
 //! Native integer and Q16 vector execution. Prior integer loops read live memory;
 //! activated integer work snapshots operands before charging and mutating them.
 use super::{
-    data, work, BigInt, Budget, Exec, Instruction as I, IntegerOp, Machine, Request, Trap,
-    Unavailable, Value,
+    data, scalar_work, work, BigInt, Budget, Exec, Instruction as I, IntegerOp, Machine, Request,
+    Trap, Unavailable, Value,
 };
 use num_traits::{Signed, Zero};
 use octra_node_protocol::{native_base64, octb::q16};
@@ -60,13 +60,38 @@ impl Machine {
     }
     fn memory_number(&mut self, address: i64, budget: &mut Option<&mut Budget>) -> Exec<BigInt> {
         let value = self.memory.get(&address).cloned().unwrap_or_default();
+        // Native `read_number` under `scalar_work`.
+        if self.options.scalar_work {
+            let ok = match &value {
+                Value::String(raw) => {
+                    scalar_work::text_ok(raw) && self.scalar_charge(&scalar_work::parse(raw.len()))
+                }
+                value => value.scalar_valid(),
+            };
+            if !ok {
+                return Err(Trap::Exception);
+            }
+        }
         if let (Some(b), Value::String(raw)) = (budget, &value) {
             let (base, requests) = work::parsing(raw.len() as i64, 1).ok_or(Trap::Exception)?;
             self.effort = b
                 .charge(self.effort, self.options.limit, base, &requests)
                 .ok_or(Trap::Exception)?;
         }
-        Ok(value.number().into_owned())
+        let number = value.number().into_owned();
+        if self.options.scalar_work && !scalar_work::valid(&number) {
+            return Err(Trap::Exception);
+        }
+        Ok(number)
+    }
+    /// Native `store_number`: a computed integer past the width limit is an
+    /// exception, after the cells before it were written.
+    fn store_number(&mut self, index: i64, number: BigInt) -> Exec {
+        if self.options.scalar_work && !scalar_work::valid(&number) {
+            return Err(Trap::Exception);
+        }
+        self.memory_set(index, Value::int(number));
+        Ok(())
     }
     fn memory_pair(
         &mut self,
@@ -141,10 +166,11 @@ impl Machine {
             })
             .collect()
     }
-    fn write_q16(&mut self, base: i64, values: Vec<BigInt>) {
+    fn write_q16(&mut self, base: i64, values: Vec<BigInt>) -> Exec {
         for (index, value) in values.into_iter().enumerate() {
-            self.memory_set(base + index as i64, Value::int(value));
+            self.store_number(base + index as i64, value)?;
         }
+        Ok(())
     }
     // Positional operand names match the native instruction layout.
     #[allow(clippy::many_single_char_names)]
@@ -186,7 +212,7 @@ impl Machine {
                         self.vector_pair(IntegerOp::Mul, &saved, index, &addresses, budget)?;
                     acc += a * b;
                 }
-                self.memory_set(data::add(dest, row * n + column), Value::int(acc));
+                self.store_number(data::add(dest, row * n + column), acc)?;
             }
         }
         Ok(())
@@ -229,7 +255,7 @@ impl Machine {
         if !result.iter().all(q16::in_range) {
             return Err(Trap::Refused);
         }
-        self.write_q16(dest, result);
+        self.write_q16(dest, result)?;
         Ok(())
     }
     fn load_work(&self, count: i64, scale: &BigInt, budgeted: bool) -> Exec<BigInt> {
@@ -358,7 +384,7 @@ impl Machine {
             if !values.iter().all(q16::in_range) {
                 return Err(Trap::Refused);
             }
-            self.write_q16(dest, values);
+            self.write_q16(dest, values)?;
         }
         Ok(())
     }
@@ -401,7 +427,7 @@ impl Machine {
             width as usize,
         )
         .ok_or(Trap::Refused)?;
-        self.write_q16(dest, result);
+        self.write_q16(dest, result)?;
         Ok(())
     }
     // Positional operand names match the native instruction layout.
@@ -479,7 +505,7 @@ impl Machine {
                         product,
                     )
                     .ok_or(Trap::Refused)?;
-                    self.write_q16(dest, values);
+                    self.write_q16(dest, values)?;
                 } else {
                     let addresses = |index| (data::add(dest, index), data::add(source, index));
                     let kind = if product {
@@ -547,7 +573,7 @@ impl Machine {
                     values.iter().map(q16::silu).collect()
                 }
                 .ok_or(Trap::Refused)?;
-                self.write_q16(base, result);
+                self.write_q16(base, result)?;
             }
             I::LayernormQ16Inplace(base, count, gamma, beta) => {
                 let base = self.index(*base)?;
@@ -566,7 +592,7 @@ impl Machine {
                     self.options.math,
                 )
                 .ok_or(Trap::Refused)?;
-                self.write_q16(base, result);
+                self.write_q16(base, result)?;
             }
             I::RmsnormQ16Inplace(base, count, gamma) => {
                 let base = self.index(*base)?;
@@ -583,7 +609,7 @@ impl Machine {
                     self.options.math,
                 )
                 .ok_or(Trap::Refused)?;
-                self.write_q16(base, result);
+                self.write_q16(base, result)?;
             }
             I::RopeApplyQ16(base, count, position, scale) => {
                 let base = self.index(*base)?;
@@ -597,7 +623,7 @@ impl Machine {
                 self.vector_space(3 * array_words(count) + array_words(count / 2), budget)?;
                 let result = q16::rope(&self.read_q16(base, count)?, &scale, position)
                     .ok_or(Trap::Refused)?;
-                self.write_q16(base, result);
+                self.write_q16(base, result)?;
             }
             I::AppendVecQ16(dest, position, source, count) => {
                 let dest = self.index(*dest)?;
@@ -624,7 +650,7 @@ impl Machine {
                 self.charge(count)?;
                 self.vector_arrays(2, count, budget)?;
                 let values = self.read_q16(source, count)?;
-                self.write_q16(target, values);
+                self.write_q16(target, values)?;
             }
             I::ArgmaxQ16(dest, base, count) => {
                 let base = self.index(*base)?;

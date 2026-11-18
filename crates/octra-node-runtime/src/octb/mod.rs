@@ -20,6 +20,7 @@ use num_traits::{Signed, ToPrimitive, Zero};
 use octra_node_protocol::{
     circle_storage::StorageTable,
     octb::{
+        scalar_work,
         work::{self, Budget, IntegerOp, Request},
         Instruction, StorageKind,
     },
@@ -80,6 +81,8 @@ pub struct Options {
     pub strict: bool,
     pub typed_bytes: bool,
     pub integer_work: bool,
+    /// Rule `scalar_work`: integer width limits and numeric text work.
+    pub scalar_work: bool,
     pub fhe_work: bool,
     pub object_cost: bool,
     pub object_quorum: octra_node_protocol::circle_object::Quorum,
@@ -100,6 +103,7 @@ impl Default for Options {
             strict: false,
             typed_bytes: false,
             integer_work: false,
+            scalar_work: false,
             fhe_work: false,
             object_cost: false,
             object_quorum: octra_node_protocol::circle_object::Quorum::Machine,
@@ -318,12 +322,23 @@ impl Machine {
         }
     }
     fn get(&self, reg: u8) -> Exec<&Value> {
-        self.regs.get(usize::from(reg)).ok_or(Trap::Exception)
+        let value = self.regs.get(usize::from(reg)).ok_or(Trap::Exception)?;
+        if self.options.scalar_work && !value.scalar_valid() {
+            return Err(Trap::Exception);
+        }
+        Ok(value)
     }
     fn set(&mut self, reg: u8, value: Value) -> Exec {
+        if self.options.scalar_work && !value.scalar_valid() {
+            return Err(Trap::Exception);
+        }
         let cell = self.regs.get_mut(usize::from(reg)).ok_or(Trap::Exception)?;
         *cell = value;
         Ok(())
+    }
+    /// Native `scalar_charge`: a no-op before `scalar_work`.
+    fn scalar_charge(&mut self, cost: &BigInt) -> bool {
+        !self.options.scalar_work || self.charge_integer(cost).is_ok()
     }
     fn integer(&self, reg: u8) -> Exec<BigInt> {
         Ok(self.get(reg)?.number().into_owned())
@@ -363,6 +378,33 @@ impl Machine {
             }
             None => self.charge(prior),
         }
+    }
+    /// Native `load_storage_value` for a declared kind. Under `scalar_work` the
+    /// stored text is charged first (parsed for numeric kinds, scanned
+    /// otherwise) and a decoded integer must fit the width limit.
+    fn load_typed(&mut self, key: &[u8], kind: StorageKind) -> Option<Value> {
+        let Some(raw) = self.storage.get(key) else {
+            return Some(Value::storage_default(kind));
+        };
+        let numeric = matches!(
+            kind,
+            StorageKind::Int | StorageKind::U64 | StorageKind::U128 | StorageKind::U256
+        );
+        let length = raw.len();
+        let fits = scalar_work::text_ok(raw);
+        let decoded = Value::decode_storage(kind, raw);
+        let cost = if numeric {
+            scalar_work::parse(length)
+        } else {
+            scalar_work::scan(length)
+        };
+        if self.options.scalar_work && numeric && !fits {
+            return None;
+        }
+        if !self.scalar_charge(&cost) {
+            return None;
+        }
+        decoded.filter(|value| !self.options.scalar_work || value.scalar_valid())
     }
     fn memory_set(&mut self, index: i64, value: Value) {
         self.memory.insert(index, value);
@@ -428,15 +470,20 @@ impl Machine {
         if self.output_ready {
             return Ok(());
         }
-        if let Some(b) = budget {
-            self.effort = crate::circle_receipt::output_value(
-                b,
-                &self.regs[0],
-                self.effort,
-                self.options.limit,
-            )
-            .ok_or(Trap::Refused)?;
+        let mut used = self.effort;
+        if self.options.scalar_work && self.regs[0].numeric() {
+            let number = self.regs[0].number();
+            if !scalar_work::valid(&number) {
+                return Err(Trap::Refused);
+            }
+            used = work::charge_integer(used, &scalar_work::decimal(&number), self.options.limit)
+                .ok_or(Trap::Refused)?;
         }
+        if let Some(b) = budget {
+            used = crate::circle_receipt::output_value(b, &self.regs[0], used, self.options.limit)
+                .ok_or(Trap::Refused)?;
+        }
+        self.effort = used;
         self.output_ready = true;
         Ok(())
     }
@@ -572,15 +619,8 @@ impl Machine {
             I::Ldi(d, v) => self.set(*d, Value::from_constant(v))?,
             I::Mov(d, a) => self.set(*d, self.get(*a)?.clone())?,
             I::Sload(d, key) => {
-                let value = match self.options.storage_kinds.get(key.as_ref()) {
-                    Some(kind) => self
-                        .storage
-                        .get(key)
-                        .map_or_else(
-                            || Some(Value::storage_default(*kind)),
-                            |v| Value::decode_storage(*kind, v),
-                        )
-                        .ok_or(Trap::Refused)?,
+                let value = match self.options.storage_kinds.get(key.as_ref()).copied() {
+                    Some(kind) => self.load_typed(key, kind).ok_or(Trap::Refused)?,
                     None => Value::string(
                         self.storage
                             .get(key)
@@ -691,7 +731,7 @@ impl Machine {
                 };
                 let output = self.regs[0].clone();
                 self.regs = values;
-                self.set(reg, output)?;
+                *self.regs.get_mut(usize::from(reg)).ok_or(Trap::Exception)? = output;
                 self.pc = pc;
             }
             I::CallInt(reg, target) => {

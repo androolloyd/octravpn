@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
-use super::{work, Budget, Exec, Instruction as I, Machine, Request, Trap, Value};
+use super::{scalar_work, work, Budget, Exec, Instruction as I, Machine, Request, Trap, Value};
 use octra_node_protocol::native_integer::parse_integer;
 use sha2::{Digest, Sha256};
 
@@ -99,10 +99,22 @@ impl Machine {
             self.effort = b
                 .charge(self.effort, self.options.limit, cost, &requests)
                 .ok_or(Trap::Refused)?;
+            if self.options.scalar_work {
+                for part in parts(input) {
+                    if part.len() > scalar_work::TEXT_LIMIT
+                        || !self.scalar_charge(&scalar_work::parse(part.len()))
+                    {
+                        return Err(Trap::Refused);
+                    }
+                }
+            }
             let values: Vec<_> = parts(input)
                 .map(|v| parse_integer(v).or_else(|| (!self.options.strict).then(Default::default)))
                 .collect::<Option<_>>()
                 .ok_or(Trap::Refused)?;
+            if self.options.scalar_work && !values.iter().all(scalar_work::valid) {
+                return Err(Trap::Refused);
+            }
             for (index, value) in values.into_iter().enumerate() {
                 self.memory_set(base + index as i64, Value::int(value));
             }

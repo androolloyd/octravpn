@@ -125,6 +125,10 @@ impl Value {
             Constant::Addr(v) => Self::Address(v.clone()),
         }
     }
+    /// Under `scalar_work`, an integer value may be at most 65,536 bits wide.
+    pub fn scalar_valid(&self) -> bool {
+        !self.numeric() || octra_node_protocol::octb::scalar_work::valid(&self.number())
+    }
     pub fn numeric(&self) -> bool {
         matches!(
             self,
