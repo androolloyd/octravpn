@@ -39,6 +39,9 @@ python3 scripts/node-port/candidate-<name>-oracle.py \
 | Compiler and publication, VM roots | `lib/vm` | unchanged | 101 + 22 + 56 cases, unchanged upstream for these inputs |
 | Eviction witness on validator updates | `validator_set_update` | `control_payload.rs`, `validator/update.rs` | 80 constructions, 540 stored forms |
 | Sync anchor steps with an eviction; checkpoint voting-set check | `sync_anchor`, `state_sync_checkpoint` | `state_sync/anchor.rs`, `checkpoint.rs` | historical state-sync vectors pass; the eviction step's parts are captured, its composition is not |
+| Epoch execution under seatless: execution marker, penalties, pending-set promotion against the finalizing set, eviction and wait, snapshot skips | `epoch_exec` | protocol `execution_marker`, `validator/update.rs`; runtime `epoch_footer.rs`, `validator_epoch/advance.rs`, `epoch_execution.rs` | 785 advance cases on the devnet chain (`candidate-validator-epoch-oracle`): every round's error, root and meta |
+| Reward exclusion and burn; supply meta; marker write and parent check | `epoch_exec`, `consensus_epoch_apply_footer` | protocol `epoch_rewards.rs`; runtime `epoch_footer.rs` | 1,401 footer cases (`candidate-footer-oracle`) |
+| Validator transactions under seatless: penalties, blocking-weight registry check, evidence retention and set check | `epoch_exec`, `validator_registry`, `validator_entry` | runtime `validator_transaction.rs`, `validator_transaction/{ready,weight}.rs`; protocol `validator/{admission,registry}.rs` | 232 bond/exit/withdraw/evidence and 143 readiness sequences (`candidate-validator-transaction-oracle`, `candidate-validator-ready-oracle`) |
 | VM integer width and numeric text work (`scalar_work`) | `scalar_work`, `contract_vm` | `octb/scalar_work.rs`; runtime `octb/{mod,meter,vector,data}.rs` | 13,528 historical VM cases unchanged without the rule; with it 11,020 change and Rust matches all; 7,280 new cases at the limits (`candidate-octb-scalar-oracle`) |
 
 ## What devnet runs
@@ -77,9 +80,8 @@ In the order an observer needs them to follow devnet past epoch 1,845,000:
    admission, `circle_exec`, `wasm_call`; the VM itself is done);
    recorded results for failed programs and circle calls
    (`program_result`); child programs from signed source
-   (`program_spawn`); validator eviction, slashing and the per-epoch
-   execution profile in `epoch_exec` (+657); reward attribution under
-   seatless voting; `tx_payload`, `tx_envelope`, `tx_savepoint`,
+   (`program_spawn`); `tx_payload`, `tx_envelope` (charged program
+   rejections), `tx_savepoint`,
    receipts with charged rejections; `private_ledger`,
    `private_transition`, `fhe_calc`; `circle_exec`, `wasm_call`, the
    Circle WASM host and worker. `SOURCE_STAMP` already names the new
