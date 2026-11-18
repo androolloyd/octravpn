@@ -39,6 +39,29 @@ python3 scripts/node-port/candidate-<name>-oracle.py \
 | Compiler and publication, VM roots | `lib/vm` | unchanged | 101 + 22 + 56 cases, unchanged upstream for these inputs |
 | Eviction witness on validator updates | `validator_set_update` | `control_payload.rs`, `validator/update.rs` | 80 constructions, 540 stored forms |
 | Sync anchor steps with an eviction; checkpoint voting-set check | `sync_anchor`, `state_sync_checkpoint` | `state_sync/anchor.rs`, `checkpoint.rs` | historical state-sync vectors pass; the eviction step's parts are captured, its composition is not |
+| VM integer width and numeric text work (`scalar_work`) | `scalar_work`, `contract_vm` | `octb/scalar_work.rs`; runtime `octb/{mod,meter,vector,data}.rs` | 13,528 historical VM cases unchanged without the rule; with it 11,020 change and Rust matches all; 7,280 new cases at the limits (`candidate-octb-scalar-oracle`) |
+
+## What devnet runs
+
+Of 18,900 transactions in the ~1,400 epochs before 1,866,522: 18,882
+`validator_ready`, 9 program calls, 5 transfers, and one each of
+`stealth`, `encrypt`, `key_switch` and `validator_bond`. Epoch execution
+(execution marker, penalties, reward exclusions, pending-set promotion,
+eviction scheduling, the weight check on `validator_ready`) therefore
+decides every state root and comes first; the program-call pricing of
+`scalar_work` next.
+
+## Native build at the candidate
+
+The VM and runtime oracles need the full upstream tree. The image
+`octra-candidate-native:8f785a93` holds it built with upstream's own
+storage wrapper (`controls/lib/gc_build.py`, which installs its patched
+irmin), `mcl` and a Rust toolchain for the Circle WASM host:
+`scripts/node-port/candidate-native-image.sh <lite_node clone>`.
+`scripts/node-port/candidate_native.py` runs an oracle against it after
+checking every source file against `source-map-candidate.json`.
+Execution time slices (`exec_resource`) only shape the proposer's
+preview; replaying a committed epoch still executes every transaction.
 
 ## Not ported yet
 
@@ -49,8 +72,9 @@ In the order an observer needs them to follow devnet past epoch 1,845,000:
    see 2. The validator source set at the durable head
    (`consensus_parent_commit.set_at_head`) belongs with the driver.
 2. **Execution** — everything that changes a state root:
-   scalar-work metering (`scalar_work`, `contract_vm` +208, `contract`,
-   `code_check`, `program_type_flow`, `bytecode`, `program_package`);
+   scalar-work pricing outside the VM (`contract` call/deploy/view,
+   `code_check`, `bytecode`, `program_package`, `call_plan`, circle code
+   admission, `circle_exec`, `wasm_call`; the VM itself is done);
    recorded results for failed programs and circle calls
    (`program_result`); child programs from signed source
    (`program_spawn`); validator eviction, slashing and the per-epoch
