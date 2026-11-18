@@ -165,6 +165,8 @@ fn native_bft_epoch_effects_roots_keys_rewards_and_atomic_failure() {
             validator_keys: &[],
         };
         let mut validator = validator_transaction::Host {
+            voting_set: None,
+            members: &[],
             chain,
             epoch,
             policy: &policy,

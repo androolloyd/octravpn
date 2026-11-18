@@ -181,6 +181,9 @@ impl<F: EpochFold> Host<'_, F> {
         state: &mut StateBatch,
     ) -> Result<(), Failure> {
         const TAG: &str = "validator_ready_rejected";
+        if self.penalized(&tx.from, state) {
+            return Err(rejected(TAG, "validator was disqualified by evidence"));
+        }
         if tx.from != tx.to {
             return Err(rejected(
                 TAG,
@@ -231,10 +234,16 @@ impl<F: EpochFold> Host<'_, F> {
                 .as_ref()
                 .is_some_and(|s| !s.allows(&ctx.config(), ctx.start(), self.epoch, &tx.from))
         {
-            prior
+            prior.clone()
         } else {
             marked
         };
+        if let Policy::Bonded(policy) = self.policy {
+            checked(
+                TAG,
+                self.check_registry_change(policy, &prior, &next, fold.as_ref(), state)?,
+            )?;
+        }
         checked(
             "insufficient_balance",
             ledger.debit(&tx.from, &tx.ou, tx.nonce, None),

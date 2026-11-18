@@ -158,6 +158,8 @@ impl Native {
         .with_keys(key_artifacts);
         let root_at = |head| roots.get(&head).cloned().flatten();
         let mut validators = validator_transaction::Host {
+            voting_set: Some(finalizing_set),
+            members: &members,
             chain: &header.chain_id,
             epoch,
             policy: &config.validators,

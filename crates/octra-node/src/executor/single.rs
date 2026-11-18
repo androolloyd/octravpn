@@ -231,6 +231,8 @@ impl Native {
         private.ready = ready;
         let root_at = |height| ready_roots.get(&height).cloned().flatten();
         let mut validators = validator_transaction::Host {
+            voting_set: None,
+            members: &[],
             chain: self.config.graph.chain_id(),
             epoch,
             policy: &self.config.validators,

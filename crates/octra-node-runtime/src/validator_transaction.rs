@@ -3,6 +3,7 @@
 //! Validator stake operations inside the native sender/savepoint loop.
 //! The trusted epoch fold supplies rule modes and canonical membership.
 mod ready;
+mod weight;
 use crate::{
     execution::{Completion, Error, OperationHost, Rejection, Route},
     state_batch::StateBatch,
@@ -40,6 +41,9 @@ pub struct Host<'a, F> {
     pub policy: &'a Policy,
     pub fold: F,
     pub ready: ReadyEnvironment<'a>,
+    /// The set that finalized this epoch and its members (`env.validator_addrs`).
+    pub voting_set: Option<&'a octra_node_protocol::consensus::ValidatorSet>,
+    pub members: &'a [Vec<u8>],
 }
 enum Failure {
     Rejected(&'static str, String),
@@ -128,6 +132,9 @@ impl<F: EpochFold> Host<'_, F> {
                     return Err(rejected(tag, "recipient must be validator escrow"));
                 }
                 let payload = checked("malformed_transaction", Bond::parse(tx.message.as_deref()))?;
+                if self.penalized(&tx.from, state) {
+                    return Err(rejected(tag, "validator was disqualified by evidence"));
+                }
                 let registry = load(state)?;
                 let next = checked(
                     tag,
@@ -141,6 +148,10 @@ impl<F: EpochFold> Host<'_, F> {
                         tx.nonce,
                         &payload,
                     ),
+                )?;
+                checked(
+                    tag,
+                    self.check_registry_change(policy, &registry, &next, None, state)?,
                 )?;
                 checked(
                     "insufficient_balance",
@@ -182,10 +193,14 @@ impl<F: EpochFold> Host<'_, F> {
                 };
                 let registry = load(state)?;
                 let (next, amount) = match fold {
-                    None => (
-                        checked(tag, registry.request_exit(self.epoch, &tx.from))?,
-                        None,
-                    ),
+                    None => {
+                        let next = checked(tag, registry.request_exit(self.epoch, &tx.from))?;
+                        checked(
+                            tag,
+                            self.check_registry_change(policy, &registry, &next, None, state)?,
+                        )?;
+                        (next, None)
+                    }
                     Some(fold) => {
                         let (r, amount) = checked(
                             tag,
@@ -235,8 +250,27 @@ impl<F: EpochFold> Host<'_, F> {
                     tag,
                     evidence::verify(self.chain, self.epoch, window, candidate, &proof),
                 )?;
-                let (next, amount) =
-                    checked(tag, registry.apply_slash(self.epoch, window, &evidence))?;
+                let seatless =
+                    octra_node_protocol::validator::update::seatless_at(self.chain, self.epoch);
+                crate::validator_epoch::remember_penalties_at(
+                    self.chain, self.epoch, &registry, state,
+                )
+                .map_err(Failure::Host)?;
+                let retain: Vec<Vec<u8>> = if seatless {
+                    checked(tag, self.voting_set_now())?
+                        .validators
+                        .iter()
+                        .map(|v| v.address.clone())
+                        .collect()
+                } else {
+                    vec![]
+                };
+                let (next, amount) = checked(
+                    tag,
+                    registry
+                        .apply_slash_retaining(self.epoch, window, &evidence, seatless, &retain),
+                )?;
+                checked(tag, self.check_evidence_set(&next))?;
                 let (total, retired) = checked(tag, supply(state))?;
                 if total < amount {
                     return Err(rejected(tag, "validator slash exceeds total supply"));
@@ -250,6 +284,12 @@ impl<F: EpochFold> Host<'_, F> {
                     ledger.debit_amount_only(&escrow, &amount),
                 )?;
                 save(state, &next)?;
+                if seatless {
+                    let key = crate::epoch_footer::penalty_key(evidence.offender());
+                    if state.get(&[b"meta", &key]).is_none() {
+                        set(state, &key, evidence.id().to_vec())?;
+                    }
+                }
                 set(
                     state,
                     b"total_supply",

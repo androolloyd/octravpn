@@ -107,8 +107,17 @@ pub(crate) fn remember_penalties(
     registry: &Registry,
     state: &mut StateBatch,
 ) -> Result<(), Error> {
+    remember_penalties_at(request.chain, request.epoch, registry, state)
+}
+/// [`remember_penalties`] for a chain and epoch.
+pub(crate) fn remember_penalties_at(
+    chain: &[u8],
+    epoch: i64,
+    registry: &Registry,
+    state: &mut StateBatch,
+) -> Result<(), Error> {
     use crate::epoch_footer::{penalty_key, PENALTY_EPOCH};
-    if !seatless(request) {
+    if !update::seatless_at(chain, epoch) {
         return Ok(());
     }
     if let Some(raw) = state.get(&[b"meta", PENALTY_EPOCH]) {
@@ -116,21 +125,21 @@ pub(crate) fn remember_penalties(
             .ok()
             .and_then(|text| text.parse().ok())
             .ok_or_else(|| error("validator penalty epoch is invalid"))?;
-        return if applied < 0 || applied > request.epoch {
+        return if applied < 0 || applied > epoch {
             Err(error("validator penalty epoch differs"))
         } else {
             Ok(())
         };
     }
     for record in registry.slashes() {
-        if record.applied_epoch <= request.epoch {
+        if record.applied_epoch <= epoch {
             let key = penalty_key(&record.offender);
             if state.get(&[b"meta", &key]).is_none() {
                 set(state, &key, record.id.clone())?;
             }
         }
     }
-    set(state, PENALTY_EPOCH, request.epoch.to_string().into_bytes())
+    set(state, PENALTY_EPOCH, epoch.to_string().into_bytes())
 }
 /// Native `prepare_validator_penalties`, run before an epoch's transactions.
 pub fn prepare_penalties(request: &Request<'_>, state: &mut StateBatch) -> Result<(), Error> {

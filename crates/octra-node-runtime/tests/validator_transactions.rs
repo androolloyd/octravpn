@@ -105,6 +105,31 @@ fn execute(
             )
             .unwrap();
     }
+    if let Some(entries) = round["registry"].as_array() {
+        // Candidate fixtures seed ready candidates; the native canonical form
+        // is the registry's own encoding.
+        let candidates: Vec<Value> = entries
+            .iter()
+            .map(|c| {
+                let id = c["id"].as_i64().unwrap();
+                json!({"address": String::from_utf8(address(id)).unwrap(),
+                    "consensus_pubkey": STANDARD.encode(SigningKey::from_bytes(&[id as u8; 32]).verifying_key().to_bytes()),
+                    "bond": c["bond"], "bonded_epoch": "0", "ready_epoch": "0", "exit_epoch": null})
+            })
+            .collect();
+        let raw_registry = serde_json::to_vec(
+            &json!({"standard": "bonded_stake", "candidates": candidates, "slashes": []}),
+        )
+        .unwrap();
+        let registry = registry::Registry::from_bytes(&raw_registry).unwrap();
+        store
+            .set(&[b"meta", registry::META_KEY], registry.to_bytes())
+            .unwrap();
+    }
+    if let Some(id) = round["penalize"].as_i64() {
+        let key = octra_node_runtime::epoch_footer::penalty_key(&address(id));
+        store.set(&[b"meta", &key], b"fixture-id".to_vec()).unwrap();
+    }
     if round["drain_escrow"] == true {
         let escrow = registry::escrow_address();
         let amount = ledger.account(&escrow).unwrap().balance.clone();
@@ -141,7 +166,36 @@ fn execute(
             RuleMode::Prior
         }
     };
+    let voting = round["voting"].as_array().and_then(|members| {
+        octra_node_protocol::consensus::ValidatorSet::weighted(
+            members
+                .iter()
+                .map(|m| {
+                    let id = m["id"].as_i64().unwrap();
+                    (
+                        octra_node_protocol::consensus::Validator {
+                            address: address(id).as_slice().into(),
+                            pubkey: SigningKey::from_bytes(&[id as u8; 32])
+                                .verifying_key()
+                                .to_bytes()
+                                .as_slice()
+                                .into(),
+                        },
+                        m["weight"].as_str().unwrap().parse().unwrap(),
+                    )
+                })
+                .collect(),
+        )
+        .ok()
+    });
+    let members: Vec<Vec<u8>> = round["legacy_active"]
+        .as_array()
+        .map_or_else(Vec::new, |ids| {
+            ids.iter().map(|v| address(v.as_i64().unwrap())).collect()
+        });
     let host = Host {
+        voting_set: voting.as_ref(),
+        members: &members,
         chain: &chain,
         epoch: round["epoch"].as_i64().unwrap(),
         policy: &policy,
@@ -548,4 +602,188 @@ async fn duty_readiness_and_exex_survive_canonical_restart() {
         "confirmed"
     );
     validator_restart(case).await;
+}
+
+/// Candidate release `8f785a93` on the devnet chain: the historical
+/// sequences either side of seatless activation, with and without the
+/// finalizing set and a signed parent, plus penalties, blocking weight and
+/// evidence against the voting set.
+#[test]
+fn candidate_validator_transactions_under_seatless() {
+    let fixtures: Value = serde_json::from_slice(include_bytes!(
+        "fixtures/validator-transactions-candidate.json"
+    ))
+    .unwrap();
+    let pin: Value = serde_json::from_slice(include_bytes!(
+        "../../../docs/rust-node/source-map-candidate.json"
+    ))
+    .unwrap();
+    assert_eq!(fixtures["upstream_commit"], pin["upstream_commit"]);
+    let digest = |raw: &[u8]| hex::encode(<sha2::Sha256 as sha2::Digest>::digest(raw));
+    assert_eq!(
+        fixtures["oracle_sha256"],
+        digest(include_bytes!(
+            "../../../scripts/node-port/candidate-validator-transaction-oracle.ml"
+        ))
+    );
+    assert_eq!(
+        fixtures["generator_sha256"],
+        digest(include_bytes!(
+            "../../../scripts/node-port/candidate-validator-transaction-oracle.py"
+        ))
+    );
+    let mut failures = Vec::new();
+    for (index, case) in fixtures["cases"].as_array().unwrap().iter().enumerate() {
+        let input = &case["input"];
+        let (mut ledger, mut store) = initial(input);
+        for (step, (round, expected)) in input["rounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(case["expected"].as_array().unwrap())
+            .enumerate()
+        {
+            let mut round = round.clone();
+            round["parent_wire"] = expected["parent"].clone();
+            let mut actual = execute(
+                input,
+                &round,
+                &expected["transactions"],
+                &mut ledger,
+                &mut store,
+            );
+            actual["parent"] = expected["parent"].clone();
+            let mut keys: Vec<Vec<u8>> = vec![
+                b"validator_penalty_epoch".to_vec(),
+                b"total_supply".to_vec(),
+            ];
+            keys.extend(
+                (1..=6).map(|id| octra_node_runtime::epoch_footer::penalty_key(&address(id))),
+            );
+            actual["meta"] = json!(keys
+                .iter()
+                .map(|k| store.get(&[b"meta", k]).map(b64))
+                .collect::<Vec<_>>());
+            if actual != *expected {
+                let fields: Vec<_> = actual
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .filter(|(k, v)| **v != expected[*k])
+                    .map(|(k, v)| {
+                        format!(
+                            "{k}: got {}, native {}",
+                            v.to_string().chars().take(400).collect::<String>(),
+                            expected[k]
+                                .to_string()
+                                .chars()
+                                .take(400)
+                                .collect::<String>()
+                        )
+                    })
+                    .collect();
+                failures.push(format!("case {index} round {step}: {}", fields.join("; ")));
+                break;
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} mismatches:\n{}",
+        failures.len(),
+        failures
+            .iter()
+            .take(10)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+/// Candidate release `8f785a93`: the historical readiness sequences on the
+/// devnet chain across seatless activation, as they were and with the
+/// finalizing set, plus penalised senders and heavier bonds.
+#[test]
+fn candidate_validator_readiness_under_seatless() {
+    let fixtures: Value =
+        serde_json::from_slice(include_bytes!("fixtures/validator-ready-candidate.json")).unwrap();
+    let pin: Value = serde_json::from_slice(include_bytes!(
+        "../../../docs/rust-node/source-map-candidate.json"
+    ))
+    .unwrap();
+    assert_eq!(fixtures["upstream_commit"], pin["upstream_commit"]);
+    let digest = |raw: &[u8]| hex::encode(<sha2::Sha256 as sha2::Digest>::digest(raw));
+    assert_eq!(
+        fixtures["oracle_sha256"],
+        digest(include_bytes!(
+            "../../../scripts/node-port/candidate-validator-ready-oracle.ml"
+        ))
+    );
+    assert_eq!(
+        fixtures["generator_sha256"],
+        digest(include_bytes!(
+            "../../../scripts/node-port/candidate-validator-ready-oracle.py"
+        ))
+    );
+    let mut failures = Vec::new();
+    for (index, case) in fixtures["cases"].as_array().unwrap().iter().enumerate() {
+        let input = &case["input"];
+        let (mut ledger, mut store) = initial(input);
+        for (step, (round, expected)) in input["rounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(case["expected"].as_array().unwrap())
+            .enumerate()
+        {
+            let round = ready_round(round, expected);
+            let mut actual = execute(
+                input,
+                &round,
+                &expected["transactions"],
+                &mut ledger,
+                &mut store,
+            );
+            let mut keys: Vec<Vec<u8>> = vec![b"validator_penalty_epoch".to_vec()];
+            keys.extend(
+                (1..=6).map(|id| octra_node_runtime::epoch_footer::penalty_key(&address(id))),
+            );
+            actual["meta"] = json!(keys
+                .iter()
+                .map(|k| store.get(&[b"meta", k]).map(b64))
+                .collect::<Vec<_>>());
+            if actual != *expected {
+                let fields: Vec<_> = actual
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .filter(|(k, v)| **v != expected[*k])
+                    .map(|(k, v)| {
+                        format!(
+                            "{k}: got {}, native {}",
+                            v.to_string().chars().take(400).collect::<String>(),
+                            expected[k]
+                                .to_string()
+                                .chars()
+                                .take(400)
+                                .collect::<String>()
+                        )
+                    })
+                    .collect();
+                failures.push(format!("case {index} round {step}: {}", fields.join("; ")));
+                break;
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} mismatches:\n{}",
+        failures.len(),
+        failures
+            .iter()
+            .take(10)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
 }
