@@ -191,6 +191,7 @@ impl Node for Host {
         let mut calls = circle_transaction::Calls::new(
             &runtime,
             circle_transaction::Rules {
+                scalar_work: false,
                 manifest: octra_node_runtime::circle::WasmProfile::Compute,
                 update_policy: false,
                 wasm: profile(),

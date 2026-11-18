@@ -59,6 +59,70 @@ fn bound_options(mut options: vm::Options, artifact: &Artifact) -> vm::Options {
     options.storage_kinds = input::storage_kinds(artifact.admitted());
     options
 }
+/// Native `Scalar_work.json_cost` over a call's parameter list.
+pub(crate) fn param_cost(params: &Document) -> Option<num_bigint::BigInt> {
+    use octra_node_protocol::octb::scalar_work::{self, Param};
+    let Json::List(items) = params.root() else {
+        return scalar_work::json_cost(std::iter::empty());
+    };
+    let values: Vec<Param<'_>> = items
+        .iter()
+        .map(|index| match params.get(*index) {
+            Some(Json::IntLiteral(text)) => {
+                std::str::from_utf8(text).map_or(Param::Other, Param::Integer)
+            }
+            Some(Json::String(text)) => {
+                std::str::from_utf8(text).map_or(Param::Other, Param::String)
+            }
+            Some(Json::Int(_) | Json::Bool(_) | Json::Null | Json::Float(_)) => Param::Unit,
+            _ => Param::Other,
+        })
+        .collect();
+    scalar_work::json_cost(values)
+}
+/// The stored code for an address, journal first: `(admission mode, base64)`.
+fn encoded_code(state: &Snapshot, journal: &Journal, address: &[u8]) -> Option<Vec<u8>> {
+    if let Some(upgrade) = journal.find_upgrade(address) {
+        return Some(upgrade.bytecode.clone());
+    }
+    if let Some(deploy) = journal.find_deploy(address) {
+        return Some(deploy.bytecode.clone());
+    }
+    store::bytecode(state, address).map(<[u8]>::to_vec)
+}
+/// Native `call_work` and `priced_load` under `scalar_work`: the parameters
+/// and the code's length and integer constants are charged before loading.
+/// `Err` is the refusal receipt.
+fn scalar_load(
+    state: &Snapshot,
+    journal: &Journal,
+    address: &[u8],
+    params: &Document,
+    limit: i64,
+    spent: i64,
+) -> std::result::Result<i64, Receipt> {
+    use octra_node_protocol::octb::{scalar_work, work};
+    let refuse = |reason: &str| Receipt {
+        effort: limit,
+        ..Receipt::failed(reason)
+    };
+    let encoded = encoded_code(state, journal, address);
+    let loading = encoded
+        .as_ref()
+        .map_or_else(num_bigint::BigInt::zero, |e| scalar_work::load(e.len()));
+    let spent = param_cost(params)
+        .and_then(|input| work::charge_integer(spent, &(input + loading), limit))
+        .ok_or_else(|| refuse("program input effort exceeds limit"))?;
+    let Some(encoded) = encoded else {
+        return Ok(spent);
+    };
+    let Ok(raw) = octra_node_protocol::transaction::decode_base64(&encoded) else {
+        return Ok(spent);
+    };
+    scalar_work::code_cost(&raw)
+        .and_then(|cost| work::charge_integer(spent, &cost, limit))
+        .ok_or_else(|| refuse("program scalar effort exceeds limit"))
+}
 fn seed(machine: &mut vm::Machine, constructor: bool, method: &[u8], params: Vec<vm::Value>) {
     machine.memory.insert(
         999,
@@ -297,8 +361,30 @@ pub fn call(
     } else {
         0
     };
-    options.limit -= spent;
+    let scalar = options.scalar_work;
     let state = env.state();
+    let spent = if scalar {
+        match scalar_load(
+            &state,
+            env.programs(),
+            &context.address,
+            params,
+            options.limit,
+            spent,
+        ) {
+            Ok(spent) => spent,
+            Err(receipt) => return Ok(receipt),
+        }
+    } else {
+        spent
+    };
+    options.limit -= spent;
+    // Native: refusals before execution report the scalar work already done.
+    let used = if scalar { spent } else { 0 };
+    let early = |receipt: Receipt| Receipt {
+        effort: used,
+        ..receipt
+    };
     let Some(artifact) = Artifact::load(
         &state,
         env.programs(),
@@ -307,12 +393,15 @@ pub fn call(
         env.trusted_program_keys(),
     )?
     else {
-        return Ok(Receipt::failed("bytecode not found"));
+        return Ok(early(Receipt::failed("bytecode not found")));
     };
     let (fixed, values) = match prepare(&artifact, method, params)? {
         Ok(value) => value,
-        Err(receipt) => return Ok(receipt),
+        Err(receipt) => return Ok(early(receipt)),
     };
+    if scalar && !values.iter().all(vm::Value::scalar_valid) {
+        return Ok(early(Receipt::failed("program input work exceeds limit")));
+    }
     let saved = (options.proof_exec || options.async_exec).then(|| env.programs().snapshot());
     let storage = env
         .programs_mut()

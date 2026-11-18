@@ -95,6 +95,7 @@ impl Prepared {
             fhe_work: ctx.fhe_work,
             object_cost: ctx.object_cost,
             program_inputs: ctx.program_inputs,
+            scalar_work: ctx.scalar_work,
         };
         let mut checked = Vec::new();
         // Native mapi_s completes admission of each child before selecting the

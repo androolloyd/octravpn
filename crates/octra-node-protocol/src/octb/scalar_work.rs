@@ -87,6 +87,51 @@ pub fn decimal_equal(number: &BigInt, text: &[u8]) -> bool {
     }
     number.to_string().as_bytes() == text
 }
+/// Native `Bytecode.scalar_cost`: parsing every integer constant of an OCTB
+/// image; `None` for a malformed header or an over-long integer constant.
+pub fn bytecode_cost(raw: &[u8]) -> Option<BigInt> {
+    const MAX_CONSTS: usize = 32_768;
+    if raw.len() < 12 || &raw[..4] != b"OCTB" {
+        return None;
+    }
+    let count = usize::from(u16::from_le_bytes([raw[6], raw[7]]));
+    if count > MAX_CONSTS {
+        return None;
+    }
+    let size = raw.len();
+    let (mut position, mut cost) = (12usize, BigInt::from(0));
+    for _ in 0..count {
+        if position + 5 > size {
+            return None;
+        }
+        let tag = raw[position];
+        let length = u32::from_le_bytes(raw[position + 1..position + 5].try_into().ok()?);
+        // OCaml reads the length as a non-negative native int.
+        let length = usize::try_from(length).ok()?;
+        if length > size - position - 5 {
+            return None;
+        }
+        if tag == 0 {
+            if length > TEXT_LIMIT {
+                return None;
+            }
+            cost += parse(length);
+        }
+        position += 5 + length;
+    }
+    Some(cost)
+}
+/// Native `Code_check.scalar_cost`: the integer constants of a program's code,
+/// inside its OCPG envelope when it has one.
+pub fn code_cost(raw: &[u8]) -> Option<BigInt> {
+    if raw.starts_with(b"OCPG") {
+        let envelope = crate::program_wire::Envelope::decode(raw).ok()?;
+        bytecode_cost(&envelope.code)
+    } else {
+        bytecode_cost(raw)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

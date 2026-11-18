@@ -87,6 +87,7 @@ fn check_updates(source: &str, capture: bool) {
             )
             .unwrap();
         let ctx = Context {
+            scalar_work: false,
             manifest: octra_node_runtime::circle::WasmProfile::Manifest,
             caller: v["caller"].as_str().unwrap().into(),
             tx_hash: v["tx_hash"].as_str().unwrap().into(),
@@ -188,6 +189,7 @@ fn updates_bind_snapshot_and_refuse_view_only_methods_without_mutation() {
     state.begin().unwrap();
     host::install_counter(&mut state, b"counter", b"4");
     let ctx = Context {
+        scalar_work: false,
         manifest: octra_node_runtime::circle::WasmProfile::Manifest,
         caller: format!("oct{}", "2".repeat(44)),
         tx_hash: "1".repeat(64),

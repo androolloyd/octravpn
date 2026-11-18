@@ -42,6 +42,7 @@ fn options(
         proof_key: ctx.profile.proof_key,
         math: ctx.profile.math,
         point_ops: ctx.storage_proof,
+        scalar_work: ctx.scalar_work,
         async_exec: true,
         fhe_memory: memory,
         ..vm::Options::default()

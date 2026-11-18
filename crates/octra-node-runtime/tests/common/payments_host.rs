@@ -222,6 +222,7 @@ impl Chain {
         let mut calls = Calls::new(
             &self.runtime,
             Rules {
+                scalar_work: false,
                 wasm: WasmRules {
                     proof_key: false,
                     wasm_float: true,

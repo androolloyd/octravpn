@@ -339,6 +339,7 @@ async fn signed_counter(octb: bool) {
     let batch = circle_transaction::execute(
         &common::runtime(),
         circle_transaction::Rules {
+            scalar_work: false,
             manifest: octra_node_runtime::circle::WasmProfile::Compute,
             update_policy: false,
             wasm: profile(),

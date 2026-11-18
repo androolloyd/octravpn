@@ -48,6 +48,7 @@ pub(super) fn payload(code: &[u8]) -> Value {
 }
 fn rules() -> Rules {
     Rules {
+        scalar_work: false,
         wasm: WasmRules {
             proof_key: false,
             wasm_float: true,

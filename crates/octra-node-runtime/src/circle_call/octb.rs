@@ -291,6 +291,7 @@ pub(super) fn execute(
             proof_key: ctx.profile.proof_key,
             math: ctx.profile.math,
             point_ops: ctx.storage_proof,
+            scalar_work: ctx.scalar_work,
             async_exec: true,
             strict: admitted.facts().is_some(),
             storage_kinds: circle_octb::storage_kinds(&admitted, calls),

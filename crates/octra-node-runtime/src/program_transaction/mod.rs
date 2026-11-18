@@ -116,7 +116,12 @@ impl<'a> Calls<'a> {
                 .map_err(operational)?,
             node_id: tx.to.clone(),
             depth: 0,
-            limit: resource_lanes::vm_limit(&tx.ou),
+            // Native `Scalar_work.allowance` caps the call by its declared fee.
+            limit: octra_node_protocol::octb::scalar_work::allowance(
+                self.rules.scalar_work,
+                &tx.ou,
+                resource_lanes::vm_limit(&tx.ou),
+            ),
             profile: self.rules.wasm,
             manifest: self.rules.manifest,
             inspect: self.rules.inspect,
@@ -127,6 +132,7 @@ impl<'a> Calls<'a> {
             fhe_work: self.rules.fhe_work,
             object_cost: self.rules.object_cost,
             program_inputs: self.source.metered,
+            scalar_work: self.rules.scalar_work,
         })
     }
     fn save(&mut self, tx: &Transaction, raw: Vec<u8>) -> Result<(), Error> {
@@ -488,7 +494,7 @@ impl<'a> Calls<'a> {
         let Some(raw) = &tx.message else {
             return Ok(malformed(b"multi_exec requires calls payload".to_vec()));
         };
-        let calls = match plan::multi(raw, self.max_calls)? {
+        let calls = match plan::multi(raw, self.max_calls, self.rules.scalar_work)? {
             Ok(calls) => calls,
             Err(reason) => return Ok(malformed(reason)),
         };

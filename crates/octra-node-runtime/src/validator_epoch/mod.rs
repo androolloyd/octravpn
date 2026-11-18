@@ -52,7 +52,7 @@ impl BoundFold {
         // Native policy faults precede a duty-rule fault. Keep validation order.
         let fold = mode(Rule::SetFold);
         // The work rules share one anchor and are authenticated first.
-        mode(Rule::ScalarWork)?;
+        ctx.scalar_work = mode(Rule::ScalarWork)?;
         mode(Rule::SourceCreate)?;
         mode(Rule::ProgramResult)?;
         mode(Rule::TxEnvelope)?;

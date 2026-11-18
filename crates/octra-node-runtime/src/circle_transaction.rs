@@ -30,6 +30,8 @@ pub struct Rules {
     pub fhe_work: bool,
     pub object_cost: bool,
     pub program_inputs: bool,
+    /// Rule `scalar_work`.
+    pub scalar_work: bool,
 }
 
 pub struct Batch {
@@ -370,7 +372,11 @@ impl OperationHost for Calls<'_> {
                 .map_err(operational)?,
             node_id: tx.to.clone(),
             depth: 0,
-            limit: limit(&tx.ou),
+            limit: octra_node_protocol::octb::scalar_work::allowance(
+                self.rules.scalar_work,
+                &tx.ou,
+                limit(&tx.ou),
+            ),
             profile: self.rules.wasm,
             manifest: self.rules.manifest,
             inspect: self.rules.inspect,
@@ -381,6 +387,7 @@ impl OperationHost for Calls<'_> {
             fhe_work: self.rules.fhe_work,
             object_cost: self.rules.object_cost,
             program_inputs: self.rules.program_inputs,
+            scalar_work: self.rules.scalar_work,
         };
         let expected = match self.verification {
             Verification::Consume { root, gate } => {

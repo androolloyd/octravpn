@@ -113,6 +113,7 @@ fn setup(input: &Value, fixture: &Value) -> (StateBatch, Ledger, Vec<Transaction
 }
 fn rules(input: &Value) -> Rules {
     Rules {
+        scalar_work: false,
         manifest: if input["wasm_compute"] == false {
             octra_node_runtime::circle::WasmProfile::Compute
         } else {

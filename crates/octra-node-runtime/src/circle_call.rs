@@ -46,6 +46,8 @@ pub struct Context {
     pub fhe_work: bool,
     pub object_cost: bool,
     pub program_inputs: bool,
+    /// Rule `scalar_work`.
+    pub scalar_work: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {

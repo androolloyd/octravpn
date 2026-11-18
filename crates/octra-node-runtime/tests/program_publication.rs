@@ -85,6 +85,7 @@ fn apply(
 ) -> Result<Completion, octra_node_runtime::execution::Error> {
     let runtime = CircleRuntime::new(Arc::new(octra_node_runtime::circle_hfhe::Backend));
     let rules = Rules {
+        scalar_work: false,
         wasm: WasmRules {
             wasm_float: false,
             proof_exec: false,
