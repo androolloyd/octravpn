@@ -13,7 +13,7 @@ use octra_node_protocol::{
     epoch_rewards::Attribution,
     preverify_commit::Gate,
     state::Ledger,
-    transaction::{self, OpType, RuleMode, Transaction},
+    transaction::{self, OpType, Transaction},
     transaction_outcome,
 };
 
