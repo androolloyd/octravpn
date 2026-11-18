@@ -100,6 +100,7 @@ fn execute(
             committed_head: Some(&before),
         },
         envelope: transaction_outcome::Rules {
+            program: octra_node_protocol::transaction::RuleMode::Prior,
             envelope: RuleMode::Active,
             compute: RuleMode::Prior,
             settle: RuleMode::Prior,

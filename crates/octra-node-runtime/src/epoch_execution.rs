@@ -220,11 +220,12 @@ pub(crate) fn execute_checked(
                 }
                 Effect::RejectedAfterFee { fee, refusal } => {
                     ledger.commit_journal().map_err(error)?;
-                    let charged = context.vm_bytes == RuleMode::Active
-                        && matches!(
-                            tx.op_type,
-                            OpType::ComputeFund | OpType::ComputeReturn | OpType::ComputeSettle
-                        );
+                    let charged = transaction_outcome::charged_operation(
+                        context.vm_bytes,
+                        request.envelope.program,
+                        &refusal.error_type,
+                        tx.op_type,
+                    );
                     artifacts.rejected.push(Rejected {
                         input_index: index,
                         refusal,

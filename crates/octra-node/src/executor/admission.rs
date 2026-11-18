@@ -20,7 +20,11 @@ pub(super) fn check(
     let inputs = transaction_outcome::merge(&bundle.txs, &bundle.rejections)?;
     transaction::check_compute(rules.envelope.compute, rules.envelope.settle, &inputs)?;
     transaction::check_envelopes(rules.envelope.envelope, &inputs)?;
-    transaction_outcome::check_charged(rules.envelope.compute, &bundle.rejections)?;
+    transaction_outcome::check_charged(
+        rules.envelope.compute,
+        rules.envelope.program,
+        &bundle.rejections,
+    )?;
     for tx in &inputs {
         ensure!(
             profile.consensus_admits(tx.op_type),
@@ -86,6 +90,7 @@ mod tests {
             crypto_active: false,
             stealth_minimum: 5000.into(),
             envelope: transaction_outcome::Rules {
+                program: octra_node_protocol::transaction::RuleMode::Prior,
                 envelope: RuleMode::Active,
                 compute: RuleMode::Prior,
                 settle: RuleMode::Prior,

@@ -44,6 +44,7 @@ fn rules(j: &Value) -> Rules {
         crypto_active: false,
         stealth_minimum: 5000.into(),
         envelope: transaction_outcome::Rules {
+            program: octra_node_protocol::transaction::RuleMode::Prior,
             envelope: mode("envelope"),
             compute: mode("compute"),
             settle: mode("settle"),

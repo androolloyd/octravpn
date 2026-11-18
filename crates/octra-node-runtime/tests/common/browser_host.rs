@@ -227,6 +227,7 @@ impl Node for Host {
                     committed_head: Some(&committed),
                 },
                 envelope: octra_node_protocol::transaction_outcome::Rules {
+                    program: octra_node_protocol::transaction::RuleMode::Prior,
                     envelope: RuleMode::Active,
                     compute: RuleMode::Prior,
                     settle: RuleMode::Prior,

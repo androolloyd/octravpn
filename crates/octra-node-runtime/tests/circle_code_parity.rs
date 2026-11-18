@@ -984,6 +984,7 @@ fn assert_bft_epochs_projected(fixture: &Value, oracle: &[u8], projection: Optio
                     committed_head: Some(&committed),
                 },
                 envelope: transaction_outcome::Rules {
+                    program: octra_node_protocol::transaction::RuleMode::Prior,
                     envelope: RuleMode::Prior,
                     compute: RuleMode::Prior,
                     settle: RuleMode::Prior,

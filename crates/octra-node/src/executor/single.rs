@@ -486,6 +486,8 @@ impl Native {
             envelope: modes[0],
             compute: modes[1],
             settle: modes[2],
+            // Single mode has no program-result activation.
+            program: octra_node_protocol::transaction::RuleMode::Prior,
         })
     }
     /// Capture public range inputs without performing any proof work or holding

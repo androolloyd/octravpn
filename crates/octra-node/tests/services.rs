@@ -357,6 +357,7 @@ fn execute_received(
     state.begin().unwrap();
     let mut ledger = account_store::ledger(&state).unwrap();
     let envelope = octra_node_protocol::transaction_outcome::Rules {
+        program: octra_node_protocol::transaction::RuleMode::Prior,
         envelope: RuleMode::Active,
         compute: RuleMode::Prior,
         settle: RuleMode::Prior,

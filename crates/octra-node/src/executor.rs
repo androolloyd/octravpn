@@ -297,6 +297,7 @@ impl Native {
                 envelope: mode(Rule::TxEnvelope),
                 compute: mode(Rule::VmBytes),
                 settle: mode(Rule::Settle),
+                program: mode(Rule::ProgramResult),
             },
         })
     }

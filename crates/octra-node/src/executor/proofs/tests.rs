@@ -49,6 +49,7 @@ fn rules() -> octra_node_runtime::consensus_bundle::Rules {
         crypto_active: false,
         stealth_minimum: 5000.into(),
         envelope: octra_node_protocol::transaction_outcome::Rules {
+            program: octra_node_protocol::transaction::RuleMode::Prior,
             envelope: RuleMode::Prior,
             compute: RuleMode::Prior,
             settle: RuleMode::Prior,

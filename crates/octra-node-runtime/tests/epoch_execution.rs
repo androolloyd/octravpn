@@ -154,6 +154,7 @@ fn native_bft_epoch_effects_roots_keys_rewards_and_atomic_failure() {
                 committed_head: Some(&committed),
             },
             envelope: transaction_outcome::Rules {
+                program: octra_node_protocol::transaction::RuleMode::Prior,
                 envelope: rules::at(chain, Rule::TxEnvelope, epoch),
                 compute: rules::at(chain, Rule::VmBytes, epoch),
                 settle: rules::at(chain, Rule::Settle, epoch),

@@ -301,17 +301,36 @@ pub struct Rules {
     pub envelope: crate::transaction::RuleMode,
     pub compute: crate::transaction::RuleMode,
     pub settle: crate::transaction::RuleMode,
+    /// Rule `program_result`: failed program and circle calls are charged.
+    pub program: crate::transaction::RuleMode,
 }
-pub fn check_charged(mode: crate::transaction::RuleMode, rejections: &[Rejection]) -> Result<()> {
+/// Native `Tx_envelope.charged_operation`: which rejected operations still
+/// pay their fee and are recorded as charged.
+pub fn charged_operation(
+    compute: crate::transaction::RuleMode,
+    program: crate::transaction::RuleMode,
+    error_type: &[u8],
+    op: crate::transaction::OpType,
+) -> bool {
     use crate::transaction::{OpType, RuleMode};
-    if rejections.iter().all(|r| {
-        !r.charged
-            || mode == RuleMode::Active
-                && matches!(
-                    r.tx.op_type,
-                    OpType::ComputeFund | OpType::ComputeReturn | OpType::ComputeSettle
-                )
-    }) {
+    match op {
+        OpType::ComputeFund | OpType::ComputeReturn | OpType::ComputeSettle => {
+            compute == RuleMode::Active
+        }
+        OpType::ProgramExec => program == RuleMode::Active && error_type == b"program_exec_failed",
+        OpType::CircleCall => program == RuleMode::Active && error_type == b"circle_call_failed",
+        _ => false,
+    }
+}
+pub fn check_charged(
+    compute: crate::transaction::RuleMode,
+    program: crate::transaction::RuleMode,
+    rejections: &[Rejection],
+) -> Result<()> {
+    if rejections
+        .iter()
+        .all(|r| !r.charged || charged_operation(compute, program, &r.error_type, r.tx.op_type))
+    {
         Ok(())
     } else {
         Err(reject("charged outcome not active"))
@@ -327,7 +346,7 @@ pub fn check_envelopes(
         return Ok(());
     }
     let partition = decode(confirmed, receipts, false)?;
-    check_charged(rules.compute, &partition.rejections)?;
+    check_charged(rules.compute, rules.program, &partition.rejections)?;
     let inputs = merge(confirmed, &partition.rejections)?;
     transaction::check_compute(rules.compute, rules.settle, &inputs).map_err(|e| reject(&e.0))?;
     transaction::check_envelopes(rules.envelope, &inputs).map_err(|e| reject(&e.0))

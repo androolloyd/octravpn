@@ -102,6 +102,7 @@ fn native_finalized_selection_and_candidate_partition_refusals() {
                         &confirmed,
                         &rejections,
                         Rules {
+                            program: octra_node_protocol::transaction::RuleMode::Prior,
                             envelope: mode(&input["envelope"]),
                             compute: mode(&input["compute"]),
                             settle: mode(&input["settle"]),
@@ -247,6 +248,7 @@ fn finalized_replay_excludes_vm_fees_and_atomically_checks_charged_outcomes() {
     )
     .unwrap();
     let envelope = Rules {
+        program: octra_node_protocol::transaction::RuleMode::Prior,
         envelope: RuleMode::Active,
         compute: RuleMode::Active,
         settle: RuleMode::Prior,
