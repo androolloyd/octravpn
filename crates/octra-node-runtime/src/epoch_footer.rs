@@ -23,6 +23,90 @@ pub struct Request<'a> {
     pub reward: &'a Attribution,
     pub validator_keys: &'a [(Vec<u8>, Vec<u8>)],
     pub confirmed_fees: BigInt,
+    pub execution: &'a Execution,
+}
+/// Seatless execution rules for one epoch: whether rule `seatless` is active
+/// and the consensus profile hash this epoch and its parent execute under
+/// (`Consensus_profile.execution_profile`; `None` before seatless).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Execution {
+    pub seatless: bool,
+    pub profile: Option<Vec<u8>>,
+    pub previous: Option<Vec<u8>>,
+}
+/// `Consensus_profile.hash ~chain_id ~epoch`.
+pub type ProfileHash = std::sync::Arc<dyn Fn(&[u8], i64) -> Result<Vec<u8>, String> + Send + Sync>;
+impl Execution {
+    /// Native `Consensus_profile.execution_profile` for an epoch and its parent.
+    pub fn at(chain: &[u8], epoch: i64, hash: &ProfileHash) -> Result<Self, String> {
+        let active = |epoch: i64| {
+            octra_node_protocol::consensus::policy::seatless_epoch(chain)
+                .is_some_and(|first| epoch >= first)
+        };
+        let profile = |epoch: i64| -> Result<Option<Vec<u8>>, String> {
+            if active(epoch) {
+                hash(chain, epoch).map(Some)
+            } else {
+                Ok(None)
+            }
+        };
+        let current = profile(epoch)?;
+        let previous = match current {
+            Some(_) if epoch > 0 => profile(epoch - 1)?,
+            _ => None,
+        };
+        Ok(Self {
+            seatless: active(epoch),
+            profile: current,
+            previous,
+        })
+    }
+}
+pub const PENALTY_PREFIX: &[u8] = b"validator_penalty:";
+pub const PENALTY_EPOCH: &[u8] = b"validator_penalty_epoch";
+pub fn penalty_key(address: &[u8]) -> Vec<u8> {
+    [PENALTY_PREFIX, address].concat()
+}
+/// Native `validator_penalties`: the given addresses with a recorded penalty,
+/// ordered and unique; always empty before seatless.
+pub fn penalties(seatless: bool, state: &StateBatch, addresses: &[Vec<u8>]) -> Vec<Vec<u8>> {
+    if !seatless {
+        return vec![];
+    }
+    let mut addresses = addresses.to_vec();
+    addresses.sort();
+    addresses.dedup();
+    addresses
+        .into_iter()
+        .filter(|address| state.get(&[b"meta", &penalty_key(address)]).is_some())
+        .collect()
+}
+/// Native `check_execution_parent`: before executing an epoch under seatless,
+/// the state must have been committed by the previous epoch with its marker.
+pub fn check_parent(epoch: i64, execution: &Execution, state: &StateBatch) -> Result<(), Error> {
+    use octra_node_protocol::execution_marker as marker;
+    let Some(expected) = &execution.profile else {
+        return Ok(());
+    };
+    if epoch <= 0 || epoch == (1 << 62) - 1 {
+        return Err(error("execution profile epoch is invalid"));
+    }
+    if expected.len() != 32 {
+        return Err(error("execution profile hash is invalid"));
+    }
+    let previous = epoch - 1;
+    marker::check_epochs(
+        previous,
+        state.get(&[b"meta", b"last_epoch"]),
+        state.get(&[b"meta", b"current_epoch"]),
+    )
+    .map_err(error)?;
+    marker::check(
+        execution.previous.as_deref(),
+        previous,
+        state.get(&[b"meta", marker::META_KEY]),
+    )
+    .map_err(error)
 }
 pub struct Footer {
     pub plan: Plan,
@@ -126,7 +210,36 @@ fn apply_inner(
         },
         Some(base),
     )?;
-    let credits = epoch_rewards::credits(request.reward, &plan)?;
+    // Seatless: rewards of slashed or penalised validators are burned.
+    let seatless = request.execution.seatless;
+    let penalized = penalties(
+        seatless,
+        state,
+        &epoch_rewards::reward_addresses(request.reward),
+    );
+    let registry = if seatless {
+        state
+            .get(&[b"meta", octra_node_protocol::validator::registry::META_KEY])
+            .map(<[u8]>::to_vec)
+    } else {
+        None
+    };
+    let plan = epoch_rewards::prepare(
+        seatless,
+        request.epoch,
+        registry.as_deref(),
+        request.reward,
+        &penalized,
+        plan,
+    )?;
+    let credits = epoch_rewards::credits_at(
+        seatless,
+        request.epoch,
+        registry.as_deref(),
+        request.reward,
+        &penalized,
+        &plan,
+    )?;
     if policy.emission_guard && plan.base_reward.is_positive() {
         return Err(error("emission guard rejected positive base reward"));
     }
@@ -156,13 +269,26 @@ fn apply_inner(
         if *ledger.total_supply() != before + &plan.total_reward {
             return Err(error("reward credit mismatch"));
         }
-        if plan.base_reward.is_positive() || plan.fees_burned.is_positive() {
-            set(state, b"emission_remaining", &plan.new_emission_remaining)?;
-            set(state, b"total_supply", &plan.new_total_supply)?;
-            if plan.supply_tracking_active {
-                set(state, b"supply_retired", &plan.new_supply_retired)?;
-            }
+    }
+    let burned = plan.reward_burned.is_positive();
+    if (plan.total_reward.is_positive() || burned)
+        && (plan.base_reward.is_positive() || plan.fees_burned.is_positive() || burned)
+    {
+        set(state, b"emission_remaining", &plan.new_emission_remaining)?;
+        set(state, b"total_supply", &plan.new_total_supply)?;
+        if plan.supply_tracking_active || burned {
+            set(state, b"supply_retired", &plan.new_supply_retired)?;
         }
+    }
+    if let Some(profile) = &request.execution.profile {
+        let raw = octra_node_protocol::execution_marker::to_bytes(request.epoch, profile)
+            .map_err(error)?;
+        state
+            .set(
+                &[b"meta", octra_node_protocol::execution_marker::META_KEY],
+                raw,
+            )
+            .map_err(error)?;
     }
     set(state, b"last_epoch", &request.epoch)?;
     set(
@@ -176,10 +302,10 @@ fn apply_inner(
     if binding.activated || emission.is_none() {
         set(state, b"emission_remaining", &plan.new_emission_remaining)?;
     }
-    if total.is_none() {
+    if total.is_none() || plan.reward_burned.is_positive() {
         set(state, b"total_supply", &plan.new_total_supply)?;
     }
-    if plan.supply_tracking_active {
+    if plan.supply_tracking_active || plan.reward_burned.is_positive() {
         set(state, b"supply_retired", &plan.new_supply_retired)?;
     }
     Ok(Footer { plan, credits })

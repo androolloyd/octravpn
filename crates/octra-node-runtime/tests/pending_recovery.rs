@@ -44,6 +44,7 @@ fn rules(j: &Value) -> Rules {
         crypto_active: false,
         stealth_minimum: 5000.into(),
         envelope: transaction_outcome::Rules {
+            program: octra_node_protocol::transaction::RuleMode::Prior,
             envelope: mode("envelope"),
             compute: mode("compute"),
             settle: mode("settle"),
@@ -296,7 +297,8 @@ fn host_syncs_before_persisting_and_restores_authenticated_bundle() {
         pending.epoch_id,
         Protocol::default(),
         TimeoutConfig::default(),
-    );
+    )
+    .unwrap();
     let mut cached = false;
     assert_eq!(
         recovery::restore(&context, &stored[0], false, &mut engine, |r| {

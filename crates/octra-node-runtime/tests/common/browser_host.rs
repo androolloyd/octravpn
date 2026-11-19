@@ -191,6 +191,7 @@ impl Node for Host {
         let mut calls = circle_transaction::Calls::new(
             &runtime,
             circle_transaction::Rules {
+                scalar_work: false,
                 manifest: octra_node_runtime::circle::WasmProfile::Compute,
                 update_policy: false,
                 wasm: profile(),
@@ -216,7 +217,9 @@ impl Node for Host {
         let previous = hex::encode(base.cursor.state_root.0);
         let batch = epoch_execution::execute(
             &epoch_execution::Request {
+                execution: &octra_node_runtime::epoch_footer::Execution::default(),
                 validators: validator_epoch::Request {
+                    voting_set: None,
                     chain: self.store.chain().chain_id.as_bytes(),
                     epoch,
                     policy: &octra_node_protocol::validator::policy::Policy::Inactive,
@@ -225,6 +228,7 @@ impl Node for Host {
                     committed_head: Some(&committed),
                 },
                 envelope: octra_node_protocol::transaction_outcome::Rules {
+                    program: octra_node_protocol::transaction::RuleMode::Prior,
                     envelope: RuleMode::Active,
                     compute: RuleMode::Prior,
                     settle: RuleMode::Prior,

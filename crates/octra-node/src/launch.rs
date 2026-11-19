@@ -673,7 +673,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                 height,
                 protocol,
                 timeouts,
-            );
+            )?;
             if minimum_peers == 0 && (!behind || voting) {
                 validator.recover(&mut engine).await?;
             }

@@ -357,6 +357,7 @@ fn execute_received(
     state.begin().unwrap();
     let mut ledger = account_store::ledger(&state).unwrap();
     let envelope = octra_node_protocol::transaction_outcome::Rules {
+        program: octra_node_protocol::transaction::RuleMode::Prior,
         envelope: RuleMode::Active,
         compute: RuleMode::Prior,
         settle: RuleMode::Prior,
@@ -411,7 +412,9 @@ fn execute_received(
     let committed = state.snapshot();
     let previous = hex::encode(parent.cursor.state_root.0);
     let request = epoch_execution::Request {
+        execution: &octra_node_runtime::epoch_footer::Execution::default(),
         validators: validator_epoch::Request {
+            voting_set: None,
             chain: authority.chain.chain_id.as_bytes(),
             epoch: epoch as i64,
             policy: &octra_node_protocol::validator::policy::Policy::Inactive,
@@ -546,6 +549,7 @@ fn add_rejected_call(view: &Committed, executed: &mut ExecutedEpoch) {
     let mut calls = circle_transaction::Calls::new(
         &runtime,
         circle_transaction::Rules {
+            scalar_work: false,
             manifest: octra_node_runtime::circle::WasmProfile::Compute,
             update_policy: false,
             wasm: rules(),
@@ -606,6 +610,7 @@ impl ImportExecutor {
         use octra_node::executor::{Config, Limits, Native};
         use octra_node_protocol::transaction_policy::Profile;
         let config = Config {
+            profile_hash: std::sync::Arc::new(|_: &[u8], _: i64| Err("no profile".to_string())),
             graph: octra_node_protocol::rules::Graph::new(
                 authority.chain.chain_id.as_bytes().to_vec(),
                 None,

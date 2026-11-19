@@ -8,7 +8,7 @@ use octra_node_protocol::consensus::{
 use serde_json::{json, Value};
 fn fixture() -> Value {
     let value: Value =
-        serde_json::from_str(include_str!("fixtures/consensus-validators-c49.json")).unwrap();
+        serde_json::from_str(include_str!("fixtures/consensus-validators-candidate.json")).unwrap();
     let manifest: Value = serde_json::from_str(include_str!(
         "../../../docs/rust-node/source-map-candidate.json"
     ))
@@ -87,7 +87,22 @@ fn execute(v: &Value) -> Result<Value, Error> {
             let count = v["signer_count"].as_i64().unwrap();
             let weight = big(&v["signed_weight"]);
             let effective = set.for_epoch(&chain, epoch)?;
-            json!({"set":set_json(&set)?,"cap":set.count_weight_cap()?.to_string(),"effective":set_json(&effective)?,"leaders":v["rounds"].as_array().unwrap().iter().map(|round|result(effective.leader(epoch,round.as_i64().unwrap()).map(|v|json!(hex::encode(&v.address))))).collect::<Vec<_>>(),"signed_weight":set.signed_weight(&signers).map(|w|w.to_string()),"weight_quorum":set.has_weight_quorum(&signers),"quorum":set.has_quorum(&signers),"quorum_at":set.has_quorum_at(&chain,epoch,&signers)?,"reached":effective.quorum_reached_at(&chain,epoch,count,&weight),"skip_weight":effective.round_skip_weight().to_string(),"skip_reached":effective.round_skip_reached_at(&chain,epoch,count,&weight)})
+            // The historical vectors record the weight-only and counted
+            // quorums separately; both are now asks of one measure.
+            let unique = signers
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len() as i64;
+            let meets = |rule| {
+                set.signed_weight(&signers).is_some_and(|weight| {
+                    set.space_for_rule(rule).meets(
+                        octra_node_protocol::consensus::measure::Ask::Quorum,
+                        unique,
+                        &weight,
+                    )
+                })
+            };
+            json!({"set":set_json(&set)?,"cap":set.count_weight_cap()?.to_string(),"effective":set_json(&effective)?,"leaders":v["rounds"].as_array().unwrap().iter().map(|round|result(effective.leader(epoch,round.as_i64().unwrap()).map(|v|json!(hex::encode(&v.address))))).collect::<Vec<_>>(),"signed_weight":set.signed_weight(&signers).map(|w|w.to_string()),"weight_quorum":meets(policy::Rule::Prior),"quorum":meets(policy::Rule::Capped),"quorum_at":set.has_quorum_at(&chain,epoch,&signers)?,"reached":effective.quorum_reached_at(&chain,epoch,count,&weight),"skip_weight":effective.round_skip_weight().to_string(),"skip_reached":effective.round_skip_reached_at(&chain,epoch,count,&weight)})
         }
         "decode_set" => set_json(&ValidatorSet::decode(&raw(&v["wire"]))?)?,
         "parse_weight" => json!(reward::parse_weight(&raw(&v["value"])).map(|w| w.to_string())),

@@ -76,6 +76,7 @@ fn address(id: u8) -> Vec<u8> {
 }
 fn config(dir: &std::path::Path) -> executor::Config {
     executor::Config {
+        profile_hash: std::sync::Arc::new(|_: &[u8], _: i64| Err("no profile".to_string())),
         graph: Graph::new(b"octra-single-local-native-oracle".to_vec(), None),
         protocol: Protocol::default(),
         profile: Profile::default(),

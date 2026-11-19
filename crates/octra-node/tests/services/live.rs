@@ -49,6 +49,7 @@ fn proposal_rules(header: &EpochHeader) -> consensus_bundle::Rules {
         crypto_active: false,
         stealth_minimum: 5000.into(),
         envelope: transaction_outcome::Rules {
+            program: octra_node_protocol::transaction::RuleMode::Prior,
             envelope: mode(Rule::TxEnvelope),
             compute: mode(Rule::VmBytes),
             settle: mode(Rule::Settle),
@@ -483,7 +484,8 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
             1,
             protocol(),
             TimeoutConfig::default(),
-        );
+        )
+        .unwrap();
         engine.realign_round(round).unwrap();
         let executor = ImportExecutor::with_protocol(&authority, &nodes[id], protocol());
         let pending = super::pending::admitted(nodes[id].snapshot().unwrap().state(), &inputs);

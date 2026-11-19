@@ -86,7 +86,7 @@ pub fn scheduled(update: &ValidatorUpdate) -> Option<Scheduled> {
     })
 }
 pub fn pending_entries(raw: Option<&[u8]>) -> Vec<Bytes> {
-    raw.and_then(|r| ValidatorUpdate::parse(Some(r)).ok())
+    raw.and_then(|r| ValidatorUpdate::of_string(r).ok())
         .filter(|u| u.weighted)
         .map_or_else(Vec::new, |u| {
             u.validators
@@ -98,7 +98,7 @@ pub fn pending_entries(raw: Option<&[u8]>) -> Vec<Bytes> {
 /// The caller logs the returned error; malformed dynamic plans are not installed.
 pub fn load_pending(raw: Option<&[u8]>) -> Result<Option<Scheduled>, Error> {
     let Some(raw) = raw else { return Ok(None) };
-    let update = ValidatorUpdate::parse(Some(raw)).map_err(error)?;
+    let update = ValidatorUpdate::of_string(raw).map_err(error)?;
     if !update.weighted {
         return Err("manual validator updates are disabled".into());
     }
@@ -207,7 +207,7 @@ impl Config {
     ) -> Result<Self, Error> {
         let parse = |label: &str, raw: Option<&[u8]>| {
             raw.map(|r| {
-                ValidatorUpdate::parse(Some(r))
+                ValidatorUpdate::of_string(r)
                     .map_err(|e| error(format!("{label} validator set is invalid: {e}")))
             })
             .transpose()

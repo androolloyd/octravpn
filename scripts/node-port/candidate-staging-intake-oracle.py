@@ -8,7 +8,7 @@ outside the historical inputs fail fast rather than returning simulated results.
 """
 import argparse, hashlib, json, os, re, subprocess
 from pathlib import Path
-PIN='c49de45cf49ebbc2e5c0697eb956cbcada5845e7';ROOT=Path(__file__).resolve().parents[2]
+PIN='8f785a93a4e7392a0f3e65674f9de89854d33dbc';ROOT=Path(__file__).resolve().parents[2]
 def sha(data):return hashlib.sha256(data).hexdigest()
 def main():
  p=argparse.ArgumentParser(description=__doc__)
@@ -23,7 +23,7 @@ def main():
  def decl(name,kind,label):
   text=read(name);m=re.search(r'^'+kind+' '+re.escape(label)+r'\b',text,re.M);assert m,(name,label);end=re.search(r'^(?:let|type|module) ',text[m.end():],re.M);j=m.end()+end.start()if end else len(text);value=text[m.start():j];extracts.setdefault(path(name),[]).append({'start_line':text[:m.start()].count('\n')+1,'end_line':text[:j].count('\n'),'sha256':sha(value.encode())});return value
  def put(name,text):generated[name]=text;(out/(name+'.ml')).write_text(text)
- whole=['oce1','hash_domain','octra_ed25519','octra_log_format','octra_log','c_protocol','epoch_time','c_epoch_time_policy','c_quorum_policy','c_types','c_reward_source','c_codec','c_config','c_hash','c_qc','c_parent_commit','c_evidence','c_role','rule_graph','json_tree','transaction','tx_signature','tx_envelope','tx_outcome','tx_payload','resource_lanes','validator_entry','validator_participation','validator_policy','validator_evidence','validator_registry','validator_set_update','validator_ready_policy','set_fold','bft_control_check','drop_record','ledger_types','tx_sender_key','consensus_mode','env']
+ whole=['oce1','hash_domain','octra_ed25519','octra_log_format','octra_log','c_protocol','epoch_time','c_epoch_time_policy','c_quorum_policy','c_measure','c_types','c_reward_source','c_codec','c_config','c_hash','c_qc','c_parent_commit','c_evidence','c_role','rule_graph','json_tree','transaction','tx_signature','tx_envelope','tx_outcome','tx_payload','resource_lanes','validator_entry','validator_participation','validator_policy','validator_evidence','validator_registry','validator_set_update','validator_ready_policy','set_fold','bft_control_check','drop_record','ledger_types','tx_sender_key','consensus_mode','env','staging_bytes']
  for name in whole:put(name,read(name))
  put('c_catchup',decl('c_catchup','let','range_epochs'))
  cons=[n for n in whole if n.startswith('c_')or n in ['epoch_time']]+['c_catchup']
@@ -45,13 +45,20 @@ module P2p_swarm=struct type t=unit let peer_count _=failwith "fixture has no sw
 let create store={cache=Hashtbl.create 32;store}
 let run_s=Lwt_main.run
 '''+decl('ledger','let','empty_account')+decl('ledger','let','get_account_internal')+''.join(decl('ledger','let',n)for n in ['mem','find','find_opt']))
- core=['rule_graph','crypto','transaction','tx_signature','tx_envelope','tx_payload','json_tree','resource_lanes','validator_registry','tx_staging','store_irmin','ledger','tx_drop']
+ # Payload parsing is queued on upstream's proof pool under a memory budget.
+ # The fixture has neither: the parse runs inline, so busy and unavailable
+ # outcomes are not exercised here. The byte accounting is the native module.
+ put('compute_memory',read('compute_memory'))
+ put('proof_pool','type priority=Required|Speculative\nlet try_run ?priority:_ ~bytes:_ task=Lwt.return(Some(task()))\n')
+ put('exec_resource',decl('exec_resource','type','resource')+'exception Unavailable of resource\n'+decl('exec_resource','let','name'))
+ core=['rule_graph','crypto','transaction','tx_signature','tx_envelope','tx_payload','json_tree','resource_lanes','validator_registry','tx_staging','store_irmin','ledger','tx_drop','staging_bytes','compute_memory','proof_pool','exec_resource']
  put('octra_core','\n'.join('module '+n.capitalize()+'='+n.capitalize()for n in core)+'\n')
  txview='''module Address=Octra_core.Crypto.Address
 module Transaction=Octra_core.Transaction
 module Staging=Octra_core.Tx_staging
 module Crypto=Octra_core.Crypto
 module Program_package=struct let validate_base64 _=failwith "fixture reached VM encrypted payload validation" end
+module Pvac_registry=struct let expected_kat ()=failwith "fixture reached the PVAC engine self-test" end
 let encrypt_decrypt_payload_ok _=failwith "fixture reached HFHE encrypted payload validation"
 let stealth_payload_ok _=failwith "fixture reached HFHE stealth payload validation"
 let claim_payload_ok _=failwith "fixture reached HFHE claim payload validation"
@@ -61,7 +68,7 @@ let key_switch_payload_ok _=failwith "fixture reached HFHE key validation"
  txview+=''.join(decl('tx_view','let',n)for n in names)+decl('tx_view','type','staging_submit_effects')
  names=['staging_submit_effects','address_route_check','self_route_check','staging_error','semantic_error_reason','has_html','call_params_message_ok','call_params_ok','encrypted_payload_ok']
  txview+=''.join(decl('tx_view','let',n)for n in names)+decl('tx_view','type','payload_limits')
- names=['payload_limits','circle_asset_body_too_large','payload_size_check','payload_check','bft_op_check','duty_retry','pre_route_check','submission_pubkey','signature_check','sender_check','submit_pre_signature_check','encrypted_data_missing_or_empty','post_signature_check','submit_signature_check']
+ names=['payload_limits','circle_asset_body_too_large','payload_size_check','payload_parse_bytes','payload_check','bft_op_check','duty_retry','pre_route_check','submission_pubkey','signature_check','sender_check','payload_account_check','submit_pre_signature_check','encrypted_data_missing_or_empty','post_signature_check','submit_signature_check']
  txview+=''.join(decl('tx_view','let',n)for n in names);put('tx_view',txview)
  put('preverify_cache','let remove _=()\nlet has_capacity ()=true\nlet pending_count ()=0\nlet pending_max ()=6\n')
  put('rest_read_rpc','module Transaction=Transaction\n'+decl('rest_read_rpc','let','stealth_floor'))
@@ -76,6 +83,9 @@ module WSServer=struct let notify_staging_update ~total_txs:_ ~total_ou:_ ~max_o
  facade+=''.join(decl('node_rest_facade','let',n)for n in names);put('node_rest_facade',facade)
  put('octra_node_runtime','module Node_rest_facade=Node_rest_facade\nmodule Tx_view=Tx_view\n')
  wrapper=(ROOT/'scripts/node-port/staging-intake-oracle.ml').read_text().replace('let runtime:R.runtime={swarm_ref=','let runtime:R.runtime={signing=(fun()->C.Tx_signature.Historical);marks_mode=(fun()->C.Rule_graph.Prior);swarm_ref=')
+ # Submission is now a promise because payload parsing may be queued; with the inline pool it is already resolved.
+ call='result(R.validate_and_submit_tx runtime ledger tx)';assert wrapper.count(call)==1
+ wrapper=wrapper.replace(call,'result(Lwt_main.run(R.validate_and_submit_tx runtime ledger tx))')
  put('oracle',wrapper)
  env=os.environ.copy();env['PATH']=str(a.ocaml_bin)+os.pathsep+env['PATH']
  # Discover transitive source order. Only the explicitly exported native modules

@@ -90,6 +90,7 @@ fn engine() -> Engine {
         Protocol::default(),
         TimeoutConfig::default(),
     )
+    .unwrap()
 }
 #[allow(clippy::unnecessary_wraps)] // Engine signer callback signature.
 fn sign(bytes: &[u8]) -> Result<Vec<u8>, octra_node_protocol::consensus::Error> {
@@ -359,7 +360,7 @@ fn stored_local_vote_resumes_same_round_and_cannot_change_statement() {
     assert!(engine
         .restore_local_votes(&[vote(1, 2, &[9; 32], VoteType::Prevote)])
         .is_err());
-    engine.start_height(HEIGHT);
+    engine.start_height(HEIGHT).unwrap();
     assert_eq!(engine.state().round, 3);
 }
 #[test]
@@ -442,7 +443,8 @@ fn injected_policy_controls_local_engine_without_rewriting_network_epochs() {
         2,
         Protocol::default(),
         TimeoutConfig::default(),
-    );
+    )
+    .unwrap();
     assert!(engine.round_wait());
     engine.set_voting_ready(true);
     engine.start_round(0);

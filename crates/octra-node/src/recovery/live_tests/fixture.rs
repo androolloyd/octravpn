@@ -162,6 +162,7 @@ fn config(
     profile: Profile,
 ) -> executor::Config {
     executor::Config {
+        profile_hash: std::sync::Arc::new(|_: &[u8], _: i64| Err("no profile".to_string())),
         graph: Graph::new(chain.chain_id.as_bytes().to_vec(), None),
         protocol,
         profile,
@@ -642,7 +643,8 @@ impl Fixture {
             2,
             protocol,
             timeouts,
-        );
+        )
+        .unwrap();
         let publication =
             Canonical::new(node.clone(), network.bundles.clone(), executor.clone(), 1.)
                 .await

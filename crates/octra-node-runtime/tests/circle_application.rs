@@ -339,6 +339,7 @@ async fn signed_counter(octb: bool) {
     let batch = circle_transaction::execute(
         &common::runtime(),
         circle_transaction::Rules {
+            scalar_work: false,
             manifest: octra_node_runtime::circle::WasmProfile::Compute,
             update_policy: false,
             wasm: profile(),
@@ -375,6 +376,7 @@ async fn signed_counter(octb: bool) {
             legacy_total: None,
         },
         &octra_node_runtime::epoch_footer::Request {
+            execution: &octra_node_runtime::epoch_footer::Execution::default(),
             epoch: 1,
             reward: &finality_host::reward(authority.seed),
             validator_keys: &[],

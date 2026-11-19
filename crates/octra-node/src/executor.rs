@@ -62,6 +62,8 @@ pub struct Config {
     pub max_stealth: usize,
     pub max_multi_exec_calls: usize,
     pub ready_max_lag: i64,
+    /// `Consensus_profile.hash`, recorded per epoch under seatless voting.
+    pub profile_hash: octra_node_runtime::epoch_footer::ProfileHash,
     /// Native PVAC directory, containing content-addressed `blobs/<hash>.pk`.
     pub pvac_dir: PathBuf,
     pub migration: Option<Arc<octra_node_protocol::state_sync::migration::Admission>>,
@@ -295,6 +297,7 @@ impl Native {
                 envelope: mode(Rule::TxEnvelope),
                 compute: mode(Rule::VmBytes),
                 settle: mode(Rule::Settle),
+                program: mode(Rule::ProgramResult),
             },
         })
     }

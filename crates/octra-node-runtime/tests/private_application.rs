@@ -89,7 +89,9 @@ fn execute(
     let reward = common::reward(seed);
     let minimum = 5000.into();
     let request = Request {
+        execution: &octra_node_runtime::epoch_footer::Execution::default(),
         validators: validator_epoch::Request {
+            voting_set: None,
             chain: b"private-application",
             epoch: parent.cursor.epoch.0 as i64 + 1,
             policy: &Policy::Inactive,
@@ -98,6 +100,7 @@ fn execute(
             committed_head: Some(&before),
         },
         envelope: transaction_outcome::Rules {
+            program: octra_node_protocol::transaction::RuleMode::Prior,
             envelope: RuleMode::Active,
             compute: RuleMode::Prior,
             settle: RuleMode::Prior,

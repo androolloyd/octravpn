@@ -114,6 +114,7 @@ fn run(input: &Value) -> Value {
             caught(
                 outcome::check_envelopes(
                     outcome::Rules {
+                        program: octra_node_protocol::transaction::RuleMode::Prior,
                         envelope: mode("envelope"),
                         compute: mode("compute"),
                         settle: mode("settle"),

@@ -171,7 +171,9 @@ fn execute(
     let minimum = 5000.into();
     let previous = hex::encode(parent.cursor.state_root.0);
     let request = Request {
+        execution: &octra_node_runtime::epoch_footer::Execution::default(),
         validators: validator_epoch::Request {
+            voting_set: None,
             chain: &finalized.chain_id,
             epoch: finalized.epoch_id,
             policy: &policy,
@@ -180,6 +182,7 @@ fn execute(
             committed_head: Some(&before),
         },
         envelope: transaction_outcome::Rules {
+            program: octra_node_protocol::transaction::RuleMode::Prior,
             envelope: RuleMode::Prior,
             compute: RuleMode::Prior,
             settle: RuleMode::Prior,

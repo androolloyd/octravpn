@@ -63,6 +63,7 @@ fn rules() -> consensus_bundle::Rules {
         crypto_active: false,
         stealth_minimum: 5000.into(),
         envelope: transaction_outcome::Rules {
+            program: octra_node_protocol::transaction::RuleMode::Prior,
             envelope: RuleMode::Prior,
             compute: RuleMode::Prior,
             settle: RuleMode::Prior,
@@ -388,7 +389,8 @@ async fn node_with_mode(
         1,
         Protocol::default(),
         timeouts,
-    );
+    )
+    .unwrap();
     if let Some(proposal) = restored {
         engine.restore_precommit_lock(proposal).unwrap();
     }

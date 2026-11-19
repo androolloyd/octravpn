@@ -125,6 +125,30 @@ pub fn snapshot(
         candidate.validate()?;
     }
     validate_unique(candidates, "duplicate validator public key")?;
+    let validators = select_members(parameters, source_epoch, candidates, incumbents);
+    if validators.len() < 4 {
+        return Err("validator snapshot has fewer than four eligible members".into());
+    }
+    let total_weight = validators.iter().map(|v| &v.weight).sum();
+    let quorum_weight = quorum_weight(&total_weight)?;
+    let fingerprint = snapshot_fingerprint(source_epoch, activate_epoch, &validators);
+    Ok(Snapshot {
+        source_epoch,
+        activate_epoch,
+        validators,
+        total_weight,
+        quorum_weight,
+        fingerprint,
+    })
+}
+/// Native `Validator_entry.select_members`: eligible candidates, incumbents
+/// first, then by bond, address and key, up to the seat limit.
+pub fn select_members(
+    parameters: &Parameters,
+    source_epoch: i64,
+    candidates: &[Candidate],
+    incumbents: &[Vec<u8>],
+) -> Vec<Member> {
     let incumbents: BTreeSet<_> = incumbents.iter().collect();
     let mut selected: Vec<_> = candidates
         .iter()
@@ -138,29 +162,39 @@ pub fn snapshot(
             .then_with(|| l.address.cmp(&r.address))
             .then_with(|| l.pubkey.cmp(&r.pubkey))
     });
-    selected.truncate(parameters.max_validators as usize);
-    if selected.len() < 4 {
-        return Err("validator snapshot has fewer than four eligible members".into());
-    }
-    let validators: Vec<_> = selected
+    selected.truncate(usize::try_from(parameters.max_validators.max(0)).unwrap_or(usize::MAX));
+    selected
         .into_iter()
         .map(|c| Member {
             address: c.address.clone(),
             pubkey: c.pubkey.clone(),
             weight: c.bond.clone(),
         })
-        .collect();
-    let total_weight = validators.iter().map(|v| &v.weight).sum();
-    let quorum_weight = quorum_weight(&total_weight)?;
-    let fingerprint = snapshot_fingerprint(source_epoch, activate_epoch, &validators);
-    Ok(Snapshot {
-        source_epoch,
-        activate_epoch,
-        validators,
-        total_weight,
-        quorum_weight,
-        fingerprint,
-    })
+        .collect()
+}
+/// Native `Validator_entry.check_weight_change`: with four or more members
+/// after a change, no member may newly reach (or grow) a blocking third of
+/// the total weight.
+pub fn check_weight_change(before: &[Member], after: &[Member]) -> Result<(), Error> {
+    let total = |members: &[Member]| members.iter().map(|m| &m.weight).sum::<BigInt>();
+    let (before_total, after_total) = (total(before), total(after));
+    if after.len() < 4 {
+        return Ok(());
+    }
+    let increased = |member: &Member| {
+        let excess: BigInt = &member.weight * 3 - &after_total;
+        !excess.is_negative()
+            && (before.len() < 4
+                || before
+                    .iter()
+                    .find(|old| old.address == member.address)
+                    .is_none_or(|old| excess > &old.weight * 3 - &before_total))
+    };
+    if after.iter().any(increased) {
+        Err("validator change increases blocking weight".into())
+    } else {
+        Ok(())
+    }
 }
 pub fn snapshot_fingerprint(
     source_epoch: i64,

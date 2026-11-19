@@ -12,20 +12,17 @@ use std::collections::BTreeSet;
 pub enum FinalityMode {
     Live(policy::Protocol),
     Persisted,
-    StrictPersisted,
 }
 pub fn validate_certificate(
     chain_id: &[u8],
     set: &ValidatorSet,
     certificate: &CommitCertificate,
-    strict: bool,
 ) -> Result<(), Error> {
     validate_certificate_for_policy(
         policy::QuorumPolicy::for_chain(chain_id),
         chain_id,
         set,
         certificate,
-        strict,
     )
 }
 pub fn validate_certificate_for_policy(
@@ -33,12 +30,13 @@ pub fn validate_certificate_for_policy(
     chain_id: &[u8],
     set: &ValidatorSet,
     certificate: &CommitCertificate,
-    strict: bool,
 ) -> Result<(), Error> {
     if certificate.chain_id != chain_id {
         return Err("chain_id".into());
     }
-    let effective = set.for_policy(policy, certificate.epoch_id)?;
+    let effective = set
+        .structural_for_policy(policy, certificate.epoch_id)
+        .map_err(|error| Error::from(format!("validator_set: {}", error.message())))?;
     if certificate.header.chain_id != certificate.chain_id {
         return Err("header_chain_id".into());
     }
@@ -69,11 +67,7 @@ pub fn validate_certificate_for_policy(
     if signers.iter().collect::<BTreeSet<_>>().len() != signers.len() {
         return Err("duplicate_validator".into());
     }
-    let policy_ok = set.has_quorum_for_policy(policy, certificate.epoch_id, &signers)?;
-    let strict_ok = !strict
-        || policy.select(certificate.epoch_id) == policy::Rule::Prior
-        || effective.has_quorum(&signers);
-    if !(policy_ok && strict_ok) {
+    if !set.has_quorum_for_policy(policy, certificate.epoch_id, &signers)? {
         return Err("quorum".into());
     }
     #[allow(clippy::suspicious_operation_groupings)] // Votes bind the certificate commit round.
@@ -129,7 +123,7 @@ pub fn validate_finalize_for_policy(
         FinalityMode::Live(protocol) => {
             finalize.header.proto_version == protocol.version_at(finalize.epoch_id)
         }
-        _ => policy::supported_version(finalize.header.proto_version),
+        FinalityMode::Persisted => policy::supported_version(finalize.header.proto_version),
     };
     if !valid_version {
         return Err("header_proto_version".into());
@@ -139,13 +133,7 @@ pub fn validate_finalize_for_policy(
     {
         return Err("parent_commit_hash".into());
     }
-    validate_certificate_for_policy(
-        policy,
-        chain_id,
-        set,
-        &finalize.certificate(),
-        mode == FinalityMode::StrictPersisted,
-    )
+    validate_certificate_for_policy(policy, chain_id, set, &finalize.certificate())
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpectedParent {
@@ -188,7 +176,6 @@ pub fn validate_parent_for_policy(
         &expected.chain_id,
         &parent.validator_set,
         certificate,
-        false,
     )
     .map_err(|e| Error::from(format!("qc_{e}")))
 }

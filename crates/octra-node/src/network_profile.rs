@@ -37,6 +37,18 @@ impl Profile {
             .hash(chain, epoch, &self.crypto_engine)?
             .to_vec())
     }
+    /// `Consensus_profile.hash` as an owned function, for the executor's
+    /// per-epoch execution marker.
+    pub fn hasher(&self) -> octra_node_runtime::epoch_footer::ProfileHash {
+        let settings = self.settings.clone();
+        let engine = self.crypto_engine.clone();
+        std::sync::Arc::new(move |chain: &[u8], epoch: i64| {
+            settings
+                .hash(chain, epoch, &engine)
+                .map(|hash| hash.to_vec())
+                .map_err(|e| e.to_string())
+        })
+    }
     pub fn wire_hash(&self, chain: &[u8], epoch: i64) -> Result<Vec<u8>> {
         Ok(hash::network_hash(
             chain,

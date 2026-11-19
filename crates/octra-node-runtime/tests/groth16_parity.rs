@@ -309,6 +309,7 @@ fn circle_host_executes_private_admin_handoff_rotation_and_rejects_replay() {
         let call = &case["call"];
         let before = state.root().unwrap();
         let context = circle_call::Context {
+            scalar_work: false,
             caller: "relayer".into(),
             tx_hash: format!("{index:064x}"),
             epoch: 2_000_000,

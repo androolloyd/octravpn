@@ -30,6 +30,8 @@ pub struct Fold {
     pub proof_key: RuleMode,
     pub program_records: RuleMode,
     pub program_inputs: RuleMode,
+    /// Rule `scalar_work`: VM integer width and numeric text work.
+    pub scalar_work: RuleMode,
     pub duty_marks: RuleMode,
     pub tx_network: RuleMode,
     pub vm_bytes: RuleMode,
@@ -64,6 +66,7 @@ impl Fold {
             proof_key: RuleMode::Prior,
             program_records: RuleMode::Prior,
             program_inputs: RuleMode::Prior,
+            scalar_work: RuleMode::Prior,
             duty_marks: RuleMode::Prior,
             tx_network: RuleMode::Prior,
             vm_bytes: RuleMode::Prior,

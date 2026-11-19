@@ -96,6 +96,14 @@ pub struct ValidatorSet {
     pub weighted: bool,
     pub authors: Option<(i64, Vec<(Validator, BigInt)>)>,
 }
+/// Witness that a validator set was reduced by removing slashed members:
+/// the set voting at `epoch` and the members removed from it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Eviction {
+    pub epoch: i64,
+    pub source: ValidatorSet,
+    pub offenders: Vec<Bytes>,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RewardMember {
     pub reward_address: Bytes,

@@ -371,6 +371,7 @@ async fn prepare(
         .max(0);
     let execution = executor::Config {
         graph: Graph::new(chain.to_vec(), Some(profile.ready_hash(chain)?)),
+        profile_hash: profile.hasher(),
         protocol,
         profile: settings.transactions.clone(),
         payload: octra_node_protocol::transaction_payload::Limits::default(),

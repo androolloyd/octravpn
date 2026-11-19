@@ -7,7 +7,7 @@ native function body, journal, signature, engine and value-log module is origina
 """
 import argparse, hashlib, importlib.util, json, os, re, shutil, subprocess
 from pathlib import Path
-PIN='c49de45cf49ebbc2e5c0697eb956cbcada5845e7'
+PIN='8f785a93a4e7392a0f3e65674f9de89854d33dbc'
 HERE=Path(__file__).resolve().parent
 ROOT=HERE.parents[1]
 def sha(data): return hashlib.sha256(data).hexdigest()
@@ -19,7 +19,7 @@ def main():
  def read(path):
   data=subprocess.check_output(['git','-C',str(a.upstream),'show',f'{PIN}:{path}']);hashes[path]=sha(data);return data.decode()
  spec=importlib.util.spec_from_file_location('engine',HERE/'consensus-engine-fixtures.py');base=importlib.util.module_from_spec(spec);spec.loader.exec_module(base)
- sources=base.SOURCES+['logging/octra_log_format.ml','lib/consensus/c_vote_log.ml','lib/consensus/c_value_log.ml']
+ sources=base.SOURCES+['lib/consensus/c_measure.ml','logging/octra_log_format.ml','lib/consensus/c_vote_log.ml','lib/consensus/c_value_log.ml']
  for path in sources: (out/Path(path).name).write_text(read(path))
  driver=read('lib/consensus/c_driver.ml')
  def decl(name):
@@ -63,7 +63,7 @@ let create_fixture ~config ~validator_set ~start_height ~vote_log =
  (out/'octra_net.ml').write_text('module Oce1=Oce1\nmodule Hash_domain=Hash_domain\n')
  (out/'octra_consensus.ml').write_text('\n'.join('module '+m+'='+m for m in modules)+'\n')
  env=os.environ.copy();env['PATH']=str(a.ocaml_bin)+os.pathsep+env['PATH']
- order=['oce1','hash_domain','octra_net','octra_log_format','octra_log','octra_ed25519','c_protocol','epoch_time','c_epoch_time_policy','c_quorum_policy','c_types','c_reward_source','c_codec','c_config','c_hash','c_qc','c_engine','c_vote_log','c_value_log','c_driver','octra_consensus','oracle']
+ order=['oce1','hash_domain','octra_net','octra_log_format','octra_log','octra_ed25519','c_protocol','epoch_time','c_epoch_time_policy','c_quorum_policy','c_measure','c_types','c_reward_source','c_codec','c_config','c_hash','c_qc','c_engine','c_vote_log','c_value_log','c_driver','octra_consensus','oracle']
  command=[shutil.which('ocamlfind',path=env['PATH']),'ocamlopt','-thread','-package','digestif.c,zarith,yojson,base64,unix,mirage-crypto-ec,lwt.unix','-linkpkg',*[m+'.ml' for m in order],'-o','oracle']
  r=subprocess.run(command,cwd=out,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT);(out/'build.log').write_text(r.stdout)
  if r.returncode: raise SystemExit(f'native build failed: {out / "build.log"}')

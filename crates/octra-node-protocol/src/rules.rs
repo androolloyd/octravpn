@@ -40,8 +40,12 @@ pub enum Rule {
     DutyMarks,
     ProofKey,
     TxNetwork,
+    ScalarWork,
+    SourceCreate,
+    ProgramResult,
+    Seatless,
 }
-pub const ALL: [Rule; 33] = [
+pub const ALL: [Rule; 37] = [
     Rule::Circle,
     Rule::WasmCompute,
     Rule::ValidatorQuorum,
@@ -75,6 +79,10 @@ pub const ALL: [Rule; 33] = [
     Rule::DutyMarks,
     Rule::ProofKey,
     Rule::TxNetwork,
+    Rule::ScalarWork,
+    Rule::SourceCreate,
+    Rule::ProgramResult,
+    Rule::Seatless,
 ];
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Activation {
@@ -205,6 +213,14 @@ pub fn activation(chain: &[u8], rule: Rule) -> Option<Activation> {
             "369bdf20cafef586867569d2db0a6d89f36811960e1445a52651856b00f8242a",
             1_737_333,
         ),
+        // One anchor carries the work-metering rules and seatless voting.
+        // Upstream also requires each rule SourceCreate and ProgramResult
+        // build on to be scheduled no later; on devnet they all precede it.
+        Rule::ScalarWork | Rule::SourceCreate | Rule::ProgramResult | Rule::Seatless => (
+            policy::SEATLESS_ANCHOR_EPOCH,
+            policy::SEATLESS_ANCHOR_ROOT,
+            policy::SEATLESS_ACTIVATION,
+        ),
         Rule::Settle | Rule::TxNetwork => return None,
     };
     Some(Activation {
@@ -302,6 +318,9 @@ pub fn root_after_floor(chain: &[u8], floor: i64, epoch: i64) -> Option<Vec<u8>>
         Rule::CircleBatch,
         Rule::ProofExecution,
         Rule::VmBytes,
+        Rule::ScalarWork,
+        Rule::SourceCreate,
+        Rule::ProgramResult,
         Rule::CipherMigration,
         Rule::Settle,
         Rule::Stake,
@@ -309,6 +328,7 @@ pub fn root_after_floor(chain: &[u8], floor: i64, epoch: i64) -> Option<Vec<u8>>
         Rule::DutyMarks,
         Rule::ProofKey,
         Rule::TxNetwork,
+        Rule::Seatless,
     ]
     .iter()
     .filter_map(|r| activation(chain, *r))

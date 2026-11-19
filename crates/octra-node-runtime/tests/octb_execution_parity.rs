@@ -17,7 +17,40 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, sync::Arc};
 fn bytes(v: &Value) -> Vec<u8> {
+    if let Some([chunk, count]) = v["repeat"].as_array().map(Vec::as_slice) {
+        return STANDARD
+            .decode(chunk.as_str().unwrap())
+            .unwrap()
+            .repeat(count.as_u64().unwrap() as usize);
+    }
     STANDARD.decode(v.as_str().unwrap()).unwrap()
+}
+/// Candidate captures write wide integers as `2^k + offset`.
+fn big(v: &Value) -> BigInt {
+    for (key, sign) in [("pow2", 1), ("neg_pow2", -1)] {
+        if let Some([k, offset]) = v[key].as_array().map(Vec::as_slice) {
+            let value = (BigInt::from(1) << k.as_u64().unwrap())
+                + offset.as_str().unwrap().parse::<BigInt>().unwrap();
+            return value * sign;
+        }
+    }
+    v.as_str().unwrap().parse().unwrap()
+}
+/// Candidate captures render large results as digests.
+fn number(n: &BigInt, compact: bool) -> Value {
+    if compact && n.bits() > 8192 {
+        json!({"digest": hex::encode(Sha256::digest(n.to_string())), "bits": n.bits(), "sign": match n.sign() {
+            num_bigint::Sign::Minus => -1, num_bigint::Sign::NoSign => 0, num_bigint::Sign::Plus => 1 }})
+    } else {
+        json!(n.to_string())
+    }
+}
+fn blob(v: &[u8], compact: bool) -> Value {
+    if compact && v.len() > 8192 {
+        json!({"digest": hex::encode(Sha256::digest(v)), "length": v.len()})
+    } else {
+        encoded(v)
+    }
 }
 fn encoded(v: &[u8]) -> Value {
     json!(STANDARD.encode(v))
@@ -45,30 +78,33 @@ fn cap_json(c: &Capability) -> Value {
 fn cell(v: &Value) -> Cell {
     let (k, v) = v.as_object().unwrap().iter().next().unwrap();
     match k.as_str() {
-        "int" => Cell::int(v.as_str().unwrap().parse::<BigInt>().unwrap()),
+        "int" => Cell::int(big(v)),
         "bool" => Cell::Bool(v.as_bool().unwrap()),
         "str" => Cell::string(bytes(v)),
         "bytes" => Cell::Bytes(bytes(v).into()),
         "bytes32" => Cell::Bytes32(bytes(v).into()),
         "addr" => Cell::Address(bytes(v).into()),
         "cap" => Cell::Capability(cap(v)),
-        "u64" => Cell::U64(Arc::new(v.as_str().unwrap().parse().unwrap())),
-        "u128" => Cell::U128(Arc::new(v.as_str().unwrap().parse().unwrap())),
-        "u256" => Cell::U256(Arc::new(v.as_str().unwrap().parse().unwrap())),
+        "u64" => Cell::U64(Arc::new(big(v))),
+        "u128" => Cell::U128(Arc::new(big(v))),
+        "u256" => Cell::U256(Arc::new(big(v))),
         _ => panic!("unknown fixture type"),
     }
 }
 fn render(v: &Cell) -> Value {
+    render_as(v, false)
+}
+fn render_as(v: &Cell, compact: bool) -> Value {
     let (k, v) = match v {
-        Cell::Int(v) => ("int", json!(v.to_string())),
+        Cell::Int(v) => ("int", number(v, compact)),
         Cell::Bool(v) => ("bool", json!(v)),
-        Cell::String(v) => ("str", encoded(v)),
-        Cell::Bytes(v) => ("bytes", encoded(v)),
-        Cell::Bytes32(v) => ("bytes32", encoded(v)),
-        Cell::Address(v) => ("addr", encoded(v)),
-        Cell::U64(v) => ("u64", json!(v.to_string())),
-        Cell::U128(v) => ("u128", json!(v.to_string())),
-        Cell::U256(v) => ("u256", json!(v.to_string())),
+        Cell::String(v) => ("str", blob(v, compact)),
+        Cell::Bytes(v) => ("bytes", blob(v, compact)),
+        Cell::Bytes32(v) => ("bytes32", blob(v, compact)),
+        Cell::Address(v) => ("addr", blob(v, compact)),
+        Cell::U64(v) => ("u64", number(v, compact)),
+        Cell::U128(v) => ("u128", number(v, compact)),
+        Cell::U256(v) => ("u256", number(v, compact)),
         Cell::Capability(v) => ("cap", cap_json(v)),
         _ => panic!("unexpected private handle"),
     };
@@ -140,7 +176,8 @@ impl Host for FixtureHost {
         Ok(self.live)
     }
 }
-fn run(v: &Value, stepped: bool) -> Value {
+fn run_as(v: &Value, stepped: bool, compact: bool) -> Value {
+    let render = |value: &Cell| render_as(value, compact);
     let _scope = crypto_worker::scope(flag(v, "view"));
     let image = Image::decode(&bytes(&v["raw"]), true).unwrap();
     let code = octb::fix_jumps(&image.code);
@@ -200,6 +237,7 @@ fn run(v: &Value, stepped: bool) -> Value {
         strict: flag(v, "strict"),
         typed_bytes: flag(v, "typed"),
         integer_work: flag(v, "integer_work"),
+        scalar_work: flag(v, "scalar"),
         point_ops: flag(v, "point"),
         is_view: flag(v, "view"),
         storage_kinds: rows(v, "kinds")
@@ -239,7 +277,7 @@ fn run(v: &Value, stepped: bool) -> Value {
         .collect();
     json!({"ok":ok,"pc":machine.pc,"effort":machine.effort,"reverted":machine.reverted,"output_ready":machine.output_ready,"regs":registers,
   "memory":machine.memory.iter().map(|(i,v)|json!([i,render(v)])).collect::<Vec<_>>(),"memory_size":machine.memory_size,
-  "storage":machine.storage.values().iter().map(|(k,v)|json!([encoded(k),encoded(v)])).collect::<Vec<_>>(),
+  "storage":machine.storage.values().iter().map(|(k,v)|json!([encoded(k),blob(v,compact)])).collect::<Vec<_>>(),
   "blobs":machine.blobs.iter().map(|(k,v)|json!([encoded(k),encoded(v)])).collect::<Vec<_>>(),
   "events":machine.events.iter().map(|e|json!({"contract":encoded(&e.contract),"depth":e.depth,"name":encoded(&e.name),"values":e.values.iter().map(render).collect::<Vec<_>>()})).collect::<Vec<_>>(),
   "closes":machine.closes.iter().map(cap_json).collect::<Vec<_>>(),"host_calls":host.calls,
@@ -275,6 +313,75 @@ fn native_octb_execution_preserves_state_cost_and_refusal_order() {
     compare(cases);
 }
 
+/// Candidate release `8f785a93`: the historical cases with and without rule
+/// `scalar_work`, plus cases at its limits. Expectations come from the
+/// unchanged upstream VM; historical cases are stored only where the
+/// candidate's result differs.
+#[test]
+fn candidate_octb_execution_matches_scalar_work() {
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/octb-scalar-candidate.json")).unwrap();
+    let historical: Value =
+        serde_json::from_str(include_str!("fixtures/octb-execution.json")).unwrap();
+    let pin: Value = serde_json::from_str(include_str!(
+        "../../../docs/rust-node/source-map-candidate.json"
+    ))
+    .unwrap();
+    assert_eq!(fixture["upstream_commit"], pin["upstream_commit"]);
+    for (path, digest) in fixture["source_sha256"].as_object().unwrap() {
+        assert_eq!(pin["files"][path], *digest, "{path}");
+    }
+    for (key, raw) in [
+        (
+            "oracle_sha256",
+            include_bytes!("../../../scripts/node-port/candidate-octb-scalar-oracle.ml").as_slice(),
+        ),
+        (
+            "generator_sha256",
+            include_bytes!("../../../scripts/node-port/candidate-octb-scalar-oracle.py").as_slice(),
+        ),
+        (
+            "generator_dependency_sha256",
+            include_bytes!("../../../scripts/node-port/octb-execution-fixtures.py").as_slice(),
+        ),
+        (
+            "historical_sha256",
+            include_bytes!("fixtures/octb-execution.json").as_slice(),
+        ),
+    ] {
+        assert_eq!(fixture[key], hex::encode(Sha256::digest(raw)), "{key}");
+    }
+    let cases = historical["cases"].as_array().unwrap();
+    assert_eq!(fixture["historical_cases"], cases.len());
+    let prior = fixture["prior_overrides"].as_object().unwrap();
+    let scalar = fixture["scalar_overrides"].as_object().unwrap();
+    let mut rows = Vec::new();
+    for (index, case) in cases.iter().enumerate() {
+        let key = index.to_string();
+        let (prior_expected, prior_compact) = prior
+            .get(&key)
+            .map_or((case["expected"].clone(), false), |v| (v.clone(), true));
+        let mut input = case.clone();
+        input["scalar"] = json!(false);
+        rows.push((input.clone(), prior_expected.clone(), prior_compact));
+        input["scalar"] = json!(true);
+        rows.push(match scalar.get(&key) {
+            Some(changed) => {
+                let mut expected = prior_expected;
+                for (field, value) in changed.as_object().unwrap() {
+                    expected[field] = value.clone();
+                }
+                (input, expected, true)
+            }
+            None => (input, prior_expected, prior_compact),
+        });
+    }
+    for case in fixture["cases"].as_array().unwrap() {
+        rows.push((case.clone(), case["expected"].clone(), true));
+    }
+    compare_rows(&rows);
+}
+
 #[test]
 fn native_octb_spawn_preserves_nonce_budget_scope_and_host_completion() {
     let fixture: Value = serde_json::from_str(include_str!("fixtures/octb-spawn.json")).unwrap();
@@ -307,17 +414,26 @@ fn native_octb_spawn_preserves_nonce_budget_scope_and_host_completion() {
 }
 
 fn compare(cases: &[Value]) {
+    let rows: Vec<_> = cases
+        .iter()
+        .map(|case| (case.clone(), case["expected"].clone(), false))
+        .collect();
+    compare_rows(&rows);
+}
+/// Each row: the case input, its expected result, and whether that result
+/// came from a candidate capture (large values rendered as digests).
+fn compare_rows(rows: &[(Value, Value, bool)]) {
     let mut failures = vec![];
-    for (index, case) in cases.iter().enumerate() {
+    for (index, (case, expected, compact)) in rows.iter().enumerate() {
         for stepped in [false, true] {
-            let actual = run(case, stepped);
-            if actual != case["expected"] {
+            let actual = run_as(case, stepped, *compact);
+            if actual != *expected {
                 let fields: Vec<_> = actual
                     .as_object()
                     .unwrap()
                     .iter()
-                    .filter(|(k, v)| **v != case["expected"][*k])
-                    .map(|(k, v)| format!("{k}: got {v}, native {}", case["expected"][k]))
+                    .filter(|(k, v)| **v != expected[*k])
+                    .map(|(k, v)| format!("{k}: got {v}, native {}", expected[k]))
                     .collect();
                 failures.push(format!(
                     "case {index}, stepped {stepped}, {}: {}",

@@ -367,9 +367,9 @@ impl<H: Host, C: Publication> Driver<H, C> {
                         }
                     }
                     let validators = self.host.activate(next).await?;
-                    self.engine.replace_validator_set(validators);
+                    self.engine.replace_validator_set(validators)?;
                     self.notify_duty(next, duty);
-                    self.engine.start_height(next);
+                    self.engine.start_height(next)?;
                     self.value_restore = None;
                     self.proof_search = None;
                     self.saved_proofs.clear();

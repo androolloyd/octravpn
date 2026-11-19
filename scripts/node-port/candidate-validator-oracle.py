@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay every historical validator control against committed c49 native code."""
+"""Replay every historical validator control against the committed candidate native code."""
 import argparse
 import hashlib
 import json
@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 
-PIN = "c49de45cf49ebbc2e5c0697eb956cbcada5845e7"
+PIN = "8f785a93a4e7392a0f3e65674f9de89854d33dbc"
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -21,7 +21,7 @@ def main():
     a.out.mkdir(parents=True, exist_ok=True)
     out = a.out.resolve()
     modules = ["c_protocol", "epoch_time", "c_epoch_time_policy", "c_quorum_policy",
-               "c_types", "c_reward_source", "c_codec", "c_config"]
+               "c_measure", "c_types", "c_reward_source", "c_codec", "c_config"]
     paths = ["net/oce1.ml", "net/hash_domain.ml"] + ["lib/consensus/" + m + ".ml" for m in modules]
     hashes = {}
     for path in paths:
@@ -32,6 +32,15 @@ def main():
     (out / "octra_consensus.ml").write_text("\n".join(f"module {m.capitalize()} = {m.capitalize()}" for m in modules) + "\n")
     old_wrapper = ROOT / "scripts/node-port/consensus-validator-oracle.ml"
     wrapper = old_wrapper.read_text().replace("~now ~previous ~candidate", "~now ~previous ~entry:candidate")
+    # The weight-only and counted quorums are no longer separate functions:
+    # both are the Quorum ask of C_measure under the prior and capped rules.
+    for name, rule in [("has_weight_quorum", "Prior"), ("has_quorum", "Capped")]:
+        call = f"T.{name} s signers"
+        if wrapper.count(call) != 1:
+            raise SystemExit("historical wrapper no longer calls " + name)
+        wrapper = wrapper.replace(call, "(match T.signed_weight s signers with None -> false | Some weight -> "
+            f"C_measure.meets (T.space_for_rule C_quorum_policy.{rule} s) C_measure.Quorum "
+            "~seats:(T.unique_signer_count signers) ~weight)")
     (out / "oracle.ml").write_text(wrapper)
     historical = ROOT / "crates/octra-node-protocol/tests/fixtures/consensus-validators.json"
     inputs = [c["input"] for c in json.loads(historical.read_text())["cases"]]
@@ -49,7 +58,8 @@ def main():
                   historical_fixture_sha256=hashlib.sha256(historical.read_bytes()).hexdigest(),
                   historical_oracle_sha256=hashlib.sha256(old_wrapper.read_bytes()).hexdigest(),
                   oracle_sha256=hashlib.sha256(wrapper.encode()).hexdigest(),
-                  wrapper_adaptation="Epoch_time.check_proposal named argument candidate renamed entry; unchanged observations",
+                  wrapper_adaptation="Epoch_time.check_proposal named argument candidate renamed entry; "
+                  "has_weight_quorum and has_quorum expressed as the C_measure Quorum ask under the prior and capped rules",
                   scope=__doc__, cases=cases)
     a.fixture.write_text(json.dumps(report, separators=(",", ":")) + "\n")
     print(json.dumps(dict(cases=len(cases), fixture=str(a.fixture))))

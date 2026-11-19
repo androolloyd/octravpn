@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
-use super::{work, Budget, Exec, Instruction as I, IntegerOp, Machine, Request, Trap, Value};
+use super::{
+    scalar_work, work, Budget, Exec, Instruction as I, IntegerOp, Machine, Request, Trap, Value,
+};
+use num_bigint::BigInt;
 use num_traits::{ToPrimitive, Zero};
 pub(super) fn fixed(op: &I) -> i64 {
     op.effort_cost()
@@ -277,9 +280,46 @@ impl Machine {
             _ => vec![],
         }
     }
+    /// The `scalar_work` half of native `reserve_numbers`: numeric text is
+    /// length-limited and charged once per pass, integers must fit the width.
+    fn reserve_scalar_numbers(&mut self, inputs: &[(u8, i64, bool)]) -> Exec {
+        if !self.options.scalar_work {
+            return Ok(());
+        }
+        for (reg, passes, _) in inputs {
+            let ok = match self.get(*reg)? {
+                Value::String(raw) => {
+                    let length = raw.len();
+                    scalar_work::text_ok(raw)
+                        && self
+                            .scalar_charge(&(BigInt::from(passes + 1) * scalar_work::parse(length)))
+                }
+                value => value.scalar_valid(),
+            };
+            if !ok {
+                return Err(Trap::Refused);
+            }
+        }
+        Ok(())
+    }
+    /// Native `converted`: every numeric input, once read as an integer, fits.
+    fn scalar_converted(&self, inputs: &[(u8, i64, bool)]) -> Exec {
+        if !self.options.scalar_work {
+            return Ok(());
+        }
+        for (reg, _, _) in inputs {
+            if !scalar_work::valid(&self.get(*reg)?.number()) {
+                return Err(Trap::Refused);
+            }
+        }
+        Ok(())
+    }
     fn reserve_numbers(&mut self, op: &I, budget: &mut Option<&mut Budget>) -> Exec {
-        let Some(b) = budget else { return Ok(()) };
         let inputs = self.inputs(op);
+        self.reserve_scalar_numbers(&inputs)?;
+        let Some(b) = budget else {
+            return self.scalar_converted(&inputs);
+        };
         let mut base = 0;
         let mut requests = Vec::new();
         for (reg, passes, _) in &inputs {
@@ -300,6 +340,7 @@ impl Machine {
                 .charge(self.effort, self.options.limit, base, &requests)
                 .ok_or(Trap::Refused)?;
         }
+        self.scalar_converted(&inputs)?;
         for (reg, _, machine) in inputs {
             if machine {
                 self.index(reg).map_err(|_| Trap::Refused)?;
@@ -398,8 +439,146 @@ impl Machine {
         }
         Ok(())
     }
+    /// Native `scalar_text`: an integer is charged its decimal rendering,
+    /// text is charged a scan.
+    fn scalar_text(&mut self, value: &Value) -> bool {
+        match value {
+            value if value.numeric() => {
+                let number = value.number();
+                scalar_work::valid(&number) && self.scalar_charge(&scalar_work::decimal(&number))
+            }
+            Value::String(text) => self.scalar_charge(&scalar_work::scan(text.len())),
+            Value::Bytes(text) | Value::Bytes32(text) | Value::Address(text) => {
+                self.scalar_charge(&scalar_work::scan(text.len()))
+            }
+            _ => true,
+        }
+    }
+    fn scalar_register(&mut self, reg: u8) -> Exec<bool> {
+        let value = self.get(reg)?.clone();
+        Ok(self.scalar_text(&value))
+    }
+    /// Native `scalar_inputs`: text-consuming operands are charged before
+    /// the instruction's own effort.
+    // Positional operand names match the native instruction layout.
+    #[allow(clippy::many_single_char_names)]
+    fn scalar_inputs(&mut self, op: &I) -> Exec {
+        if !self.options.scalar_work {
+            return Ok(());
+        }
+        let span = |base: u8, count: u8| {
+            (u16::from(base) + u16::from(count) <= 64)
+                .then(|| (base..base + count).collect::<Vec<_>>())
+        };
+        let registers: Vec<u8> = match op {
+            I::Eq(_, a, b)
+            | I::Neq(_, a, b)
+            | I::Concat(_, a, b)
+            | I::Indexof(_, a, b)
+            | I::Sstorek(a, b)
+            | I::ObjectHasMember(_, a, b)
+            | I::SkeysPage(_, _, a, b, _) => vec![*a, *b],
+            I::Sstore(_, a)
+            | I::Sloadk(_, a)
+            | I::Sdelk(a)
+            | I::Fstore(_, a)
+            | I::Fload(_, a)
+            | I::Ishex(_, a)
+            | I::Isaddr(_, a)
+            | I::AssertAddr(a)
+            | I::StatePathKey(_, a)
+            | I::Strlen(_, a)
+            | I::Sha256(_, a)
+            | I::Keccak256(_, a)
+            | I::FheLoadPk(_, a)
+            | I::ObjectMemberCount(_, a)
+            | I::ObjectMemberRefAt(_, a, _)
+            | I::Substr(_, a, _, _)
+            | I::Skeys(_, a, _)
+            | I::ParseInts(_, a, _)
+            | I::Spawn(_, a)
+            | I::Spawn2(_, a, _, _)
+            | I::Transfer(_, a, _)
+            | I::LoadInt8BytesToMem(_, a, _, _, _)
+            | I::LoadInt8B64ToMem(_, a, _, _, _)
+            | I::LoadInt8Q16(_, a, _, _, _) => vec![*a],
+            I::ObjectTransitionApply(_, a, b, c, d, e, f, g, h, i, j) => {
+                vec![*a, *b, *c, *d, *e, *f, *g, *h, *i, *j]
+            }
+            I::Xcall(_, target, method, base, count) => match span(*base, *count) {
+                Some(rest) => [vec![*target, *method], rest].concat(),
+                None => vec![],
+            },
+            I::Emit(_, registers) => registers.clone(),
+            _ => vec![],
+        };
+        for reg in registers {
+            if !self.scalar_register(reg)? {
+                return Err(Trap::Refused);
+            }
+        }
+        let ok = match op {
+            I::Sloadn(keys, _, count) => self.scalar_batch(*keys, None, *count)?,
+            I::Sstoren(keys, values, count) => self.scalar_batch(*keys, Some(*values), *count)?,
+            I::Spawn2(_, _, base, count) => match span(*base, *count) {
+                Some(registers) => {
+                    let mut ok = true;
+                    for reg in registers {
+                        if !self.scalar_register(reg)? {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    ok
+                }
+                None => true,
+            },
+            _ => true,
+        };
+        if ok {
+            Ok(())
+        } else {
+            Err(Trap::Refused)
+        }
+    }
+    fn scalar_batch(&mut self, keys: u8, values: Option<u8>, count: u8) -> Exec<bool> {
+        let in_range = |cap: i64, value: &BigInt| {
+            value.sign() != num_bigint::Sign::Minus && *value <= BigInt::from(cap)
+        };
+        let count = self.get(count)?.number().into_owned();
+        let keys = self.get(keys)?.number().into_owned();
+        let values = match values {
+            Some(reg) => Some(self.get(reg)?.number().into_owned()),
+            None => None,
+        };
+        if !(in_range(1000, &count)
+            && in_range(16_777_216, &keys)
+            && values.as_ref().is_none_or(|v| in_range(16_777_216, v)))
+        {
+            return Ok(false);
+        }
+        let (Some(count), Some(keys)) = (count.to_i64(), keys.to_i64()) else {
+            return Ok(false);
+        };
+        let values = values.and_then(|v| v.to_i64());
+        let span = |base: i64| count <= 16_777_216 - base;
+        if !span(keys) || !values.is_none_or(span) {
+            return Ok(false);
+        }
+        for index in 0..count {
+            for base in std::iter::once(keys).chain(values) {
+                if let Some(value) = self.memory.get(&(base + index)).cloned() {
+                    if !self.scalar_text(&value) {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
     pub(super) fn prepare(&mut self, op: &I, budget: &mut Option<&mut Budget>) -> Exec {
         self.reserve_numbers(op, budget)?;
+        self.scalar_inputs(op)?;
         let strict = !self.options.strict || self.strict(op)?;
         let active = self.options.integer_work || budget.is_some();
         let cost = if strict {
@@ -434,6 +613,20 @@ impl Machine {
                         fixed(op),
                         &self.get(*a)?.number(),
                         &num_bigint::BigInt::zero(),
+                    )
+                }
+                I::Lt(_, a, b)
+                | I::Gt(_, a, b)
+                | I::Bitand(_, a, b)
+                | I::Bitor(_, a, b)
+                | I::Bitxor(_, a, b)
+                    if self.options.scalar_work =>
+                {
+                    IntegerOp::Add.cost(
+                        true,
+                        fixed(op),
+                        &self.get(*a)?.number(),
+                        &self.get(*b)?.number(),
                     )
                 }
                 _ => fixed(op).into(),

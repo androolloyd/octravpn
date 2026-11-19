@@ -43,7 +43,7 @@ impl Partition {
         rules: Rules,
     ) -> Result<Self, Error> {
         let all = outcome::merge(confirmed, rejections).map_err(error)?;
-        outcome::check_charged(rules.compute, rejections).map_err(error)?;
+        outcome::check_charged(rules.compute, rules.program, rejections).map_err(error)?;
         transaction::check_compute(rules.compute, rules.settle, &all).map_err(error)?;
         transaction::check_envelopes(rules.envelope, &all).map_err(error)?;
         let inputs = outcome::executed(confirmed, rejections).map_err(error)?;

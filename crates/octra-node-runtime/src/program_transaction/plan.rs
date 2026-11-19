@@ -35,6 +35,7 @@ pub(super) struct Call {
 pub(super) fn multi(
     raw: &[u8],
     max_calls: usize,
+    scalar_work: bool,
 ) -> Result<std::result::Result<Vec<Call>, Vec<u8>>, Error> {
     let invalid = || b"multi_exec payload is invalid".to_vec();
     let doc = match Document::parse_native(raw, ReadMode::Tree) {
@@ -73,6 +74,12 @@ pub(super) fn multi(
         // parameter shape in native parse_call, even on malformed objects.
         let amount = match doc.field(item, b"amount") {
             Some(Value::Int(value)) => BigInt::from(value.get()),
+            // Native `parse_call ~scalar_work`: long amount text is refused.
+            Some(Value::String(value) | Value::IntLiteral(value))
+                if scalar_work && value.len() > 128 =>
+            {
+                return Ok(Err(invalid()))
+            }
             Some(Value::String(value) | Value::IntLiteral(value)) => match parse_integer(value) {
                 Some(value) => value,
                 None => return Ok(Err(invalid())),

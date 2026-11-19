@@ -43,6 +43,7 @@ fn engine(local: u8, height: i64) -> Engine {
         Protocol::default(),
         TimeoutConfig::default(),
     )
+    .unwrap()
 }
 fn proposal(j: &Value) -> Proposal {
     let chain_id = raw(j, "chain");
@@ -142,7 +143,8 @@ async fn trace(j: &Value) -> Vec<Value> {
         integer(j, "height"),
         Protocol::default(),
         TimeoutConfig::default(),
-    );
+    )
+    .unwrap();
     let mut guard = VoteGuard::new(chain, address(local), owner.clone());
     let mut ready = Readiness {
         role_can_vote: true,
@@ -212,7 +214,7 @@ async fn trace(j: &Value) -> Vec<Value> {
 }
 #[tokio::test]
 async fn current_native_local_vote_bootstrap_recovery_and_durability_match() {
-    let raw = include_bytes!("fixtures/driver-votes-c49.json");
+    let raw = include_bytes!("fixtures/driver-votes-candidate.json");
     let fixture: Value = serde_json::from_slice(raw).unwrap();
     let source: Value = serde_json::from_str(include_str!(
         "../../../docs/rust-node/source-map-candidate.json"

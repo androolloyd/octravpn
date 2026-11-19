@@ -252,7 +252,8 @@ mod tests {
             HEIGHT,
             Protocol::default(),
             TimeoutConfig::default(),
-        );
+        )
+        .unwrap();
         engine.start_round(64);
         let (_, mut driver) = Driver::new(
             engine,

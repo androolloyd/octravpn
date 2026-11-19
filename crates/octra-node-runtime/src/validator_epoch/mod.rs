@@ -4,7 +4,8 @@
 mod advance;
 mod context;
 use crate::{execution::Error, state_batch::StateBatch, validator_transaction::EpochFold};
-pub use advance::{advance, Advanced, Request};
+pub(crate) use advance::remember_penalties_at;
+pub use advance::{advance, prepare_penalties, Advanced, Request, EVICTION_WAIT_KEY};
 pub use context::Fold;
 use octra_node_protocol::{
     consensus::ParentCommit,
@@ -50,6 +51,10 @@ impl BoundFold {
         };
         // Native policy faults precede a duty-rule fault. Keep validation order.
         let fold = mode(Rule::SetFold);
+        // The work rules share one anchor and are authenticated first.
+        ctx.scalar_work = mode(Rule::ScalarWork)?;
+        mode(Rule::SourceCreate)?;
+        mode(Rule::ProgramResult)?;
         mode(Rule::TxEnvelope)?;
         ctx.exit_mode = mode(Rule::Exit)?;
         ctx.ready_exec_mode = mode(Rule::ReadyExecution)?;

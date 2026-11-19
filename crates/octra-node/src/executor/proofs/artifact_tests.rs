@@ -42,6 +42,7 @@ impl History for NoHistory {
 fn host(directory: &std::path::Path) -> Native {
     Native::new_with_cache_inputs(
         super::super::Config {
+            profile_hash: std::sync::Arc::new(|_: &[u8], _: i64| Err("no profile".to_string())),
             graph: octra_node_protocol::rules::Graph::new(b"artifact-test".to_vec(), None),
             protocol: Protocol::default(),
             profile: octra_node_protocol::transaction_policy::Profile::default(),

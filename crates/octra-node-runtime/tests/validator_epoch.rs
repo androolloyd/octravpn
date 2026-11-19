@@ -123,6 +123,7 @@ fn round(
         Policy::from_value(Some(b"64")).unwrap()
     };
     let request = Request {
+        voting_set: None,
         chain: &chain,
         epoch: step["epoch"].as_i64().unwrap(),
         policy: &policy,
@@ -357,6 +358,7 @@ async fn scheduled_membership_and_circle_roots_survive_canonical_restart() {
         };
         let resolver = |_: i64, _: &StateBatch| Ok(context.clone());
         let request = Request {
+            voting_set: None,
             chain: &chain_id,
             epoch,
             policy: &policy,
@@ -514,4 +516,171 @@ async fn scheduled_membership_and_circle_roots_survive_canonical_restart() {
         }
     }
     store.close().await;
+}
+
+fn candidate_member(
+    id: &Value,
+) -> (
+    octra_node_protocol::consensus::Validator,
+    num_bigint::BigInt,
+) {
+    use ed25519_dalek::SigningKey;
+    let key = SigningKey::from_bytes(&[id["id"].as_u64().unwrap() as u8; 32])
+        .verifying_key()
+        .to_bytes();
+    let address =
+        octra_node_protocol::transaction::address_from_public_key(STANDARD.encode(key).as_bytes());
+    (
+        octra_node_protocol::consensus::Validator {
+            address: address.as_slice().into(),
+            pubkey: key.as_slice().into(),
+        },
+        id["weight"].as_str().unwrap().parse().unwrap(),
+    )
+}
+
+/// Candidate release `8f785a93`: penalties, promotion against the
+/// finalizing set, eviction scheduling and snapshots on the devnet chain
+/// around seatless activation, against `Epoch_exec` itself.
+#[test]
+fn candidate_seatless_advance_matches_native() {
+    use octra_node_protocol::consensus::ValidatorSet;
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/validator-epoch-candidate.json")).unwrap();
+    let pin: Value = serde_json::from_str(include_str!(
+        "../../../docs/rust-node/source-map-candidate.json"
+    ))
+    .unwrap();
+    assert_eq!(fixture["upstream_commit"], pin["upstream_commit"]);
+    for (key, raw) in [
+        (
+            "oracle_sha256",
+            include_bytes!("../../../scripts/node-port/candidate-validator-epoch-oracle.ml")
+                .as_slice(),
+        ),
+        (
+            "generator_sha256",
+            include_bytes!("../../../scripts/node-port/candidate-validator-epoch-oracle.py")
+                .as_slice(),
+        ),
+    ] {
+        assert_eq!(
+            fixture[key],
+            hex::encode(<sha2::Sha256 as sha2::Digest>::digest(raw)),
+            "{key}"
+        );
+    }
+    let policy = Policy::from_value(Some(b"64")).unwrap();
+    let mut failures = Vec::new();
+    let mut rounds_checked = 0;
+    for (index, case) in fixture["cases"].as_array().unwrap().iter().enumerate() {
+        let (input, expected) = (&case["input"], &case["expected"]);
+        if !expected["setup_error"].is_null() {
+            continue;
+        }
+        let chain = raw(&input["chain"]);
+        let mut state = StateBatch::default();
+        state.begin().unwrap();
+        state
+            .set(&[b"meta", registry::META_KEY], raw(&expected["registry"]))
+            .unwrap();
+        let candidates: Vec<Vec<u8>> = addresses(&json!(input["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["id"].clone())
+            .collect::<Vec<_>>()));
+        for (step, outcome) in input["rounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(expected["rounds"].as_array().unwrap())
+        {
+            if !outcome["setup_error"].is_null() {
+                break;
+            }
+            for write in step["meta"].as_array().map_or(&[][..], Vec::as_slice) {
+                state
+                    .set(
+                        &[b"meta", write["key"].as_str().unwrap().as_bytes()],
+                        raw(&write["value"]),
+                    )
+                    .unwrap();
+            }
+            if !outcome["setup_pending"].is_null() {
+                state
+                    .set(
+                        &[b"meta", update::PENDING_KEY],
+                        raw(&outcome["setup_pending"]),
+                    )
+                    .unwrap();
+            }
+            let epoch = step["epoch"].as_i64().unwrap();
+            let voting = step["voting"].as_array().and_then(|members| {
+                ValidatorSet::weighted(members.iter().map(candidate_member).collect()).ok()
+            });
+            let legacy = addresses(&step["legacy"]);
+            let mode = |name: &str| {
+                if step[name] == true {
+                    RuleMode::Active
+                } else {
+                    RuleMode::Prior
+                }
+            };
+            let ctx = Fold {
+                standard_mode: mode("standard"),
+                plan_mode: mode("plan"),
+                ..Fold::prior()
+            };
+            let resolver = |_: i64, _: &StateBatch| -> Result<Fold, Error> { Ok(ctx.clone()) };
+            let request = Request {
+                voting_set: voting.as_ref(),
+                chain: &chain,
+                epoch,
+                policy: &policy,
+                legacy_members: &legacy,
+                previous_root: &[4; 32],
+                committed_head: None,
+            };
+            let before = hex::encode(state.root().unwrap());
+            let saved = state.save().unwrap();
+            let result = validator_epoch::prepare_penalties(&request, &mut state)
+                .and_then(|()| validator_epoch::advance(&request, &resolver, &mut state));
+            if result.is_err() {
+                state.restore(saved).unwrap();
+            }
+            let meta = |key: &[u8]| json!(state.get(&[b"meta", key]).map(b64));
+            let actual = json!({
+                "before": before,
+                "error": result.err().map(|e| e.0),
+                "root": hex::encode(state.root().unwrap()),
+                "pending": meta(update::PENDING_KEY),
+                "active": meta(update::ACTIVE_KEY),
+                "wait": meta(validator_epoch::EVICTION_WAIT_KEY),
+                "penalty_epoch": meta(b"validator_penalty_epoch"),
+                "penalties": candidates.iter().map(|a| meta(&octra_node_runtime::epoch_footer::penalty_key(a))).collect::<Vec<_>>(),
+            });
+            for (field, value) in actual.as_object().unwrap() {
+                if *value != outcome[field] {
+                    failures.push(format!(
+                        "case {index} epoch {epoch} {field}: got {value}, native {}",
+                        outcome[field]
+                    ));
+                }
+            }
+            rounds_checked += 1;
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} mismatches:\n{}",
+        failures.len(),
+        failures
+            .iter()
+            .take(30)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    assert!(rounds_checked > 1000, "{rounds_checked}");
 }

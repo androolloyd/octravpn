@@ -9,7 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
-PIN = "c49de45cf49ebbc2e5c0697eb956cbcada5845e7"
+PIN = "8f785a93a4e7392a0f3e65674f9de89854d33dbc"
 HERE = Path(__file__).resolve().parent
 
 
@@ -23,7 +23,7 @@ def main():
     spec = importlib.util.spec_from_file_location("baseline", HERE / "consensus-engine-fixtures.py")
     baseline = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(baseline)
-    source_paths = baseline.SOURCES + ["logging/octra_log_format.ml"]
+    source_paths = baseline.SOURCES + ["logging/octra_log_format.ml", "lib/consensus/c_measure.ml"]
     a.out.mkdir(parents=True, exist_ok=True)
     out = a.out.resolve()
     hashes = {}
@@ -46,7 +46,7 @@ def main():
     compiler = shutil.which("ocamlopt", path=env["PATH"])
     find = shutil.which("ocamlfind", path=env["PATH"])
     order = ["oce1", "hash_domain", "octra_net", "octra_log_format", "octra_log", "octra_ed25519",
-             "c_protocol", "epoch_time", "c_epoch_time_policy", "c_quorum_policy", "c_types",
+             "c_protocol", "epoch_time", "c_epoch_time_policy", "c_quorum_policy", "c_measure", "c_types",
              "c_reward_source", "c_codec", "c_config", "c_hash", "c_qc", "c_engine",
              "octra_consensus", "oracle"]
     command = [find, "ocamlopt", "-package", "digestif.c,zarith,yojson,base64,unix,mirage-crypto-ec",
@@ -59,7 +59,7 @@ def main():
     # complete signed event streams at each new policy boundary.
     selected = [c for c in baseline.cases() if c["n"] == 4 and c["weighted"] and c["epoch"] == "1306547"]
     historical = baseline.cases()
-    cases = historical + [dict(c, epoch=str(epoch)) for epoch in [1737332, 1737333, 1739999, 1740000, 1740001] for c in selected]
+    cases = historical + [dict(c, epoch=str(epoch)) for epoch in [1737332, 1737333, 1739999, 1740000, 1740001, 1844999, 1845000, 1845001] for c in selected]
     (out / "inputs.json").write_text(json.dumps(cases))
     result = subprocess.run([str(out / "oracle"), str(out / "inputs.json")], env=env, text=True,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)

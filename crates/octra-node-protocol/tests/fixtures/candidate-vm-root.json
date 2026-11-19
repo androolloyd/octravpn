@@ -1,11 +1,11 @@
 {
-  "upstream_commit": "c49de45cf49ebbc2e5c0697eb956cbcada5845e7",
+  "upstream_commit": "8f785a93a4e7392a0f3e65674f9de89854d33dbc",
   "scope": "Native c49 VM-root encoding and narrowly scoped historical receipt projection.\n\nOnly the tree_hash JSON literal and its native byte-work emission cost change.\nFull historical Circle execution is not rerun: state roots, fees, transactions,\nand all unrelated receipt bytes remain original adopted native observations.\n",
   "source_sha256": {
-    "node_runtime/consensus_vm_transition.ml": "f603a2b8f9c3638cb89c99474273c0ca9ca160fa9f6de043b0998a2f4db8b1d8",
-    "node_runtime/consensus_epoch_vm_shell.ml": "339599b044d186da0526c77ab9748f16550a64a18c13a7c0df88577745db2ba4",
-    "lib/vm/runtime/contract_vm.ml": "2721748dce06edcc1856691f799a7fbe6ff7b832578758f7c74f88fa883381f6",
-    "lib/vm/rpc/contract_rpc.ml": "d09ac5d15cab900ac24de7d5962eb2c55f44188b95eca5b1f34283da4ce4b13e",
+    "node_runtime/consensus_vm_transition.ml": "cbc7e765e174782e9104d69b7dd9cddc45dc78bb1ea2cdc2be5256be1498f9ba",
+    "node_runtime/consensus_epoch_vm_shell.ml": "92698f804910d7d968e4c932dcd2f6559ad0bb8a1bcd351efa78914229be5875",
+    "lib/vm/runtime/contract_vm.ml": "7cb92c34b8753c21753298b347e1fc55d018032f4aa99b6e9f1c275135dcda1a",
+    "lib/vm/rpc/contract_rpc.ml": "79c3f8fc761e1b3001a5d517a75208ee7f691908a43a15cddb556fe5eec08a21",
     "lib/vm/runtime/byte_work.ml": "26f1096335eda8b08eadef321d820e26e4d0c12dbec4b584ed0a9a32b79b4187"
   },
   "extraction": {
@@ -23,7 +23,7 @@
     "compiled_sha256": "d8d231ce4b062c5f21a3836312b5814b438937556cc2b9a85cdae5965739a63a"
   },
   "oracle_sha256": "e49ea2f08e5be474c74c5306ce5c60f9da3c921edb9c896c31892803bb4aa833",
-  "generator_sha256": "c9e7758d6a7b7af55eeae50d3eae2a1360e7b8f6846d356b29eefea79c48169f",
+  "generator_sha256": "2a35fd3cff11da86ee7ba35648709f96eafbefba50182917da8411513686c522",
   "historical_sha256": {
     "circle-octb-execution.json": "f037403016c208c1ccf47865fef141d275f41fe75f15b59440996fc93b628cdb",
     "circle-octb-journal.json": "c0ae9ffc18720bf2d5f9d5f3dda46e6fd3f1a3c7e5df2b324ac744a084586c02"

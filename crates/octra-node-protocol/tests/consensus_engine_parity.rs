@@ -87,10 +87,10 @@ fn current_native_original_signed_consensus_state_transition_traces() {
 fn current_fixture() -> Value {
     use sha2::{Digest, Sha256};
     let fixture: Value =
-        serde_json::from_str(include_str!("fixtures/consensus-engine-c49.json")).unwrap();
+        serde_json::from_str(include_str!("fixtures/consensus-engine-candidate.json")).unwrap();
     assert_eq!(
         fixture["upstream_commit"],
-        "c49de45cf49ebbc2e5c0697eb956cbcada5845e7"
+        "8f785a93a4e7392a0f3e65674f9de89854d33dbc"
     );
     let manifest: Value = serde_json::from_str(include_str!(
         "../../../docs/rust-node/source-map-candidate.json"
@@ -113,7 +113,7 @@ fn candidate_native_staged_consensus_state_transition_traces() {
     let fixture = current_fixture();
     let n = fixture["historical_case_count"].as_u64().unwrap() as usize;
     let cases = &fixture["cases"].as_array().unwrap()[n..];
-    assert_eq!(cases.len(), 80);
+    assert_eq!(cases.len(), 128);
     run_cases(cases);
 }
 fn run_cases(cases: &[Value]) {
@@ -129,7 +129,8 @@ fn run_cases(cases: &[Value]) {
             config["epoch"].as_str().unwrap().parse().unwrap(),
             Protocol::default(),
             TimeoutConfig::default(),
-        );
+        )
+        .unwrap();
         engine.set_voting_ready(config["ready"].as_bool().unwrap());
         for (index, input) in config["steps"].as_array().unwrap().iter().enumerate() {
             let round = int(input, "round", engine.state().round);
@@ -138,7 +139,9 @@ fn run_cases(cases: &[Value]) {
                 match op {
                     "start" => engine.start_round(round),
                     "height" => {
-                        engine.start_height(input["height"].as_str().unwrap().parse().unwrap());
+                        engine
+                            .start_height(input["height"].as_str().unwrap().parse().unwrap())
+                            .unwrap();
                     }
                     "realign" => engine.realign_round(round)?,
                     "ready" => {

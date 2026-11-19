@@ -342,6 +342,7 @@ async fn signed_circle_rpc_queues_without_execution_then_qc_publishes_bound_spaw
 fn configured(fixture: &Fixture, profile: Profile) -> executor::Native {
     executor::Native::new(
         executor::Config {
+            profile_hash: std::sync::Arc::new(|_: &[u8], _: i64| Err("no profile".to_string())),
             graph: fixture.graph.clone(),
             protocol: fixture.protocol,
             profile,

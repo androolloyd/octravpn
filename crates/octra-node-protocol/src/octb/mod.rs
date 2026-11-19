@@ -10,6 +10,7 @@ mod instruction;
 mod metadata;
 pub mod program;
 pub mod q16;
+pub mod scalar_work;
 #[cfg(test)]
 mod tests;
 pub mod work;

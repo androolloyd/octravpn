@@ -143,7 +143,9 @@ fn native_bft_epoch_effects_roots_keys_rewards_and_atomic_failure() {
         };
         let members = [address(4)];
         let request = Request {
+            execution: &octra_node_runtime::epoch_footer::Execution::default(),
             validators: validator_epoch::Request {
+                voting_set: None,
                 chain,
                 epoch,
                 policy: &policy,
@@ -152,6 +154,7 @@ fn native_bft_epoch_effects_roots_keys_rewards_and_atomic_failure() {
                 committed_head: Some(&committed),
             },
             envelope: transaction_outcome::Rules {
+                program: octra_node_protocol::transaction::RuleMode::Prior,
                 envelope: rules::at(chain, Rule::TxEnvelope, epoch),
                 compute: rules::at(chain, Rule::VmBytes, epoch),
                 settle: rules::at(chain, Rule::Settle, epoch),
@@ -163,6 +166,8 @@ fn native_bft_epoch_effects_roots_keys_rewards_and_atomic_failure() {
             validator_keys: &[],
         };
         let mut validator = validator_transaction::Host {
+            voting_set: None,
+            members: &[],
             chain,
             epoch,
             policy: &policy,

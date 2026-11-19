@@ -161,6 +161,36 @@ impl Body {
     }
     pub fn verify_quorum(&self, validators: &ValidatorSet, signatures: &[Signature]) -> Result<()> {
         self.validate()?;
+        let policy = crate::consensus::policy::QuorumPolicy::for_chain(&self.chain_id);
+        if policy.seatless(self.epoch) {
+            // Checkpoint sets carry base64 keys; the voting-set check is on
+            // the raw-key form.
+            let raw = |member: &crate::consensus::Validator| -> Result<_> {
+                Ok(crate::consensus::Validator {
+                    address: member.address.clone(),
+                    pubkey: raw_pubkey(&member.pubkey)?,
+                })
+            };
+            let mut set = validators.clone();
+            set.validators = validators
+                .validators
+                .iter()
+                .map(raw)
+                .collect::<Result<_>>()?;
+            set.authors = validators
+                .authors
+                .as_ref()
+                .map(|(height, entries)| {
+                    entries
+                        .iter()
+                        .map(|(member, weight)| Ok((raw(member)?, weight.clone())))
+                        .collect::<Result<Vec<_>>>()
+                        .map(|entries| (*height, entries))
+                })
+                .transpose()?;
+            set.structural_for_policy(policy, self.epoch)
+                .map_err(|error| error.message())?;
+        }
         require(
             signatures.windows(2).all(|w| w[0].signer < w[1].signer),
             "checkpoint signatures are not canonical",

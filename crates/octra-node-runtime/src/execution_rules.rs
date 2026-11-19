@@ -88,6 +88,7 @@ impl Bound {
                 fhe_work: ctx.fhe_work == RuleMode::Active,
                 object_cost,
                 program_inputs: ctx.program_inputs == RuleMode::Active,
+                scalar_work: ctx.scalar_work == RuleMode::Active,
             },
             object_cost,
             owner_migration,

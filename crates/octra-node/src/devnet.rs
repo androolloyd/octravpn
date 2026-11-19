@@ -564,6 +564,10 @@ pub async fn private_wallet_action(
 
 fn execution(config: &Config, graph: Graph, protocol: Protocol) -> executor::Config {
     executor::Config {
+        // Local devnets never reach seatless voting.
+        profile_hash: std::sync::Arc::new(|_: &[u8], _: i64| {
+            Err("local devnet has no execution profile".to_string())
+        }),
         graph,
         protocol,
         profile: Profile::from_values(Some(b"devnet_full_v1"), None, None),

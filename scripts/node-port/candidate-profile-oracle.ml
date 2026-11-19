@@ -98,7 +98,7 @@ let () =
   assert (valid = expected_valid);
   let result = `Assoc [
     "schema",`String "octra_native_consensus_profile_case_v1";
-    "native_pin",`String "c49de45cf49ebbc2e5c0697eb956cbcada5845e7";
+    "native_pin",`String "8f785a93a4e7392a0f3e65674f9de89854d33dbc";
     "native_sources_sha256",`String Sys.argv.(2);
     "oracle_source_sha256",`String Sys.argv.(3);
     "id",field "id" input;

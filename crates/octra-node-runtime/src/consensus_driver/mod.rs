@@ -463,11 +463,11 @@ impl<H: Host, C: Publication> Driver<H, C> {
             tokio::time::sleep(Duration::from_secs(3)).await;
         }
         let validators = self.host.activate(self.engine.state().height).await?;
-        self.engine.replace_validator_set(validators);
+        self.engine.replace_validator_set(validators)?;
         self.refresh();
         self.relay.open(self.engine.generation());
         if self.engine.is_pristine() {
-            self.engine.start_height(self.engine.state().height);
+            self.engine.start_height(self.engine.state().height)?;
         }
         if let Some(public) = self.engine.validators().public_key(&self.address) {
             match self.journal.load_syncs(

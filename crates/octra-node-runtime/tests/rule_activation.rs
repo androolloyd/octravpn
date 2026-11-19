@@ -122,7 +122,7 @@ fn run(input: &Value, expected: &Value) -> Value {
 #[test]
 fn current_native_anchored_rules_and_bound_validator_context() {
     let fixtures: Value =
-        serde_json::from_str(include_str!("fixtures/rule-activation-c49.json")).unwrap();
+        serde_json::from_str(include_str!("fixtures/rule-activation-candidate.json")).unwrap();
     let sources: Value = serde_json::from_str(include_str!(
         "../../../docs/rust-node/source-map-candidate.json"
     ))

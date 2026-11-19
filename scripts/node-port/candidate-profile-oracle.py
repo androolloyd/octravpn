@@ -14,7 +14,7 @@ from pathlib import Path
 import re
 import subprocess
 
-PIN = "c49de45cf49ebbc2e5c0697eb956cbcada5845e7"
+PIN = "8f785a93a4e7392a0f3e65674f9de89854d33dbc"
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -71,10 +71,12 @@ def main():
         sliced(name, selected, path)
 
     for name in ["oce1", "hash_domain", "c_protocol", "epoch_time", "c_epoch_time_policy", "c_quorum_policy", "rule_graph",
-                 "private_result_policy", "epoch_cadence", "consensus_profile"]:
+                 "private_result_policy", "epoch_cadence", "scalar_work"]:
         whole(name)
+    # Everything but the store-backed parent check, which is not a commitment.
+    sliced("consensus_profile", [(None, "let check_execution_parent "), ("let epochs ?policy", None)])
     sliced("transaction", [(None, "type t ="), ("let stealth_min_ou_default", "let program_deploy_min_ou_from_wire_len")])
-    sliced("preverify_receipt_policy", [(None, "let check ~epoch_id")])
+    sliced("preverify_receipt_policy", [(None, "let check ~rejections")])
     sliced("emission_schedule", [(None, "let parse_nonnegative")])
     declarations("validator_entry", ["type parameters ="])
     sliced("validator_policy", [(None, "let withdraw_epoch"), ("let parse_activation", "let lifecycle_enabled")])
@@ -103,7 +105,7 @@ def main():
     declarations("fhe_memory", ["let limit =", "let image_factor =", "let key_factor =", "let key_scratch =", "let public_cells =", "let cell_bytes =", "let key_io_bytes =", "let consensus_id ="])
     declarations("fhe_view_policy", ["let base_effort =", "let base_layer_pairs =", "let edge_divisor =", "let cell_limit =", "let layer_limit =", "let word_limit =", "let cell_effort =", "let product_edges =", "let sample_factor =", "let memory_cell =", "let memory_item =", "let memory_word =", "let consensus_id ="])
     declarations("program_package", ["let source_id =", "let preview_id =", "let compiler_profile_id =", "let standard_id ="])
-    declarations("program_record", ["let identity ", "let consensus_id =", "let released_id ="])
+    declarations("program_record", ["let identity ", "let consensus_id =", "let prior_id =", "let released_id ="])
     sliced("contract_vm", [(None, "type mem ="), ("let effort_cost =", "let is_valid_addr ")])
     sliced("fhe_image", [(None, "let key_size ")])
     sliced("pvac_ffi", [(None, "external isolate_worker"), ("external aes_kat :", None)])
@@ -114,7 +116,7 @@ def main():
     groups = {
         "octra_consensus": ["C_protocol", "C_quorum_policy", "C_epoch_time_policy", "Epoch_time"],
         "octra_circle_runtime": ["Circle_runtime_storage"],
-        "octra_vm": ["Program_package", "Int_work", "Contract_vm", "Fhe_view_policy", "Byte_work", "Program_record"],
+        "octra_vm": ["Program_package", "Int_work", "Contract_vm", "Fhe_view_policy", "Byte_work", "Program_record", "Scalar_work"],
         "octra_node_runtime": ["Consensus_profile", "Startup_runtime_limits", "Consensus_proposal", "Epoch_cadence"],
         "octra_core": ["Rule_graph", "Transaction", "Preverify_receipt_policy", "Private_result_policy", "Emission_schedule",
             "Validator_policy", "Pvac_registry", "Resource_lanes", "Tx_staging", "Fee_policy", "Set_fold", "Reward_policy",

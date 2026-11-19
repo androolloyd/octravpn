@@ -231,6 +231,8 @@ impl Native {
         private.ready = ready;
         let root_at = |height| ready_roots.get(&height).cloned().flatten();
         let mut validators = validator_transaction::Host {
+            voting_set: None,
+            members: &[],
             chain: self.config.graph.chain_id(),
             epoch,
             policy: &self.config.validators,
@@ -349,6 +351,7 @@ impl Native {
         };
         let request = single_execution::Request {
             validators: validator_epoch::Request {
+                voting_set: None,
                 chain: self.config.graph.chain_id(),
                 epoch,
                 policy: &self.config.validators,
@@ -483,6 +486,8 @@ impl Native {
             envelope: modes[0],
             compute: modes[1],
             settle: modes[2],
+            // Single mode has no program-result activation.
+            program: octra_node_protocol::transaction::RuleMode::Prior,
         })
     }
     /// Capture public range inputs without performing any proof work or holding

@@ -75,6 +75,7 @@ fn fixture() -> (PendingCommit, Precommit, Proposal, Rules) {
         crypto_active: false,
         stealth_minimum: 5000.into(),
         envelope: transaction_outcome::Rules {
+            program: octra_node_protocol::transaction::RuleMode::Prior,
             envelope: mode("envelope"),
             compute: mode("compute"),
             settle: mode("settle"),
@@ -213,7 +214,8 @@ async fn rejects_forgery_falls_back_and_recovers_the_fetched_bundle() {
         pending.epoch_id,
         Protocol::default(),
         TimeoutConfig::default(),
-    );
+    )
+    .unwrap();
     assert_eq!(
         recovery::restore(&context, &saved[0], false, &mut engine, |recovered| {
             assert_eq!(recovered.bundle.tx_hashes, accepted.tx_hashes);
