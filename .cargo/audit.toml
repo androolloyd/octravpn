@@ -15,9 +15,6 @@ ignore = [
   "RUSTSEC-2023-0071",
   # No fixed replacement from tun-rs/netlink-packet-core yet.
   "RUSTSEC-2024-0436",
-  # Removed from the companion headscale-rs audit branch by switching
-  # to rustls-pki-types' built-in PEM parser.
-  "RUSTSEC-2025-0134",
   # SQLite CVE-2026-119375. The fix is backported into the vendored
   # amalgamations (vendor/libsqlite3-sys/OCTRA-PATCHES.md) and held by
   # crates/octra-node-runtime/tests/sqlite_wal_page_size.rs; the advisory
